@@ -727,6 +727,107 @@ class ApiClient {
   };
 
   // ========================================================================
+  // REMEDIATION
+  // ========================================================================
+
+  remediation = {
+    listPlans: (params?: any) => this.get<any>('/remediation/plans', params),
+    createPlan: (data: any) => this.post<any>('/remediation/plans', data),
+    generatePlan: (data: any) => this.post<any>('/remediation/plans/generate', data),
+    getPlan: (id: string) => this.get<any>(`/remediation/plans/${id}`),
+    approvePlan: (id: string) => this.post<any>(`/remediation/plans/${id}/approve`),
+    getPlanProgress: (id: string) => this.get<any>(`/remediation/plans/${id}/progress`),
+    updateAction: (id: string, data: any) => this.put<any>(`/remediation/actions/${id}`, data),
+    completeAction: (id: string, data: any) => this.post<any>(`/remediation/actions/${id}/complete`, data),
+  };
+
+  // ========================================================================
+  // AI
+  // ========================================================================
+
+  ai = {
+    controlGuidance: (data: any) => this.post<any>('/ai/control-guidance', data),
+    evidenceSuggestion: (data: any) => this.post<any>('/ai/evidence-suggestion', data),
+    policyDraft: (data: any) => this.post<any>('/ai/policy-draft', data),
+    riskNarrative: (data: any) => this.post<any>('/ai/risk-narrative', data),
+    usage: () => this.get<any>('/ai/usage'),
+    feedback: (data: any) => this.post<any>('/ai/feedback', data),
+  };
+
+  // ========================================================================
+  // MARKETPLACE
+  // ========================================================================
+
+  marketplace = {
+    search: (params?: any) => this.get<any>('/marketplace/packages', params),
+    featured: () => this.get<any>('/marketplace/packages/featured'),
+    getPackage: (publisher: string, slug: string) => this.get<any>(`/marketplace/packages/${publisher}/${slug}`),
+    install: (data: any) => this.post<any>('/marketplace/install', data),
+    uninstall: (id: string) => this.delete<any>(`/marketplace/install/${id}`),
+    installed: () => this.get<any>('/marketplace/installed'),
+    submitReview: (data: any) => this.post<any>('/marketplace/reviews', data),
+  };
+
+  // ========================================================================
+  // REGULATORY
+  // ========================================================================
+
+  regulatory = {
+    listChanges: (params?: any) => this.get<any>('/regulatory/changes', params),
+    getChange: (id: string) => this.get<any>(`/regulatory/changes/${id}`),
+    assessImpact: (id: string, data?: any) => this.post<any>(`/regulatory/changes/${id}/assess`, data),
+    getAssessment: (id: string) => this.get<any>(`/regulatory/changes/${id}/assessment`),
+    createResponsePlan: (id: string) => this.post<any>(`/regulatory/changes/${id}/respond`),
+    listSources: () => this.get<any>('/regulatory/sources'),
+    subscriptions: () => this.get<any>('/regulatory/subscriptions'),
+    subscribe: (data: any) => this.post<any>('/regulatory/subscriptions', data),
+    dashboard: () => this.get<any>('/regulatory/dashboard'),
+  };
+
+  // ========================================================================
+  // BIA (Business Impact Analysis)
+  // ========================================================================
+
+  bia = {
+    listProcesses: (params?: any) => this.get<any>('/bia/processes', params),
+    createProcess: (data: any) => this.post<any>('/bia/processes', data),
+    getProcess: (id: string) => this.get<any>(`/bia/processes/${id}`),
+    updateProcess: (id: string, data: any) => this.put<any>(`/bia/processes/${id}`, data),
+    mapDependencies: (id: string, data: any) => this.post<any>(`/bia/processes/${id}/dependencies`, data),
+    singlePointsOfFailure: () => this.get<any>('/bia/single-points-of-failure'),
+    report: () => this.get<any>('/bia/report'),
+    listScenarios: () => this.get<any>('/bc/scenarios'),
+    createScenario: (data: any) => this.post<any>('/bc/scenarios', data),
+    listPlans: () => this.get<any>('/bc/plans'),
+    createPlan: (data: any) => this.post<any>('/bc/plans', data),
+    listExercises: () => this.get<any>('/bc/exercises'),
+    scheduleExercise: (data: any) => this.post<any>('/bc/exercises', data),
+    bcDashboard: () => this.get<any>('/bc/dashboard'),
+  };
+
+  // ========================================================================
+  // ANALYTICS
+  // ========================================================================
+
+  analytics = {
+    snapshots: (params?: any) => this.get<any>('/analytics/snapshots', params),
+    complianceTrends: (params?: any) => this.get<any>('/analytics/trends/compliance', params),
+    riskTrends: (params?: any) => this.get<any>('/analytics/trends/risks', params),
+    riskPrediction: (riskId: string) => this.get<any>(`/analytics/predictions/risks/${riskId}`),
+    breachProbability: () => this.get<any>('/analytics/predictions/breach-probability'),
+    benchmarks: () => this.get<any>('/analytics/benchmarks'),
+    metrics: (metric: string, params?: any) => this.get<any>(`/analytics/metrics/${metric}`, params),
+    metricsCompare: (metric: string, params?: any) => this.get<any>(`/analytics/metrics/${metric}/compare`, params),
+    topMovers: (params?: any) => this.get<any>('/analytics/top-movers', params),
+    distribution: (entity: string) => this.get<any>(`/analytics/distribution/${entity}`),
+    exportData: (data: any) => this.post<any>('/analytics/export', data),
+    listDashboards: () => this.get<any>('/analytics/dashboards'),
+    createDashboard: (data: any) => this.post<any>('/analytics/dashboards', data),
+    updateDashboard: (id: string, data: any) => this.put<any>(`/analytics/dashboards/${id}`, data),
+    widgetTypes: () => this.get<any>('/analytics/widget-types'),
+  };
+
+  // ========================================================================
   // DASHBOARD
   // ========================================================================
 

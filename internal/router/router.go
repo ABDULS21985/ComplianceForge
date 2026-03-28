@@ -60,6 +60,11 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 		integrationHandler  *handler.IntegrationHandler
 		onboardingHandler   *handler.OnboardingHandler
 		accessHandler       *handler.AccessHandler
+		remediationHandler  *handler.RemediationHandler
+		marketplaceHandler  *handler.MarketplaceHandler
+		regulatoryHandler   *handler.RegulatoryHandler
+		biaHandler          *handler.BIAHandler
+		analyticsHandler    *handler.AnalyticsHandler
 	)
 
 	// Wire repositories, services, and handlers when implementations are available.
@@ -398,6 +403,158 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 				r.Post("/cancel", onboardingHandler.Cancel)
 				r.Get("/plans", onboardingHandler.ListPlans)
 				r.Get("/usage", onboardingHandler.GetUsage)
+			}
+		})
+
+		// Remediation Plans
+		r.Route("/remediation", func(r chi.Router) {
+			if remediationHandler != nil {
+				r.Route("/plans", func(r chi.Router) {
+					r.Get("/", remediationHandler.ListPlans)
+					r.Post("/", remediationHandler.CreatePlan)
+					r.Post("/generate", remediationHandler.GeneratePlan)
+					r.Route("/{id}", func(r chi.Router) {
+						r.Get("/", remediationHandler.GetPlan)
+						r.Put("/", remediationHandler.UpdatePlan)
+						r.Post("/approve", remediationHandler.ApprovePlan)
+						r.Get("/progress", remediationHandler.GetPlanProgress)
+					})
+				})
+				r.Route("/actions/{id}", func(r chi.Router) {
+					r.Put("/", remediationHandler.UpdateAction)
+					r.Post("/complete", remediationHandler.CompleteAction)
+				})
+			}
+		})
+
+		// AI Assistance
+		r.Route("/ai", func(r chi.Router) {
+			if remediationHandler != nil {
+				r.Post("/control-guidance", remediationHandler.GetControlGuidance)
+				r.Post("/evidence-suggestion", remediationHandler.GetEvidenceSuggestion)
+				r.Post("/policy-draft", remediationHandler.GetPolicyDraft)
+				r.Post("/risk-narrative", remediationHandler.GetRiskNarrative)
+				r.Get("/usage", remediationHandler.GetAIUsage)
+				r.Post("/feedback", remediationHandler.SubmitAIFeedback)
+			}
+		})
+
+		// Marketplace
+		r.Route("/marketplace", func(r chi.Router) {
+			if marketplaceHandler != nil {
+				// Public-ish (still behind auth in this block)
+				r.Route("/packages", func(r chi.Router) {
+					r.Get("/", marketplaceHandler.SearchPackages)
+					r.Get("/featured", marketplaceHandler.GetFeaturedPackages)
+					r.Get("/{publisher}/{slug}", marketplaceHandler.GetPackageDetail)
+					r.Get("/{publisher}/{slug}/reviews", marketplaceHandler.GetPackageReviews)
+				})
+				// Install / uninstall
+				r.Post("/install", marketplaceHandler.InstallPackage)
+				r.Delete("/install/{id}", marketplaceHandler.UninstallPackage)
+				r.Get("/installed", marketplaceHandler.ListInstalled)
+				r.Post("/reviews", marketplaceHandler.SubmitReview)
+				// Publisher
+				r.Post("/publishers", marketplaceHandler.RegisterPublisher)
+				r.Route("/publishers/me", func(r chi.Router) {
+					r.Get("/stats", marketplaceHandler.GetPublisherStats)
+					r.Post("/packages", marketplaceHandler.CreatePackageEntry)
+					r.Post("/packages/{id}/versions", marketplaceHandler.PublishVersion)
+				})
+			}
+		})
+
+		// Regulatory Intelligence
+		r.Route("/regulatory", func(r chi.Router) {
+			if regulatoryHandler != nil {
+				r.Route("/changes", func(r chi.Router) {
+					r.Get("/", regulatoryHandler.ListChanges)
+					r.Route("/{id}", func(r chi.Router) {
+						r.Get("/", regulatoryHandler.GetChange)
+						r.Post("/assess", regulatoryHandler.AssessImpact)
+						r.Get("/assessment", regulatoryHandler.GetAssessment)
+						r.Post("/respond", regulatoryHandler.CreateResponsePlan)
+					})
+				})
+				r.Route("/sources", func(r chi.Router) {
+					r.Get("/", regulatoryHandler.ListSources)
+					r.Post("/", regulatoryHandler.AddSource)
+				})
+				r.Route("/subscriptions", func(r chi.Router) {
+					r.Get("/", regulatoryHandler.ListSubscriptions)
+					r.Post("/", regulatoryHandler.Subscribe)
+				})
+				r.Get("/dashboard", regulatoryHandler.GetDashboard)
+				r.Get("/timeline", regulatoryHandler.GetTimeline)
+			}
+		})
+
+		// Business Impact Analysis
+		r.Route("/bia", func(r chi.Router) {
+			if biaHandler != nil {
+				r.Route("/processes", func(r chi.Router) {
+					r.Get("/", biaHandler.ListProcesses)
+					r.Post("/", biaHandler.CreateProcess)
+					r.Route("/{id}", func(r chi.Router) {
+						r.Get("/", biaHandler.GetProcess)
+						r.Put("/", biaHandler.UpdateProcess)
+						r.Post("/dependencies", biaHandler.MapDependencies)
+						r.Get("/dependency-graph", biaHandler.GetDependencyGraph)
+					})
+				})
+				r.Get("/single-points-of-failure", biaHandler.GetSinglePointsOfFailure)
+				r.Get("/report", biaHandler.GetBIAReport)
+			}
+		})
+
+		// Business Continuity
+		r.Route("/bc", func(r chi.Router) {
+			if biaHandler != nil {
+				r.Route("/scenarios", func(r chi.Router) {
+					r.Get("/", biaHandler.ListScenarios)
+					r.Post("/", biaHandler.CreateScenario)
+				})
+				r.Route("/plans", func(r chi.Router) {
+					r.Get("/", biaHandler.ListBCPlans)
+					r.Post("/", biaHandler.CreateBCPlan)
+					r.Post("/{id}/approve", biaHandler.ApproveBCPlan)
+				})
+				r.Route("/exercises", func(r chi.Router) {
+					r.Get("/", biaHandler.ListExercises)
+					r.Post("/", biaHandler.CreateExercise)
+					r.Put("/{id}/complete", biaHandler.CompleteExercise)
+				})
+				r.Get("/dashboard", biaHandler.GetBCDashboard)
+			}
+		})
+
+		// Analytics
+		r.Route("/analytics", func(r chi.Router) {
+			if analyticsHandler != nil {
+				r.Get("/snapshots", analyticsHandler.ListSnapshots)
+				r.Route("/trends", func(r chi.Router) {
+					r.Get("/compliance", analyticsHandler.GetComplianceTrends)
+					r.Get("/risks", analyticsHandler.GetRiskTrends)
+				})
+				r.Route("/predictions", func(r chi.Router) {
+					r.Get("/risks/{riskId}", analyticsHandler.GetRiskPrediction)
+					r.Get("/breach-probability", analyticsHandler.GetBreachProbability)
+				})
+				r.Get("/benchmarks", analyticsHandler.GetBenchmarks)
+				r.Route("/metrics/{metric}", func(r chi.Router) {
+					r.Get("/", analyticsHandler.GetMetricTimeSeries)
+					r.Get("/compare", analyticsHandler.CompareMetricPeriods)
+				})
+				r.Get("/top-movers", analyticsHandler.GetTopMovers)
+				r.Get("/distribution/{entity}", analyticsHandler.GetDistribution)
+				r.Post("/export", analyticsHandler.ExportData)
+				r.Route("/dashboards", func(r chi.Router) {
+					r.Get("/", analyticsHandler.ListDashboards)
+					r.Post("/", analyticsHandler.CreateDashboard)
+					r.Put("/{id}", analyticsHandler.UpdateDashboard)
+					r.Delete("/{id}", analyticsHandler.DeleteDashboard)
+				})
+				r.Get("/widget-types", analyticsHandler.GetWidgetTypes)
 			}
 		})
 	})
