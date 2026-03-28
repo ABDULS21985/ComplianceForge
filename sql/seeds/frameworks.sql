@@ -1,89 +1,390 @@
--- ComplianceForge: Seed data for common compliance frameworks.
--- Replace the placeholder organization_id with a real UUID after creating your organization.
--- Example: SET app.current_tenant = '<your-org-uuid>';
+-- Seed Data: Compliance Frameworks, Domains & Controls
+-- ComplianceForge GRC Platform
+--
+-- This seeds the system-provided framework library. All records have:
+--   organization_id = NULL (system/global)
+--   is_system_framework = true
+--
+-- Fixed UUIDs use a pattern for readability:
+--   Frameworks:  f0000000-0000-0000-0000-00000000000X
+--   Domains:     d0000000-XXXX-0000-0000-00000000000X (XXXX = framework suffix)
+--   Controls:    c0000000-XXXX-0000-0000-00000000XXXX
 
--- Placeholder organization ID (replace with actual value)
--- organization_id: '00000000-0000-0000-0000-000000000001'
+BEGIN;
 
-INSERT INTO compliance_frameworks (organization_id, name, version, description, authority, website_url, status) VALUES
-(
-    '00000000-0000-0000-0000-000000000001',
-    'ISO/IEC 27001:2022',
-    '2022',
-    'Information security, cybersecurity and privacy protection — Information security management systems — Requirements.',
-    'International Organization for Standardization (ISO)',
-    'https://www.iso.org/standard/27001',
-    'active'
-),
-(
-    '00000000-0000-0000-0000-000000000001',
-    'UK GDPR',
-    '2018',
-    'The UK General Data Protection Regulation, governing the processing of personal data of individuals in the United Kingdom.',
-    'Information Commissioner''s Office (ICO)',
-    'https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/',
-    'active'
-),
-(
-    '00000000-0000-0000-0000-000000000001',
-    'NCSC CAF',
-    '3.2',
-    'The NCSC Cyber Assessment Framework provides systematic guidance for organisations responsible for vitally important services and activities.',
-    'National Cyber Security Centre (NCSC)',
-    'https://www.ncsc.gov.uk/collection/caf',
-    'active'
-),
-(
-    '00000000-0000-0000-0000-000000000001',
-    'Cyber Essentials',
-    '3.1',
-    'A UK Government-backed scheme to help organisations protect against the most common cyber attacks.',
-    'National Cyber Security Centre (NCSC)',
-    'https://www.ncsc.gov.uk/cyberessentials/overview',
-    'active'
-),
-(
-    '00000000-0000-0000-0000-000000000001',
-    'NIST SP 800-53 Rev 5',
-    'Rev 5',
-    'Security and Privacy Controls for Information Systems and Organizations.',
-    'National Institute of Standards and Technology (NIST)',
-    'https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final',
-    'active'
-),
-(
-    '00000000-0000-0000-0000-000000000001',
-    'NIST CSF 2.0',
-    '2.0',
-    'The NIST Cybersecurity Framework helps organisations manage and reduce cybersecurity risk.',
-    'National Institute of Standards and Technology (NIST)',
-    'https://www.nist.gov/cyberframework',
-    'active'
-),
-(
-    '00000000-0000-0000-0000-000000000001',
-    'PCI DSS v4.0',
-    '4.0',
-    'Payment Card Industry Data Security Standard — requirements for entities that store, process, or transmit cardholder data.',
-    'PCI Security Standards Council',
-    'https://www.pcisecuritystandards.org/document_library/',
-    'active'
-),
-(
-    '00000000-0000-0000-0000-000000000001',
-    'ITIL 4',
-    '4',
-    'IT Infrastructure Library — a set of practices for IT service management that focuses on aligning IT services with business needs.',
-    'Axelos / PeopleCert',
-    'https://www.axelos.com/certifications/itil-service-management',
-    'active'
-),
-(
-    '00000000-0000-0000-0000-000000000001',
-    'COBIT 2019',
-    '2019',
-    'A framework for the governance and management of enterprise information and technology.',
-    'ISACA',
-    'https://www.isaca.org/resources/cobit',
-    'active'
-);
+-- ============================================================================
+-- COMPLIANCE FRAMEWORKS
+-- ============================================================================
+
+INSERT INTO compliance_frameworks (id, organization_id, code, name, full_name, version, description, issuing_body, category, applicable_regions, applicable_industries, is_system_framework, effective_date, total_controls, color_hex) VALUES
+
+-- 1. ISO/IEC 27001:2022
+('f0000000-0000-0000-0000-000000000001', NULL, 'ISO27001', 'ISO 27001', 'ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection — Information security management systems — Requirements',
+ '2022', 'International standard for information security management systems (ISMS). Specifies requirements for establishing, implementing, maintaining, and continually improving an ISMS.',
+ 'ISO/IEC', 'security', '{global,EU,UK}', '{all}', true, '2022-10-25', 93, '#1A56DB'),
+
+-- 2. UK GDPR
+('f0000000-0000-0000-0000-000000000002', NULL, 'UK_GDPR', 'UK GDPR', 'United Kingdom General Data Protection Regulation',
+ '2021', 'The UK GDPR sets out requirements for processing personal data. It mirrors the EU GDPR with UK-specific provisions post-Brexit. Enforced by the ICO.',
+ 'UK Parliament / ICO', 'privacy', '{UK}', '{all}', true, '2021-01-01', 99, '#7C3AED'),
+
+-- 3. NCSC CAF
+('f0000000-0000-0000-0000-000000000003', NULL, 'NCSC_CAF', 'NCSC CAF', 'NCSC Cyber Assessment Framework',
+ '3.2', 'The NCSC Cyber Assessment Framework provides systematic guidance for organisations responsible for vitally important services and activities. Aligned with NIS Regulations.',
+ 'NCSC (UK)', 'security', '{UK}', '{critical_infrastructure,energy,transport,health,water,digital_infrastructure}', true, '2019-04-01', 39, '#059669'),
+
+-- 4. Cyber Essentials
+('f0000000-0000-0000-0000-000000000004', NULL, 'CYBER_ESSENTIALS', 'Cyber Essentials', 'Cyber Essentials Certification Scheme',
+ '3.1', 'UK Government-backed scheme to help organisations protect against common cyber attacks. Five technical controls that form the baseline of cyber hygiene.',
+ 'NCSC (UK) / IASME', 'security', '{UK}', '{all}', true, '2023-04-24', 70, '#EA580C'),
+
+-- 5. NIST SP 800-53 Rev 5
+('f0000000-0000-0000-0000-000000000005', NULL, 'NIST_800_53', 'NIST 800-53', 'NIST Special Publication 800-53 Revision 5: Security and Privacy Controls for Information Systems and Organizations',
+ 'Rev5', 'Comprehensive catalog of security and privacy controls for federal information systems. Widely adopted as a baseline for security programs globally.',
+ 'NIST', 'security', '{US,global}', '{government,defence,critical_infrastructure,all}', true, '2020-09-23', 1189, '#DC2626'),
+
+-- 6. NIST CSF 2.0
+('f0000000-0000-0000-0000-000000000006', NULL, 'NIST_CSF_2', 'NIST CSF 2.0', 'NIST Cybersecurity Framework Version 2.0',
+ '2.0', 'Voluntary framework of standards, guidelines, and best practices to manage cybersecurity risk. Version 2.0 adds Govern function and improves supply chain coverage.',
+ 'NIST', 'security', '{US,global}', '{all}', true, '2024-02-26', 106, '#2563EB'),
+
+-- 7. PCI DSS v4.0
+('f0000000-0000-0000-0000-000000000007', NULL, 'PCI_DSS_4', 'PCI DSS v4.0', 'Payment Card Industry Data Security Standard Version 4.0',
+ 'v4.0', 'Global standard for securing payment card data. Applies to all entities that store, process, or transmit cardholder data or sensitive authentication data.',
+ 'PCI SSC', 'security', '{global}', '{financial_services,retail,ecommerce,hospitality}', true, '2022-03-31', 277, '#0891B2'),
+
+-- 8. ITIL 4
+('f0000000-0000-0000-0000-000000000008', NULL, 'ITIL_4', 'ITIL 4', 'Information Technology Infrastructure Library Version 4',
+ '4', 'Best practice framework for IT service management (ITSM). Provides guidance on aligning IT services with business needs through a service value system.',
+ 'AXELOS / PeopleCert', 'it_service_management', '{global}', '{all}', true, '2019-02-18', 34, '#4F46E5'),
+
+-- 9. COBIT 2019
+('f0000000-0000-0000-0000-000000000009', NULL, 'COBIT_2019', 'COBIT 2019', 'Control Objectives for Information and Related Technologies 2019',
+ '2019', 'Governance and management framework for enterprise IT. Provides 40 governance and management objectives across 5 domains.',
+ 'ISACA', 'governance', '{global}', '{all}', true, '2018-11-01', 40, '#9333EA');
+
+-- ============================================================================
+-- FRAMEWORK DOMAINS
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- ISO 27001:2022 — 4 Themes (Annex A reorganization)
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+('d0000000-0001-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000001', 'A.5', 'Organizational Controls', 'Controls related to organizational policies, roles, responsibilities, and management of information security.', 1, 0, 37),
+('d0000000-0001-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000001', 'A.6', 'People Controls', 'Controls related to HR security, awareness, training, and responsibilities of personnel.', 2, 0, 8),
+('d0000000-0001-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000001', 'A.7', 'Physical Controls', 'Controls related to physical security of premises, equipment, and environmental protections.', 3, 0, 14),
+('d0000000-0001-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000001', 'A.8', 'Technological Controls', 'Controls related to IT/technology security measures including access control, cryptography, and operations security.', 4, 0, 34);
+
+-- ---------------------------------------------------------------------------
+-- UK GDPR — 7 Key Article Groups
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+('d0000000-0002-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000002', 'PRINCIPLES', 'Data Protection Principles', 'Article 5 — the seven key principles of data protection.', 1, 0, 7),
+('d0000000-0002-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000002', 'LAWFULNESS', 'Lawful Basis for Processing', 'Articles 6-10 — legal bases, consent, special categories, criminal data.', 2, 0, 12),
+('d0000000-0002-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000002', 'RIGHTS', 'Data Subject Rights', 'Articles 12-23 — individual rights including access, rectification, erasure, portability.', 3, 0, 18),
+('d0000000-0002-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000002', 'CONTROLLER', 'Controller & Processor Obligations', 'Articles 24-43 — responsibilities, DPO, records, security, DPIA, prior consultation.', 4, 0, 32),
+('d0000000-0002-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000002', 'TRANSFERS', 'International Transfers', 'Articles 44-50 — rules for transferring personal data internationally.', 5, 0, 10),
+('d0000000-0002-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000002', 'BREACH', 'Data Breach Notification', 'Articles 33-34 — breach notification to supervisory authority and data subjects.', 6, 0, 8),
+('d0000000-0002-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000002', 'ACCOUNTABILITY', 'Accountability & Governance', 'Articles 5(2), 24, 25, 30 — demonstrating compliance, privacy by design, records.', 7, 0, 12);
+
+-- ---------------------------------------------------------------------------
+-- NCSC CAF — 4 Objectives, 14 Principles
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+-- Objectives (top level)
+('d0000000-0003-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000003', 'A', 'Managing Security Risk', 'Appropriate organisational structures, policies, and processes are in place to understand, assess, and systematically manage security risks.', 1, 0, 10),
+('d0000000-0003-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000003', 'B', 'Protecting Against Cyber Attack', 'Proportionate security measures are in place to protect against cyber attack.', 2, 0, 14),
+('d0000000-0003-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000003', 'C', 'Detecting Cyber Security Events', 'Capabilities to ensure security defences remain effective and to detect cyber security events.', 3, 0, 7),
+('d0000000-0003-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000003', 'D', 'Minimising the Impact of Cyber Security Incidents', 'Capabilities to minimise the impact of a cyber security incident when it occurs.', 4, 0, 8),
+-- Principles (sub-domains under objectives)
+('d0000000-0003-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000003', 'A1', 'Governance', 'Appropriate management policies and processes in place to govern the organisation''s approach to security.', 1, 1, 4),
+('d0000000-0003-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000003', 'A2', 'Risk Management', 'Appropriate steps taken to identify, assess and understand security risks.', 2, 1, 3),
+('d0000000-0003-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000003', 'A3', 'Asset Management', 'Understanding of what assets require protection and their dependencies.', 3, 1, 3),
+('d0000000-0003-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000003', 'A4', 'Supply Chain', 'Understanding and managing security risks introduced by supply chains.', 4, 1, 3),
+('d0000000-0003-0000-0000-000000000021', 'f0000000-0000-0000-0000-000000000003', 'B1', 'Service Protection Policies & Processes', 'Defining and communicating policies and processes to secure systems and data.', 5, 1, 4),
+('d0000000-0003-0000-0000-000000000022', 'f0000000-0000-0000-0000-000000000003', 'B2', 'Identity and Access Control', 'Understanding, documenting and managing access to essential functions.', 6, 1, 3),
+('d0000000-0003-0000-0000-000000000023', 'f0000000-0000-0000-0000-000000000003', 'B3', 'Data Security', 'Protecting data stored and transmitted electronically.', 7, 1, 3),
+('d0000000-0003-0000-0000-000000000024', 'f0000000-0000-0000-0000-000000000003', 'B4', 'System Security', 'Protecting critical systems from cyber attack.', 8, 1, 4),
+('d0000000-0003-0000-0000-000000000025', 'f0000000-0000-0000-0000-000000000003', 'B5', 'Resilient Networks & Systems', 'Building resilience against cyber attack.', 9, 1, 3),
+('d0000000-0003-0000-0000-000000000026', 'f0000000-0000-0000-0000-000000000003', 'B6', 'Staff Awareness & Training', 'Staff are appropriately supported and trained in cyber security.', 10, 1, 3),
+('d0000000-0003-0000-0000-000000000031', 'f0000000-0000-0000-0000-000000000003', 'C1', 'Security Monitoring', 'Monitoring to detect potential security problems.', 11, 1, 4),
+('d0000000-0003-0000-0000-000000000032', 'f0000000-0000-0000-0000-000000000003', 'C2', 'Proactive Security Event Discovery', 'Detecting anomalous events in relevant systems.', 12, 1, 3),
+('d0000000-0003-0000-0000-000000000041', 'f0000000-0000-0000-0000-000000000003', 'D1', 'Response and Recovery Planning', 'Putting in place incident management and mitigation processes.', 13, 1, 4),
+('d0000000-0003-0000-0000-000000000042', 'f0000000-0000-0000-0000-000000000003', 'D2', 'Lessons Learned', 'Learning from incidents and improving security.', 14, 1, 4);
+
+-- Set parent_domain_id for NCSC CAF principles
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0003-0000-0000-000000000001' WHERE id IN ('d0000000-0003-0000-0000-000000000011','d0000000-0003-0000-0000-000000000012','d0000000-0003-0000-0000-000000000013','d0000000-0003-0000-0000-000000000014');
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0003-0000-0000-000000000002' WHERE id IN ('d0000000-0003-0000-0000-000000000021','d0000000-0003-0000-0000-000000000022','d0000000-0003-0000-0000-000000000023','d0000000-0003-0000-0000-000000000024','d0000000-0003-0000-0000-000000000025','d0000000-0003-0000-0000-000000000026');
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0003-0000-0000-000000000003' WHERE id IN ('d0000000-0003-0000-0000-000000000031','d0000000-0003-0000-0000-000000000032');
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0003-0000-0000-000000000004' WHERE id IN ('d0000000-0003-0000-0000-000000000041','d0000000-0003-0000-0000-000000000042');
+
+-- ---------------------------------------------------------------------------
+-- Cyber Essentials — 5 Technical Controls
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+('d0000000-0004-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000004', 'CE1', 'Firewalls', 'Use a firewall to secure your internet connection. Configure boundary firewalls and internet gateways.', 1, 0, 14),
+('d0000000-0004-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000004', 'CE2', 'Secure Configuration', 'Choose the most secure settings for your devices and software.', 2, 0, 14),
+('d0000000-0004-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000004', 'CE3', 'User Access Control', 'Control who has access to your data and services.', 3, 0, 14),
+('d0000000-0004-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000004', 'CE4', 'Malware Protection', 'Protect your organisation from malware (malicious software).', 4, 0, 14),
+('d0000000-0004-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000004', 'CE5', 'Security Update Management', 'Keep your devices, software and firmware up to date.', 5, 0, 14);
+
+-- ---------------------------------------------------------------------------
+-- NIST SP 800-53 Rev 5 — 20 Control Families
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+('d0000000-0005-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000005', 'AC', 'Access Control', 'Manage access to information systems and data.', 1, 0, 82),
+('d0000000-0005-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000005', 'AT', 'Awareness and Training', 'Security awareness and training programs.', 2, 0, 16),
+('d0000000-0005-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000005', 'AU', 'Audit and Accountability', 'Audit events, record keeping, and accountability.', 3, 0, 50),
+('d0000000-0005-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000005', 'CA', 'Assessment, Authorization, and Monitoring', 'Security assessments and continuous monitoring.', 4, 0, 35),
+('d0000000-0005-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000005', 'CM', 'Configuration Management', 'Baseline configurations and change control.', 5, 0, 56),
+('d0000000-0005-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000005', 'CP', 'Contingency Planning', 'Contingency plans for information systems.', 6, 0, 52),
+('d0000000-0005-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000005', 'IA', 'Identification and Authentication', 'Identifying and authenticating users and devices.', 7, 0, 56),
+('d0000000-0005-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000005', 'IR', 'Incident Response', 'Incident handling and response capabilities.', 8, 0, 36),
+('d0000000-0005-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000005', 'MA', 'Maintenance', 'Maintenance of information systems.', 9, 0, 27),
+('d0000000-0005-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000005', 'MP', 'Media Protection', 'Protection of information system media.', 10, 0, 32),
+('d0000000-0005-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000005', 'PE', 'Physical and Environmental Protection', 'Physical access controls and environmental protections.', 11, 0, 76),
+('d0000000-0005-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000005', 'PL', 'Planning', 'Security planning for information systems.', 12, 0, 20),
+('d0000000-0005-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000005', 'PM', 'Program Management', 'Information security program management.', 13, 0, 64),
+('d0000000-0005-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000005', 'PS', 'Personnel Security', 'Personnel security policies and procedures.', 14, 0, 20),
+('d0000000-0005-0000-0000-000000000015', 'f0000000-0000-0000-0000-000000000005', 'PT', 'PII Processing and Transparency', 'Personally identifiable information processing.', 15, 0, 32),
+('d0000000-0005-0000-0000-000000000016', 'f0000000-0000-0000-0000-000000000005', 'RA', 'Risk Assessment', 'Risk assessments for information systems.', 16, 0, 28),
+('d0000000-0005-0000-0000-000000000017', 'f0000000-0000-0000-0000-000000000005', 'SA', 'System and Services Acquisition', 'Security in system development and acquisition.', 17, 0, 92),
+('d0000000-0005-0000-0000-000000000018', 'f0000000-0000-0000-0000-000000000005', 'SC', 'System and Communications Protection', 'Protecting communications and system boundaries.', 18, 0, 112),
+('d0000000-0005-0000-0000-000000000019', 'f0000000-0000-0000-0000-000000000005', 'SI', 'System and Information Integrity', 'System and information integrity protections.', 19, 0, 76),
+('d0000000-0005-0000-0000-000000000020', 'f0000000-0000-0000-0000-000000000005', 'SR', 'Supply Chain Risk Management', 'Supply chain risk management controls.', 20, 0, 47);
+
+-- ---------------------------------------------------------------------------
+-- NIST CSF 2.0 — 6 Functions
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+('d0000000-0006-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000006', 'GV', 'Govern', 'Establish and monitor the organisation''s cybersecurity risk management strategy, expectations, and policy. New in CSF 2.0.', 1, 0, 17),
+('d0000000-0006-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000006', 'ID', 'Identify', 'Understand the organisation''s cybersecurity risk posture: assets, business environment, risk assessment, governance.', 2, 0, 17),
+('d0000000-0006-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000006', 'PR', 'Protect', 'Implement appropriate safeguards: access control, awareness training, data security, processes, technology.', 3, 0, 26),
+('d0000000-0006-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000006', 'DE', 'Detect', 'Implement capabilities to identify cybersecurity events: anomalies, continuous monitoring, detection processes.', 4, 0, 13),
+('d0000000-0006-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000006', 'RS', 'Respond', 'Take action regarding detected cybersecurity events: response planning, communications, analysis, mitigation.', 5, 0, 16),
+('d0000000-0006-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000006', 'RC', 'Recover', 'Maintain resilience and restore capabilities: recovery planning, improvements, communications.', 6, 0, 17);
+
+-- ---------------------------------------------------------------------------
+-- PCI DSS v4.0 — 12 Requirements (grouped into 6 goals)
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+-- Goals (top level)
+('d0000000-0007-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000007', 'G1', 'Build and Maintain a Secure Network and Systems', NULL, 1, 0, 46),
+('d0000000-0007-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000007', 'G2', 'Protect Account Data', NULL, 2, 0, 46),
+('d0000000-0007-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000007', 'G3', 'Maintain a Vulnerability Management Program', NULL, 3, 0, 46),
+('d0000000-0007-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000007', 'G4', 'Implement Strong Access Control Measures', NULL, 4, 0, 46),
+('d0000000-0007-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000007', 'G5', 'Regularly Monitor and Test Networks', NULL, 5, 0, 46),
+('d0000000-0007-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000007', 'G6', 'Maintain an Information Security Policy', NULL, 6, 0, 47),
+-- Requirements (sub-domains under goals)
+('d0000000-0007-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000007', 'R1', 'Install and Maintain Network Security Controls', 'Requirement 1: Network security controls (firewalls, etc.) are installed and maintained.', 1, 1, 23),
+('d0000000-0007-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000007', 'R2', 'Apply Secure Configurations to All System Components', 'Requirement 2: Vendor defaults and unnecessary functionality are removed/changed.', 2, 1, 23),
+('d0000000-0007-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000007', 'R3', 'Protect Stored Account Data', 'Requirement 3: Stored account data is protected with encryption, truncation, masking.', 3, 1, 23),
+('d0000000-0007-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000007', 'R4', 'Protect Cardholder Data with Strong Cryptography During Transmission', 'Requirement 4: Cardholder data encrypted during transmission over open networks.', 4, 1, 23),
+('d0000000-0007-0000-0000-000000000015', 'f0000000-0000-0000-0000-000000000007', 'R5', 'Protect All Systems and Networks from Malicious Software', 'Requirement 5: Anti-malware mechanisms are deployed and maintained.', 5, 1, 23),
+('d0000000-0007-0000-0000-000000000016', 'f0000000-0000-0000-0000-000000000007', 'R6', 'Develop and Maintain Secure Systems and Software', 'Requirement 6: Secure development practices and vulnerability management.', 6, 1, 23),
+('d0000000-0007-0000-0000-000000000017', 'f0000000-0000-0000-0000-000000000007', 'R7', 'Restrict Access to System Components and Cardholder Data by Business Need to Know', 'Requirement 7: Access restricted based on business need-to-know.', 7, 1, 23),
+('d0000000-0007-0000-0000-000000000018', 'f0000000-0000-0000-0000-000000000007', 'R8', 'Identify Users and Authenticate Access to System Components', 'Requirement 8: User identification and multi-factor authentication.', 8, 1, 23),
+('d0000000-0007-0000-0000-000000000019', 'f0000000-0000-0000-0000-000000000007', 'R9', 'Restrict Physical Access to Cardholder Data', 'Requirement 9: Physical access to cardholder data is restricted.', 9, 1, 23),
+('d0000000-0007-0000-0000-000000000020', 'f0000000-0000-0000-0000-000000000007', 'R10', 'Log and Monitor All Access to System Components and Cardholder Data', 'Requirement 10: All access to network resources and cardholder data is logged and monitored.', 10, 1, 23),
+('d0000000-0007-0000-0000-000000000021', 'f0000000-0000-0000-0000-000000000007', 'R11', 'Test Security of Systems and Networks Regularly', 'Requirement 11: Regular testing of security systems and processes.', 11, 1, 23),
+('d0000000-0007-0000-0000-000000000022', 'f0000000-0000-0000-0000-000000000007', 'R12', 'Support Information Security with Organizational Policies and Programs', 'Requirement 12: Security policy addressing information security for all personnel.', 12, 1, 24);
+
+-- Set parent_domain_id for PCI DSS requirements under goals
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0007-0000-0000-000000000001' WHERE id IN ('d0000000-0007-0000-0000-000000000011','d0000000-0007-0000-0000-000000000012');
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0007-0000-0000-000000000002' WHERE id IN ('d0000000-0007-0000-0000-000000000013','d0000000-0007-0000-0000-000000000014');
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0007-0000-0000-000000000003' WHERE id IN ('d0000000-0007-0000-0000-000000000015','d0000000-0007-0000-0000-000000000016');
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0007-0000-0000-000000000004' WHERE id IN ('d0000000-0007-0000-0000-000000000017','d0000000-0007-0000-0000-000000000018','d0000000-0007-0000-0000-000000000019');
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0007-0000-0000-000000000005' WHERE id IN ('d0000000-0007-0000-0000-000000000020','d0000000-0007-0000-0000-000000000021');
+UPDATE framework_domains SET parent_domain_id = 'd0000000-0007-0000-0000-000000000006' WHERE id IN ('d0000000-0007-0000-0000-000000000022');
+
+-- ---------------------------------------------------------------------------
+-- ITIL 4 — Service Value Chain Activities + Practices
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+('d0000000-0008-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000008', 'SVC', 'Service Value Chain', 'Six interconnected activities that create value: Plan, Improve, Engage, Design & Transition, Obtain/Build, Deliver & Support.', 1, 0, 6),
+('d0000000-0008-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000008', 'GP', 'General Management Practices', 'Management practices applicable across industries.', 2, 0, 14),
+('d0000000-0008-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000008', 'SM', 'Service Management Practices', 'Practices specific to IT service management.', 3, 0, 17),
+('d0000000-0008-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000008', 'TM', 'Technical Management Practices', 'Technology-focused management practices.', 4, 0, 3);
+
+-- ---------------------------------------------------------------------------
+-- COBIT 2019 — 5 Domains
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_domains (id, framework_id, code, name, description, sort_order, depth_level, total_controls) VALUES
+('d0000000-0009-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000009', 'EDM', 'Evaluate, Direct and Monitor', 'Governance objectives ensuring stakeholder needs, conditions and options are evaluated, direction is set, and performance/compliance is monitored.', 1, 0, 5),
+('d0000000-0009-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000009', 'APO', 'Align, Plan and Organize', 'Management objectives addressing overall organisation of IT strategy and supporting activities.', 2, 0, 14),
+('d0000000-0009-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000009', 'BAI', 'Build, Acquire and Implement', 'Management objectives for definition, acquisition, and implementation of IT solutions.', 3, 0, 11),
+('d0000000-0009-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000009', 'DSS', 'Deliver, Service and Support', 'Management objectives for operational delivery of IT services and support.', 4, 0, 6),
+('d0000000-0009-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000009', 'MEA', 'Monitor, Evaluate and Assess', 'Management objectives for monitoring performance, conformance and assurance.', 5, 0, 4);
+
+-- ============================================================================
+-- FRAMEWORK CONTROLS (representative samples per framework)
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- ISO 27001:2022 — Representative Controls
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0001-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000001', 'A.5.1', 'Policies for information security', 'A set of policies for information security shall be defined, approved by management, published and communicated to relevant personnel and relevant interested parties.', 'Develop an overarching information security policy supported by topic-specific policies. Review at planned intervals or when significant changes occur.', 'preventive', 'high', 1),
+('c0000000-0001-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000001', 'A.5.2', 'Information security roles and responsibilities', 'Information security roles and responsibilities shall be defined and allocated.', 'Clearly define who is responsible for each asset and process. Ensure segregation of duties where practical.', 'preventive', 'high', 2),
+('c0000000-0001-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000001', 'A.5.3', 'Segregation of duties', 'Conflicting duties and conflicting areas of responsibility shall be segregated.', 'Ensure no single person can access, modify, or use assets without authorization or detection.', 'preventive', 'medium', 3),
+('c0000000-0001-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000001', 'A.5.10', 'Acceptable use of information and other associated assets', 'Rules for the acceptable use of information and other associated assets shall be identified, documented and implemented.', 'Establish acceptable use policies covering email, internet, mobile devices, and social media usage.', 'preventive', 'medium', 10),
+('c0000000-0001-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000001', 'A.5.23', 'Information security for use of cloud services', 'Processes for acquisition, use, management and exit from cloud services shall be established in accordance with the organisation''s information security requirements.', 'New control in 2022. Address cloud-specific risks including data location, shared responsibility, and exit strategies.', 'preventive', 'high', 23),
+('c0000000-0001-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000002', 'A.6.1', 'Screening', 'Background verification checks on all candidates to become personnel shall be carried out prior to joining the organisation and on an ongoing basis.', 'Conduct pre-employment checks appropriate to the role, business requirements, and applicable legislation.', 'preventive', 'medium', 1),
+('c0000000-0001-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000002', 'A.6.3', 'Information security awareness, education and training', 'Personnel of the organisation and relevant interested parties shall receive appropriate information security awareness, education and training and regular updates of the organisation''s information security policy.', 'Provide security awareness training at induction and regularly thereafter. Track completion and effectiveness.', 'preventive', 'high', 3),
+('c0000000-0001-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000003', 'A.7.1', 'Physical security perimeters', 'Security perimeters shall be defined and used to protect areas that contain information and other associated assets.', 'Define physical perimeters using walls, card-controlled entry gates, or staffed reception desks.', 'preventive', 'medium', 1),
+('c0000000-0001-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000004', 'A.8.1', 'User endpoint devices', 'Information stored on, processed by or accessible via user endpoint devices shall be protected.', 'Implement endpoint protection policies covering encryption, patching, malware protection, and remote wipe capabilities.', 'preventive', 'high', 1),
+('c0000000-0001-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000004', 'A.8.5', 'Secure authentication', 'Secure authentication technologies and procedures shall be established and implemented based on information access restrictions and the topic-specific policy on access control.', 'Implement multi-factor authentication for privileged and remote access. Use strong password policies.', 'preventive', 'high', 5),
+('c0000000-0001-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000004', 'A.8.8', 'Management of technical vulnerabilities', 'Information about technical vulnerabilities of information systems in use shall be obtained, the organisation''s exposure to such vulnerabilities shall be evaluated and appropriate measures shall be taken.', 'Establish a vulnerability management process including regular scanning, risk-based prioritization, and timely remediation.', 'preventive', 'high', 8),
+('c0000000-0001-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000004', 'A.8.15', 'Logging', 'Logs that record activities, exceptions, faults and other relevant events shall be produced, stored, protected and analysed.', 'Implement centralized logging with appropriate retention. Monitor logs for security events and anomalies.', 'detective', 'high', 15),
+('c0000000-0001-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000004', 'A.8.24', 'Use of cryptography', 'Rules for the effective use of cryptography, including cryptographic key management, shall be defined and implemented.', 'Define a cryptography policy covering approved algorithms, key lengths, key management lifecycle, and certificate management.', 'preventive', 'high', 24),
+('c0000000-0001-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000001', 'd0000000-0001-0000-0000-000000000004', 'A.8.28', 'Secure coding', 'Secure coding principles shall be applied to software development.', 'New control in 2022. Apply secure development lifecycle, code reviews, static analysis, and OWASP guidelines.', 'preventive', 'high', 28);
+
+-- ---------------------------------------------------------------------------
+-- UK GDPR — Representative Controls
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0002-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000001', 'ART5.1.A', 'Lawfulness, fairness and transparency', 'Personal data shall be processed lawfully, fairly and in a transparent manner in relation to the data subject.', 'Ensure a valid legal basis exists for all processing. Provide clear privacy notices to data subjects.', 'preventive', 'critical', 1),
+('c0000000-0002-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000001', 'ART5.1.B', 'Purpose limitation', 'Personal data shall be collected for specified, explicit and legitimate purposes and not further processed in a manner incompatible with those purposes.', 'Clearly define and document the purpose of each processing activity before collection begins.', 'preventive', 'critical', 2),
+('c0000000-0002-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000001', 'ART5.1.C', 'Data minimisation', 'Personal data shall be adequate, relevant and limited to what is necessary in relation to the purposes for which they are processed.', 'Only collect personal data that is directly relevant and necessary for the specified purpose.', 'preventive', 'critical', 3),
+('c0000000-0002-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000001', 'ART5.1.F', 'Integrity and confidentiality', 'Personal data shall be processed in a manner that ensures appropriate security, including protection against unauthorised or unlawful processing and against accidental loss, destruction or damage.', 'Implement appropriate technical and organisational measures to protect personal data. Conduct regular security assessments.', 'preventive', 'critical', 6),
+('c0000000-0002-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000002', 'ART6', 'Lawful basis for processing', 'Processing shall be lawful only if and to the extent that at least one of the six legal bases applies.', 'Document the lawful basis for each processing activity in a Record of Processing Activities (ROPA). Review regularly.', 'preventive', 'critical', 1),
+('c0000000-0002-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000002', 'ART7', 'Conditions for consent', 'Where processing is based on consent, the controller shall be able to demonstrate that the data subject has consented. Consent must be freely given, specific, informed and unambiguous.', 'Implement consent management mechanisms. Maintain records of when and how consent was obtained. Enable easy withdrawal.', 'preventive', 'high', 2),
+('c0000000-0002-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000003', 'ART15', 'Right of access', 'The data subject shall have the right to obtain from the controller confirmation as to whether personal data concerning them are being processed, and access to those data.', 'Establish a process to handle Subject Access Requests (SARs) within one month. Verify identity before disclosure.', 'corrective', 'high', 1),
+('c0000000-0002-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000003', 'ART17', 'Right to erasure', 'The data subject shall have the right to obtain from the controller the erasure of personal data without undue delay where certain grounds apply.', 'Implement processes to identify and erase personal data upon valid request. Document exemptions where they apply.', 'corrective', 'high', 3),
+('c0000000-0002-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000004', 'ART25', 'Data protection by design and default', 'The controller shall implement appropriate technical and organisational measures for ensuring that, by default, only personal data which are necessary for each specific purpose are processed.', 'Integrate privacy considerations into system design from the outset. Apply privacy-enhancing technologies. Conduct DPIAs for high-risk processing.', 'preventive', 'high', 1),
+('c0000000-0002-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000004', 'ART30', 'Records of processing activities', 'Each controller shall maintain a record of processing activities under its responsibility.', 'Maintain a comprehensive ROPA including purposes, categories, recipients, transfers, retention periods, and security measures.', 'preventive', 'high', 3),
+('c0000000-0002-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000004', 'ART35', 'Data protection impact assessment', 'Where a type of processing is likely to result in a high risk to the rights and freedoms of natural persons, the controller shall carry out an assessment of the impact.', 'Conduct DPIAs before processing that uses new technologies or is likely to result in high risk. Consult the ICO if risks cannot be mitigated.', 'preventive', 'high', 6),
+('c0000000-0002-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000006', 'ART33', 'Notification of a personal data breach to the supervisory authority', 'In the case of a personal data breach, the controller shall without undue delay and, where feasible, not later than 72 hours notify the ICO.', 'Establish breach detection and reporting procedures. Maintain a breach register. Train staff on recognition and escalation.', 'corrective', 'critical', 1),
+('c0000000-0002-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000006', 'ART34', 'Communication of a personal data breach to the data subject', 'When the personal data breach is likely to result in a high risk to rights and freedoms, the controller shall communicate the breach to the data subject without undue delay.', 'Develop breach communication templates. Establish criteria for when data subject notification is required.', 'corrective', 'critical', 2),
+('c0000000-0002-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000002', 'd0000000-0002-0000-0000-000000000005', 'ART46', 'Appropriate safeguards for international transfers', 'In the absence of an adequacy decision, transfers shall only take place subject to appropriate safeguards.', 'Use Standard Contractual Clauses, Binding Corporate Rules, or other approved mechanisms. Conduct Transfer Impact Assessments.', 'preventive', 'high', 1);
+
+-- ---------------------------------------------------------------------------
+-- NCSC CAF — Representative Controls
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0003-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000011', 'A1.a', 'Board Direction', 'The organisation''s board (or equivalent) sets the overall direction for cyber security and defines the risk appetite.', 'Board-level ownership of cyber security risk with regular reporting. Documented risk appetite statement.', 'preventive', 'critical', 1),
+('c0000000-0003-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000011', 'A1.b', 'Roles and Responsibilities', 'Appropriate roles and responsibilities are defined and communicated for governance of cyber security.', 'Assign a named individual with authority and accountability for cyber security. Define RACI matrices.', 'preventive', 'high', 2),
+('c0000000-0003-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000012', 'A2.a', 'Risk Management Process', 'The organisation has a systematic risk management process that informs protective security decisions.', 'Implement a structured risk assessment methodology. Maintain a risk register. Review risks regularly.', 'preventive', 'critical', 1),
+('c0000000-0003-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000013', 'A3.a', 'Asset Management', 'All essential functions and supporting assets are identified, catalogued and managed.', 'Maintain an accurate inventory of all systems, data, and dependencies supporting essential functions.', 'preventive', 'high', 1),
+('c0000000-0003-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000022', 'B2.a', 'Identity Verification, Authentication and Authorisation', 'Access to systems and data is managed based on verified identity, with appropriate authentication and authorisation.', 'Implement strong authentication (MFA where appropriate). Apply least privilege access. Regular access reviews.', 'preventive', 'critical', 1),
+('c0000000-0003-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000023', 'B3.a', 'Data Protection', 'Data at rest and in transit is protected in accordance with its sensitivity.', 'Apply encryption to data at rest and in transit. Implement data classification scheme. Use secure protocols.', 'preventive', 'high', 1),
+('c0000000-0003-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000024', 'B4.a', 'Secure by Design', 'Network and information systems are designed, implemented and maintained securely.', 'Apply secure architecture principles. Conduct security reviews of designs. Implement network segmentation.', 'preventive', 'high', 1),
+('c0000000-0003-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000031', 'C1.a', 'Monitoring Coverage', 'The organisation monitors the security status of networks and systems supporting essential functions.', 'Deploy monitoring across all systems supporting essential functions. Ensure coverage of network, host, and application layers.', 'detective', 'critical', 1),
+('c0000000-0003-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000031', 'C1.c', 'Generating Alerts', 'Evidence of potential security incidents is identified through alerts.', 'Configure alerting rules for known attack patterns. Tune alert thresholds to balance detection with false positives.', 'detective', 'high', 3),
+('c0000000-0003-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000041', 'D1.a', 'Response Plan', 'Effective incident response plans are in place covering a range of scenarios.', 'Develop and maintain incident response plans. Test plans through exercises. Define escalation procedures.', 'corrective', 'critical', 1),
+('c0000000-0003-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000041', 'D1.c', 'Response and Recovery Capability', 'The organisation can restore essential functions after a cyber security incident.', 'Maintain and test backup and recovery procedures. Define RTOs and RPOs for essential functions.', 'corrective', 'critical', 3),
+('c0000000-0003-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000003', 'd0000000-0003-0000-0000-000000000042', 'D2.a', 'Incident Root Cause Analysis', 'Incidents are investigated to identify root causes and lessons learned.', 'Conduct post-incident reviews. Document findings and track remediation actions to completion.', 'corrective', 'high', 1);
+
+-- ---------------------------------------------------------------------------
+-- Cyber Essentials — Representative Controls
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0004-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000001', 'CE1.1', 'Change default firewall admin credentials', 'Default passwords on firewalls and routers must be changed to strong, unique passwords.', 'Change all default administrative credentials before deployment. Use passwords of at least 12 characters.', 'preventive', 'critical', 1),
+('c0000000-0004-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000001', 'CE1.2', 'Block unauthenticated inbound connections by default', 'Firewall rules should deny all inbound connections by default, only allowing explicitly approved services.', 'Configure firewalls to drop all inbound traffic unless specifically permitted by a documented rule set.', 'preventive', 'critical', 2),
+('c0000000-0004-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000001', 'CE1.3', 'Software firewalls on devices', 'Enable and configure host-based firewalls on all devices, especially those used on untrusted networks.', 'Enable the built-in firewall on all endpoints. Configure to block inbound connections by default.', 'preventive', 'high', 3),
+('c0000000-0004-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000002', 'CE2.1', 'Remove unnecessary software and services', 'Remove or disable software and services that are not required for business operations.', 'Audit installed software regularly. Remove unused applications. Disable unnecessary OS services and features.', 'preventive', 'high', 1),
+('c0000000-0004-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000002', 'CE2.2', 'Change default passwords', 'All default or guessable passwords must be changed before devices are deployed.', 'Implement a policy requiring all default credentials to be changed. Use strong, unique passwords.', 'preventive', 'critical', 2),
+('c0000000-0004-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000003', 'CE3.1', 'User account controls', 'Control access to data and services through user accounts with appropriate privileges.', 'Create individual user accounts. Remove or disable accounts that are no longer needed. Implement approval process.', 'preventive', 'high', 1),
+('c0000000-0004-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000003', 'CE3.2', 'Restrict administrative privileges', 'Administrative accounts should only be used for administrative tasks and not day-to-day activities.', 'Limit admin rights to specific individuals. Use separate accounts for admin and standard use. Apply least privilege.', 'preventive', 'critical', 2),
+('c0000000-0004-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000003', 'CE3.3', 'Multi-factor authentication', 'Use multi-factor authentication where available, especially for cloud services and admin access.', 'Enable MFA on all admin accounts. Enable MFA on all cloud services. Use app-based or hardware tokens over SMS.', 'preventive', 'critical', 3),
+('c0000000-0004-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000004', 'CE4.1', 'Anti-malware software', 'Use anti-malware software on all devices (or equivalent controls on devices where traditional AV cannot run).', 'Install and maintain anti-malware on all endpoints. Enable real-time scanning. Keep signatures current.', 'preventive', 'high', 1),
+('c0000000-0004-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000004', 'CE4.2', 'Application allow-listing or sandboxing', 'Prevent execution of unknown/untrusted applications through allow-listing, sandboxing, or other mechanisms.', 'Implement application control to prevent execution of unapproved software. Use sandboxing for untrusted content.', 'preventive', 'high', 2),
+('c0000000-0004-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000005', 'CE5.1', 'Apply software updates within 14 days', 'All high-risk and critical security updates must be applied within 14 days of release.', 'Implement automated patch management. Prioritize critical and high-severity patches. Test before broad deployment.', 'preventive', 'critical', 1),
+('c0000000-0004-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000005', 'CE5.2', 'Remove unsupported software', 'Software that is no longer supported by the vendor must be removed or isolated.', 'Maintain an inventory of software versions. Plan migration from end-of-life products. Isolate where removal is not immediately possible.', 'preventive', 'critical', 2),
+('c0000000-0004-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000004', 'd0000000-0004-0000-0000-000000000005', 'CE5.3', 'Automatic update configuration', 'Enable automatic updates where possible and configure devices to install updates automatically.', 'Configure operating systems and applications to auto-update. Where not possible, implement a manual process with SLA.', 'preventive', 'high', 3);
+
+-- ---------------------------------------------------------------------------
+-- NIST SP 800-53 Rev 5 — Representative Controls
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0005-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000001', 'AC-1', 'Policy and Procedures', 'Develop, document, and disseminate access control policy and procedures.', 'Establish organization-wide access control policy. Review and update at least annually.', 'preventive', 'high', 1),
+('c0000000-0005-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000001', 'AC-2', 'Account Management', 'Define and manage information system accounts, including establishing, activating, modifying, reviewing, disabling, and removing accounts.', 'Implement account lifecycle management. Conduct periodic access reviews. Automate where possible.', 'preventive', 'high', 2),
+('c0000000-0005-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000001', 'AC-3', 'Access Enforcement', 'Enforce approved authorizations for logical access to information and system resources.', 'Implement role-based or attribute-based access control. Enforce least privilege and separation of duties.', 'preventive', 'critical', 3),
+('c0000000-0005-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000001', 'AC-6', 'Least Privilege', 'Employ the principle of least privilege, allowing only authorized accesses necessary to accomplish assigned tasks.', 'Restrict privileged accounts. Implement just-in-time access. Review privileges regularly.', 'preventive', 'critical', 6),
+('c0000000-0005-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000003', 'AU-2', 'Event Logging', 'Identify events that the system is capable of logging and coordinate the event logging function.', 'Define auditable events. Include successful and failed logon attempts, privilege changes, and data access.', 'detective', 'high', 2),
+('c0000000-0005-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000003', 'AU-6', 'Audit Record Review, Analysis, and Reporting', 'Review and analyse system audit records for indications of inappropriate or unusual activity.', 'Implement SIEM or log analysis tools. Establish review schedules. Define escalation procedures for anomalies.', 'detective', 'high', 6),
+('c0000000-0005-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000005', 'CM-6', 'Configuration Settings', 'Establish and document configuration settings for components using security configuration checklists.', 'Use CIS Benchmarks or DISA STIGs. Monitor configuration drift. Enforce through automation.', 'preventive', 'high', 6),
+('c0000000-0005-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000005', 'CM-8', 'System Component Inventory', 'Develop and document an inventory of system components that accurately reflects the system.', 'Maintain automated inventory. Include hardware, software, and firmware. Reconcile regularly.', 'preventive', 'high', 8),
+('c0000000-0005-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000007', 'IA-2', 'Identification and Authentication (Organizational Users)', 'Uniquely identify and authenticate organizational users and associate that identification with processes on their behalf.', 'Implement multi-factor authentication. Use centralized identity management. Enforce unique user IDs.', 'preventive', 'critical', 2),
+('c0000000-0005-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000008', 'IR-4', 'Incident Handling', 'Implement an incident handling capability that includes preparation, detection, analysis, containment, eradication, and recovery.', 'Develop and maintain incident response procedures. Conduct exercises. Integrate with threat intelligence.', 'corrective', 'critical', 4),
+('c0000000-0005-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000016', 'RA-5', 'Vulnerability Monitoring and Scanning', 'Monitor and scan for vulnerabilities in the system and hosted applications and remediate discovered vulnerabilities.', 'Conduct regular vulnerability scans. Prioritize remediation based on risk. Track to closure.', 'detective', 'critical', 5),
+('c0000000-0005-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000018', 'SC-7', 'Boundary Protection', 'Monitor and control communications at the external managed interfaces and key internal boundaries.', 'Implement firewalls, proxies, and DMZs. Restrict traffic to authorized flows. Monitor boundary traffic.', 'preventive', 'critical', 7),
+('c0000000-0005-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000018', 'SC-8', 'Transmission Confidentiality and Integrity', 'Protect the confidentiality and integrity of transmitted information.', 'Implement TLS/encryption for all data in transit. Use authenticated protocols. Monitor for downgrade attacks.', 'preventive', 'high', 8),
+('c0000000-0005-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000019', 'SI-2', 'Flaw Remediation', 'Identify, report, and correct system flaws. Install security-relevant software and firmware updates.', 'Establish patch management program. Apply critical patches within defined SLAs. Test patches before deployment.', 'corrective', 'critical', 2),
+('c0000000-0005-0000-0000-000000000015', 'f0000000-0000-0000-0000-000000000005', 'd0000000-0005-0000-0000-000000000019', 'SI-4', 'System Monitoring', 'Monitor the system to detect attacks, indicators of potential attacks, and unauthorized connections.', 'Deploy IDS/IPS, SIEM, and endpoint detection. Define monitoring strategies. Establish alert thresholds.', 'detective', 'critical', 4);
+
+-- ---------------------------------------------------------------------------
+-- NIST CSF 2.0 — Representative Controls
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0006-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000001', 'GV.OC-01', 'Organizational Context', 'The organisational mission is understood and informs cybersecurity risk management.', 'Document how cybersecurity supports the mission. Align risk appetite with business objectives.', 'preventive', 'high', 1),
+('c0000000-0006-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000001', 'GV.RM-01', 'Risk Management Objectives', 'Risk management objectives are established and agreed to by organisational stakeholders.', 'Define risk tolerance levels. Obtain executive approval. Communicate to all relevant parties.', 'preventive', 'critical', 2),
+('c0000000-0006-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000001', 'GV.SC-01', 'Supply Chain Risk Management', 'A cyber supply chain risk management program and strategy is established.', 'New emphasis in CSF 2.0. Assess and manage cyber risks across the supply chain.', 'preventive', 'high', 3),
+('c0000000-0006-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000002', 'ID.AM-01', 'Asset Inventory', 'Inventories of hardware managed by the organisation are maintained.', 'Implement automated asset discovery. Maintain up-to-date hardware inventory. Track lifecycle states.', 'preventive', 'high', 1),
+('c0000000-0006-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000002', 'ID.AM-02', 'Software Inventory', 'Inventories of software, services, and systems managed by the organisation are maintained.', 'Catalogue all software and services. Track versions, licensing, and dependencies.', 'preventive', 'high', 2),
+('c0000000-0006-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000002', 'ID.RA-01', 'Vulnerability Identification', 'Vulnerabilities in assets are identified, validated, and recorded.', 'Conduct regular vulnerability scans. Correlate findings with threat intelligence. Track remediation.', 'detective', 'high', 5),
+('c0000000-0006-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000003', 'PR.AA-01', 'Identity Management', 'Identities and credentials for authorised users, services, and hardware are managed.', 'Implement centralised identity management. Apply strong authentication. Manage credential lifecycle.', 'preventive', 'critical', 1),
+('c0000000-0006-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000003', 'PR.DS-01', 'Data Protection', 'The confidentiality, integrity, and availability of data-at-rest is protected.', 'Implement encryption for sensitive data at rest. Apply access controls. Maintain data classification scheme.', 'preventive', 'high', 4),
+('c0000000-0006-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000003', 'PR.PS-01', 'Configuration Management', 'Configuration management practices are established and applied.', 'Establish baseline configurations. Monitor for drift. Enforce through automation tools.', 'preventive', 'high', 7),
+('c0000000-0006-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000004', 'DE.CM-01', 'Network Monitoring', 'Networks and network services are monitored to find potentially adverse events.', 'Deploy network monitoring tools. Establish baselines. Alert on anomalies and known threat indicators.', 'detective', 'critical', 1),
+('c0000000-0006-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000004', 'DE.AE-02', 'Adverse Event Analysis', 'Potentially adverse events are analysed to better understand associated activities.', 'Correlate security events. Investigate alerts. Integrate threat intelligence for context.', 'detective', 'high', 4),
+('c0000000-0006-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000005', 'RS.MA-01', 'Incident Management', 'The incident is managed from detection through resolution.', 'Follow established incident response plan. Coordinate with stakeholders. Document all actions taken.', 'corrective', 'critical', 1),
+('c0000000-0006-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000005', 'RS.CO-02', 'Incident Reporting', 'Internal and external stakeholders are notified of incidents.', 'Establish communication plans. Define notification thresholds and timelines. Report to regulators as required.', 'corrective', 'high', 4),
+('c0000000-0006-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000006', 'd0000000-0006-0000-0000-000000000006', 'RC.RP-01', 'Recovery Execution', 'The recovery portion of the incident response plan is executed.', 'Implement and test recovery procedures. Define RTOs and RPOs. Conduct post-recovery validation.', 'corrective', 'critical', 1);
+
+-- ---------------------------------------------------------------------------
+-- PCI DSS v4.0 — Representative Controls
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0007-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000011', '1.2.1', 'Restrict inbound and outbound traffic', 'Configuration standards for network security controls are defined, implemented, and maintained that restrict inbound and outbound traffic to that which is necessary.', 'Document all allowed traffic flows. Implement deny-all/permit-by-exception. Review rules semi-annually.', 'preventive', 'critical', 1),
+('c0000000-0007-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000012', '2.2.1', 'Secure configuration standards', 'Configuration standards are developed, implemented, and maintained for all system components.', 'Use industry-hardening standards. Address all known vulnerabilities. Document deviations with justification.', 'preventive', 'high', 1),
+('c0000000-0007-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000013', '3.4.1', 'Render PAN unreadable', 'PAN is rendered unreadable anywhere it is stored using strong cryptography.', 'Encrypt stored PAN using AES-256 or equivalent. Implement key management procedures. Avoid reversible encryption where possible.', 'preventive', 'critical', 1),
+('c0000000-0007-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000014', '4.2.1', 'Strong cryptography for transmission', 'PAN is protected with strong cryptography during transmission over open, public networks.', 'Use TLS 1.2 or higher. Validate certificates. Do not use early SSL or TLS versions.', 'preventive', 'critical', 1),
+('c0000000-0007-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000015', '5.2.1', 'Anti-malware deployed', 'An anti-malware solution is deployed on all system components except those identified as not at risk.', 'Deploy anti-malware on all applicable systems. Enable real-time protection. Perform periodic full scans.', 'preventive', 'high', 1),
+('c0000000-0007-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000016', '6.2.4', 'Secure coding practices', 'Software engineering techniques or other methods are defined and in use to prevent or mitigate common software attacks.', 'Train developers on secure coding. Use OWASP guidelines. Conduct code reviews and application security testing.', 'preventive', 'high', 1),
+('c0000000-0007-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000017', '7.2.1', 'Access control model defined', 'An access control model is defined and includes granting access based on business and role needs.', 'Implement role-based access control. Document access requirements per role. Apply need-to-know principle.', 'preventive', 'critical', 1),
+('c0000000-0007-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000018', '8.3.1', 'User authentication managed', 'All user access to system components is authenticated using at least one authentication factor.', 'Implement strong authentication. Use unique IDs. Enforce password complexity and MFA requirements.', 'preventive', 'critical', 1),
+('c0000000-0007-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000018', '8.4.2', 'MFA for CDE access', 'MFA is implemented for all access into the cardholder data environment.', 'Deploy MFA for all CDE access. Use at least two of the three authentication factors. Implement for remote and administrative access.', 'preventive', 'critical', 4),
+('c0000000-0007-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000020', '10.2.1', 'Audit logs enabled', 'Audit logs are enabled and active for all system components and cardholder data.', 'Enable logging on all systems in scope. Capture user access, privilege changes, and security events. Secure log data.', 'detective', 'critical', 1),
+('c0000000-0007-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000021', '11.3.1', 'Internal vulnerability scans', 'Internal vulnerability scans are performed at least quarterly and after significant changes.', 'Conduct quarterly internal scans. Rescan until all high-risk vulnerabilities are resolved. Document results.', 'detective', 'high', 1),
+('c0000000-0007-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000021', '11.4.1', 'Penetration testing', 'External and internal penetration testing is regularly performed and exploitable vulnerabilities are corrected.', 'Conduct annual penetration testing. Test from inside and outside the network. Remediate findings and retest.', 'detective', 'high', 3),
+('c0000000-0007-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000022', '12.1.1', 'Information security policy', 'An overall information security policy is established, published, maintained, and disseminated.', 'Develop and maintain a comprehensive security policy. Review annually. Communicate to all relevant personnel.', 'preventive', 'high', 1),
+('c0000000-0007-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000007', 'd0000000-0007-0000-0000-000000000022', '12.10.1', 'Incident response plan', 'An incident response plan exists and is ready to be activated.', 'Create an incident response plan covering detection, containment, eradication, recovery, and post-incident. Test annually.', 'corrective', 'critical', 8);
+
+-- ---------------------------------------------------------------------------
+-- ITIL 4 — Representative Controls (Practices)
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0008-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000001', 'SVC.1', 'Plan', 'Ensure a shared understanding of the vision, current status, and improvement direction across all four dimensions and all products and services.', 'Develop strategic, tactical, and operational plans. Align IT strategy with business strategy. Track progress.', 'preventive', 'high', 1),
+('c0000000-0008-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000001', 'SVC.2', 'Improve', 'Ensure continual improvement of products, services, and practices across all value chain activities.', 'Implement continual improvement register. Use metrics to identify improvement opportunities. Apply Lean/Agile methods.', 'corrective', 'high', 2),
+('c0000000-0008-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000001', 'SVC.6', 'Deliver and Support', 'Ensure that services are delivered and supported according to agreed specifications and stakeholder expectations.', 'Manage service delivery against SLAs. Monitor performance. Resolve incidents and fulfil requests efficiently.', 'preventive', 'high', 6),
+('c0000000-0008-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000002', 'GP.ISM', 'Information Security Management', 'Protect the information needed by the organisation to conduct its business, including understanding and managing risks to the confidentiality, integrity, and availability of information.', 'Establish information security policies. Conduct risk assessments. Implement controls aligned with ISO 27001.', 'preventive', 'critical', 1),
+('c0000000-0008-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000002', 'GP.RM', 'Risk Management', 'Ensure the organisation understands and effectively handles risks to avoid negative impact on stakeholders.', 'Identify and assess risks. Define risk responses. Maintain risk registers. Report on risk status.', 'preventive', 'high', 2),
+('c0000000-0008-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000003', 'SM.CHG', 'Change Enablement', 'Maximise the number of successful service and product changes by ensuring that risks have been properly assessed.', 'Implement change management process. Classify changes by risk. Require approval for significant changes.', 'preventive', 'high', 1),
+('c0000000-0008-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000003', 'SM.INC', 'Incident Management', 'Minimise the negative impact of incidents by restoring normal service operation as quickly as possible.', 'Define incident classification and prioritisation. Establish escalation paths. Track mean time to resolve.', 'corrective', 'critical', 2),
+('c0000000-0008-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000003', 'SM.PRB', 'Problem Management', 'Reduce the likelihood and impact of incidents by identifying actual and potential causes of incidents.', 'Conduct root cause analysis. Maintain known error database. Track problem resolution and workarounds.', 'corrective', 'high', 3),
+('c0000000-0008-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000003', 'SM.SLM', 'Service Level Management', 'Set clear business-based targets for service levels and ensure successful delivery is properly assessed, monitored, and managed.', 'Define SLAs based on business needs. Monitor service performance. Conduct regular service reviews.', 'preventive', 'high', 4),
+('c0000000-0008-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000003', 'SM.SACM', 'Service Configuration Management', 'Ensure accurate and reliable information about the configuration of services and their supporting CIs is available.', 'Maintain a CMDB. Track CI relationships. Verify accuracy through audits.', 'preventive', 'high', 5),
+('c0000000-0008-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000008', 'd0000000-0008-0000-0000-000000000004', 'TM.DEPLOY', 'Deployment Management', 'Move new or changed hardware, software, documentation, and processes to live environments.', 'Implement deployment pipelines. Use blue/green or canary deployments. Automate where possible.', 'preventive', 'medium', 1);
+
+-- ---------------------------------------------------------------------------
+-- COBIT 2019 — Representative Controls (Management Objectives)
+-- ---------------------------------------------------------------------------
+INSERT INTO framework_controls (id, framework_id, domain_id, code, title, description, guidance, control_type, priority, sort_order) VALUES
+('c0000000-0009-0000-0000-000000000001', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000001', 'EDM01', 'Ensured Governance Framework Setting and Maintenance', 'Analyse and articulate the requirements for the governance of enterprise IT. Establish and maintain effective enabling structures, principles and processes.', 'Define governance structures. Assign accountabilities. Evaluate governance effectiveness regularly.', 'preventive', 'critical', 1),
+('c0000000-0009-0000-0000-000000000002', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000001', 'EDM02', 'Ensured Benefits Delivery', 'Optimise the value contribution to the business from IT-enabled investments, services and assets.', 'Define expected benefits. Track value delivery. Ensure benefits realisation plans are in place.', 'preventive', 'high', 2),
+('c0000000-0009-0000-0000-000000000003', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000001', 'EDM03', 'Ensured Risk Optimisation', 'Ensure that IT-related enterprise risk does not exceed the enterprise''s risk appetite and risk tolerance.', 'Define risk appetite. Integrate IT risk into enterprise risk management. Monitor risk indicators.', 'preventive', 'critical', 3),
+('c0000000-0009-0000-0000-000000000004', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000002', 'APO01', 'Managed I&T Management Framework', 'Implement and maintain a set of policies, processes, and procedures to ensure IT management aligns with enterprise goals.', 'Establish IT management policies. Define processes and procedures. Assign ownership and accountability.', 'preventive', 'high', 1),
+('c0000000-0009-0000-0000-000000000005', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000002', 'APO12', 'Managed Risk', 'Continually identify, assess, and reduce IT-related risk within levels of tolerance set by enterprise management.', 'Maintain a risk register. Conduct periodic risk assessments. Define and monitor key risk indicators.', 'preventive', 'critical', 12),
+('c0000000-0009-0000-0000-000000000006', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000002', 'APO13', 'Managed Security', 'Define, operate, and monitor an information security management system (ISMS).', 'Align with ISO 27001. Establish security policies. Implement security controls. Monitor and report.', 'preventive', 'critical', 13),
+('c0000000-0009-0000-0000-000000000007', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000003', 'BAI03', 'Managed Solutions Identification and Build', 'Establish and maintain identified solutions in line with enterprise requirements, covering design, development, procurement, and partnering.', 'Apply secure development practices. Conduct quality assurance. Document design decisions.', 'preventive', 'high', 3),
+('c0000000-0009-0000-0000-000000000008', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000003', 'BAI06', 'Managed IT Changes', 'Manage all changes in a controlled manner, including standard changes and emergency maintenance.', 'Implement change management process. Assess impact and risk. Require appropriate approvals.', 'preventive', 'high', 6),
+('c0000000-0009-0000-0000-000000000009', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000003', 'BAI09', 'Managed Assets', 'Manage IT assets through their lifecycle to ensure that their use delivers value at optimal cost.', 'Maintain asset inventory. Track lifecycle from acquisition to disposal. Optimise asset utilisation.', 'preventive', 'high', 9),
+('c0000000-0009-0000-0000-000000000010', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000004', 'DSS01', 'Managed Operations', 'Coordinate and execute operational procedures required to deliver IT services, including scheduled execution of procedures.', 'Define and document operational procedures. Monitor execution. Manage operational events and incidents.', 'preventive', 'high', 1),
+('c0000000-0009-0000-0000-000000000011', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000004', 'DSS02', 'Managed Service Requests and Incidents', 'Provide timely and effective response to user requests and resolution of all types of incidents.', 'Classify and prioritise incidents. Track resolution against SLAs. Manage escalation paths.', 'corrective', 'critical', 2),
+('c0000000-0009-0000-0000-000000000012', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000004', 'DSS05', 'Managed Security Services', 'Protect enterprise information to maintain the level of security risk acceptable to the enterprise in accordance with the security policy.', 'Monitor security services. Manage vulnerabilities. Protect against malware. Manage network and endpoint security.', 'preventive', 'critical', 5),
+('c0000000-0009-0000-0000-000000000013', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000005', 'MEA01', 'Managed Performance and Conformance Monitoring', 'Collect, validate, and evaluate business, IT, and process goals and metrics. Monitor that processes are performing against agreed targets.', 'Define KPIs and KGIs. Implement monitoring dashboards. Report on conformance and performance.', 'detective', 'high', 1),
+('c0000000-0009-0000-0000-000000000014', 'f0000000-0000-0000-0000-000000000009', 'd0000000-0009-0000-0000-000000000005', 'MEA03', 'Managed Compliance with External Requirements', 'Evaluate that IT processes and IT-supported business processes are compliant with laws, regulations, and contractual requirements.', 'Identify applicable requirements. Map controls to requirements. Monitor compliance status. Remediate gaps.', 'detective', 'critical', 3);
+
+COMMIT;
