@@ -1,0 +1,99 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosec
+    - gocyclo
+    - goconst
+    - misspell
+    - revive
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  misspell:
+    locale: US
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: increment-decrement
+      - name: var-naming
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+
+  gosec:
+    excludes:
+      - G104  # Audit errors not checked (handled by errcheck)
+
+  govet:
+    enable-all: true
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on test files
+    - path: _test\.go
+      linters:
+        - gosec
+        - goconst
+        - gocyclo
+        - errcheck
+
+    # Exclude generated code
+    - path: ".*_gen\\.go"
+      linters:
+        - errcheck
+        - govet
+        - staticcheck
+        - unused
+        - gosec
+        - gocyclo
+        - goconst
+        - revive
+
+    # Exclude generated mocks
+    - path: "mock_.*\\.go"
+      linters:
+        - errcheck
+        - govet
+        - staticcheck
+        - unused
+        - revive
+
+    # Exclude migration files
+    - path: "internal/database/migrations/"
+      linters:
+        - goconst
+        - gocyclo
+
+  max-issues-per-linter: 50
+  max-same-issues: 5
+
+output:
+  formats:
+    - format: colored-line-number
+  sort-results: true

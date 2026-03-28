@@ -1,0 +1,101 @@
+# ========================
+# Go
+# ========================
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.prof
+*.pprof
+bin/
+vendor/
+coverage.out
+coverage.html
+
+# ========================
+# Node / Next.js (frontend)
+# ========================
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+frontend/.vercel/
+frontend/.cache/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.playwright/
+
+# ========================
+# Environment & secrets
+# ========================
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.local.example
+!frontend/.env.local.example
+
+# ========================
+# IDE & editors
+# ========================
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ========================
+# OS files
+# ========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ========================
+# Docker
+# ========================
+docker-compose.override.yml
+
+# ========================
+# Protobuf generated
+# ========================
+proto/**/*.pb.go
+proto/**/*_grpc.pb.go
+proto/**/google/
+
+# ========================
+# Database
+# ========================
+*.sqlite
+*.sqlite3
+*.db
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
+
+# ========================
+# Build & temp
+# ========================
+tmp/
+dist/
+build/
+
+# ========================
+# Misc
+# ========================
+*.bak
+*.tmp
+*.pid

@@ -52,6 +52,14 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 		vendorHandler       *handler.VendorHandler
 		dashboardHandler    *handler.DashboardHandler
 		reportHandler       *handler.ReportHandler
+		notificationHandler *handler.NotificationHandler
+		dsrHandler          *handler.DSRHandler
+		nis2Handler         *handler.NIS2Handler
+		monitoringHandler   *handler.MonitoringHandler
+		workflowHandler     *handler.WorkflowHandler
+		integrationHandler  *handler.IntegrationHandler
+		onboardingHandler   *handler.OnboardingHandler
+		accessHandler       *handler.AccessHandler
 	)
 
 	// Wire repositories, services, and handlers when implementations are available.
@@ -200,10 +208,196 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 		// Reports
 		r.Route("/reports", func(r chi.Router) {
 			if reportHandler != nil {
-				r.Get("/compliance", reportHandler.GetComplianceReport)
-				r.Get("/risk", reportHandler.GetRiskReport)
-				r.Get("/audit", reportHandler.GetAuditReport)
-				r.Get("/executive-summary", reportHandler.GetExecutiveSummary)
+				r.Post("/generate", reportHandler.GenerateReport)
+				r.Get("/status/{id}", reportHandler.GetRunStatus)
+				r.Get("/download/{id}", reportHandler.DownloadReport)
+				r.Get("/definitions", reportHandler.ListDefinitions)
+				r.Post("/definitions", reportHandler.CreateDefinition)
+				r.Put("/definitions/{id}", reportHandler.UpdateDefinition)
+				r.Delete("/definitions/{id}", reportHandler.DeleteDefinition)
+				r.Post("/definitions/{id}/generate", reportHandler.GenerateFromDefinition)
+				r.Get("/schedules", reportHandler.ListSchedules)
+				r.Post("/schedules", reportHandler.CreateSchedule)
+				r.Put("/schedules/{id}", reportHandler.UpdateSchedule)
+				r.Delete("/schedules/{id}", reportHandler.DeleteSchedule)
+				r.Get("/history", reportHandler.ListHistory)
+			}
+		})
+
+		// Notifications (user-facing)
+		r.Route("/notifications", func(r chi.Router) {
+			if notificationHandler != nil {
+				r.Get("/", notificationHandler.ListNotifications)
+				r.Put("/{id}/read", notificationHandler.MarkAsRead)
+				r.Put("/read-all", notificationHandler.MarkAllAsRead)
+				r.Get("/unread-count", notificationHandler.GetUnreadCount)
+				r.Get("/preferences", notificationHandler.GetPreferences)
+				r.Put("/preferences", notificationHandler.UpdatePreferences)
+			}
+		})
+
+		// Notification settings (admin)
+		r.Route("/settings/notification-rules", func(r chi.Router) {
+			if notificationHandler != nil {
+				r.Get("/", notificationHandler.ListRules)
+				r.Post("/", notificationHandler.CreateRule)
+				r.Put("/{id}", notificationHandler.UpdateRule)
+				r.Delete("/{id}", notificationHandler.DeleteRule)
+			}
+		})
+		r.Route("/settings/notification-channels", func(r chi.Router) {
+			if notificationHandler != nil {
+				r.Get("/", notificationHandler.ListChannels)
+				r.Post("/", notificationHandler.CreateChannel)
+				r.Post("/{id}/test", notificationHandler.TestChannel)
+			}
+		})
+
+		// DSR (Data Subject Requests)
+		r.Route("/dsr", func(r chi.Router) {
+			if dsrHandler != nil {
+				r.Get("/", dsrHandler.ListRequests)
+				r.Post("/", dsrHandler.CreateRequest)
+				r.Get("/dashboard", dsrHandler.GetDashboard)
+				r.Get("/overdue", dsrHandler.GetOverdue)
+				r.Get("/templates", dsrHandler.ListTemplates)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", dsrHandler.GetRequest)
+					r.Put("/", dsrHandler.UpdateRequest)
+					r.Post("/verify-identity", dsrHandler.VerifyIdentity)
+					r.Post("/assign", dsrHandler.AssignRequest)
+					r.Post("/extend", dsrHandler.ExtendDeadline)
+					r.Post("/complete", dsrHandler.CompleteRequest)
+					r.Post("/reject", dsrHandler.RejectRequest)
+					r.Put("/tasks/{taskId}", dsrHandler.UpdateTask)
+				})
+			}
+		})
+
+		// NIS2
+		r.Route("/nis2", func(r chi.Router) {
+			if nis2Handler != nil {
+				r.Get("/assessment", nis2Handler.GetAssessment)
+				r.Post("/assessment", nis2Handler.CreateAssessment)
+				r.Get("/dashboard", nis2Handler.GetDashboard)
+				r.Get("/measures", nis2Handler.GetMeasures)
+				r.Put("/measures/{id}", nis2Handler.UpdateMeasure)
+				r.Get("/management", nis2Handler.GetManagement)
+				r.Post("/management", nis2Handler.RecordTraining)
+				r.Route("/incidents", func(r chi.Router) {
+					r.Get("/", nis2Handler.ListIncidentReports)
+					r.Route("/{id}", func(r chi.Router) {
+						r.Get("/", nis2Handler.GetIncidentReport)
+						r.Post("/early-warning", nis2Handler.SubmitEarlyWarning)
+						r.Post("/notification", nis2Handler.SubmitNotification)
+						r.Post("/final-report", nis2Handler.SubmitFinalReport)
+					})
+				})
+			}
+		})
+
+		// Monitoring
+		r.Route("/monitoring", func(r chi.Router) {
+			if monitoringHandler != nil {
+				r.Get("/dashboard", monitoringHandler.GetDashboard)
+				r.Route("/configs", func(r chi.Router) {
+					r.Get("/", monitoringHandler.ListCollectionConfigs)
+					r.Post("/", monitoringHandler.CreateCollectionConfig)
+					r.Put("/{id}", monitoringHandler.UpdateCollectionConfig)
+					r.Post("/{id}/run-now", monitoringHandler.RunCollectionNow)
+					r.Get("/{id}/history", monitoringHandler.GetCollectionHistory)
+				})
+				r.Route("/monitors", func(r chi.Router) {
+					r.Get("/", monitoringHandler.ListMonitors)
+					r.Post("/", monitoringHandler.CreateMonitor)
+					r.Put("/{id}", monitoringHandler.UpdateMonitor)
+					r.Get("/{id}/results", monitoringHandler.GetMonitorResults)
+				})
+				r.Route("/drift", func(r chi.Router) {
+					r.Get("/", monitoringHandler.ListDriftEvents)
+					r.Put("/{id}/acknowledge", monitoringHandler.AcknowledgeDrift)
+					r.Put("/{id}/resolve", monitoringHandler.ResolveDrift)
+				})
+			}
+		})
+
+		// Workflows
+		r.Route("/workflows", func(r chi.Router) {
+			if workflowHandler != nil {
+				r.Get("/my-approvals", workflowHandler.GetMyApprovals)
+				r.Get("/definitions", workflowHandler.ListDefinitions)
+				r.Post("/definitions", workflowHandler.CreateDefinition)
+				r.Put("/definitions/{id}", workflowHandler.UpdateDefinition)
+				r.Post("/definitions/{id}/activate", workflowHandler.ActivateDefinition)
+				r.Get("/instances", workflowHandler.ListInstances)
+				r.Get("/instances/{id}", workflowHandler.GetInstance)
+				r.Post("/start", workflowHandler.StartWorkflow)
+				r.Post("/instances/{id}/cancel", workflowHandler.CancelWorkflow)
+				r.Post("/executions/{id}/approve", workflowHandler.ApproveStep)
+				r.Post("/executions/{id}/reject", workflowHandler.RejectStep)
+				r.Post("/executions/{id}/delegate", workflowHandler.DelegateStep)
+				r.Post("/executions/{id}/request-info", workflowHandler.RequestInfo)
+				r.Get("/delegations", workflowHandler.ListDelegations)
+				r.Post("/delegations", workflowHandler.CreateDelegation)
+			}
+		})
+
+		// Integrations
+		r.Route("/integrations", func(r chi.Router) {
+			if integrationHandler != nil {
+				r.Get("/", integrationHandler.ListIntegrations)
+				r.Post("/", integrationHandler.CreateIntegration)
+				r.Get("/{id}", integrationHandler.GetIntegration)
+				r.Put("/{id}", integrationHandler.UpdateIntegration)
+				r.Delete("/{id}", integrationHandler.DeleteIntegration)
+				r.Post("/{id}/test", integrationHandler.TestConnection)
+				r.Post("/{id}/sync", integrationHandler.TriggerSync)
+				r.Get("/{id}/logs", integrationHandler.GetSyncLogs)
+			}
+		})
+
+		// SSO & API Keys (under settings)
+		if integrationHandler != nil {
+			r.Get("/settings/sso", integrationHandler.GetSSOConfig)
+			r.Put("/settings/sso", integrationHandler.UpdateSSOConfig)
+			r.Get("/settings/api-keys", integrationHandler.ListAPIKeys)
+			r.Post("/settings/api-keys", integrationHandler.CreateAPIKey)
+			r.Delete("/settings/api-keys/{id}", integrationHandler.RevokeAPIKey)
+		}
+
+		// Access Policies (ABAC)
+		r.Route("/access", func(r chi.Router) {
+			if accessHandler != nil {
+				r.Get("/policies", accessHandler.ListPolicies)
+				r.Post("/policies", accessHandler.CreatePolicy)
+				r.Put("/policies/{id}", accessHandler.UpdatePolicy)
+				r.Delete("/policies/{id}", accessHandler.DeletePolicy)
+				r.Post("/policies/{id}/assignments", accessHandler.AssignPolicy)
+				r.Delete("/policies/{id}/assignments/{assignmentId}", accessHandler.RemoveAssignment)
+				r.Post("/evaluate", accessHandler.TestEvaluate)
+				r.Get("/audit-log", accessHandler.GetAuditLog)
+				r.Get("/my-permissions", accessHandler.GetMyPermissions)
+				r.Get("/field-permissions", accessHandler.GetFieldPermissions)
+			}
+		})
+
+		// Onboarding & Subscription
+		r.Route("/onboard", func(r chi.Router) {
+			if onboardingHandler != nil {
+				r.Get("/progress", onboardingHandler.GetProgress)
+				r.Put("/step/{n}", onboardingHandler.SaveStep)
+				r.Post("/step/{n}/skip", onboardingHandler.SkipStep)
+				r.Post("/complete", onboardingHandler.Complete)
+				r.Get("/recommendations", onboardingHandler.GetRecommendations)
+			}
+		})
+		r.Route("/subscription", func(r chi.Router) {
+			if onboardingHandler != nil {
+				r.Get("/", onboardingHandler.GetSubscription)
+				r.Put("/plan", onboardingHandler.ChangePlan)
+				r.Post("/cancel", onboardingHandler.Cancel)
+				r.Get("/plans", onboardingHandler.ListPlans)
+				r.Get("/usage", onboardingHandler.GetUsage)
 			}
 		})
 	})

@@ -1,0 +1,41 @@
+# Stage 1: Build
+FROM golang:1.22-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /build/bin/api cmd/api/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /build/bin/worker cmd/worker/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /build/bin/migrate cmd/migrate/main.go
+
+# Stage 2: Runtime
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata curl \
+    && addgroup -S appgroup \
+    && adduser -S appuser -G appgroup
+
+WORKDIR /app
+
+COPY --from=builder /build/bin/api /app/api
+COPY --from=builder /build/bin/worker /app/worker
+COPY --from=builder /build/bin/migrate /app/migrate
+COPY --from=builder /build/internal/database/migrations /app/migrations
+COPY --from=builder /build/internal/database/seeds /app/seeds
+
+RUN chown -R appuser:appgroup /app
+
+USER appuser
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["/app/api"]
