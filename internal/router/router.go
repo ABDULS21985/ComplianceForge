@@ -41,30 +41,37 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	// The concrete wiring will be added once service implementations exist.
 
 	var (
-		authHandler         *handler.AuthHandler
-		organizationHandler *handler.OrganizationHandler
-		frameworkHandler    *handler.FrameworkHandler
-		controlHandler      *handler.ControlHandler
-		riskHandler         *handler.RiskHandler
-		policyHandler       *handler.PolicyHandler
-		auditHandler        *handler.AuditHandler
-		incidentHandler     *handler.IncidentHandler
-		vendorHandler       *handler.VendorHandler
-		dashboardHandler    *handler.DashboardHandler
-		reportHandler       *handler.ReportHandler
-		notificationHandler *handler.NotificationHandler
-		dsrHandler          *handler.DSRHandler
-		nis2Handler         *handler.NIS2Handler
-		monitoringHandler   *handler.MonitoringHandler
-		workflowHandler     *handler.WorkflowHandler
-		integrationHandler  *handler.IntegrationHandler
-		onboardingHandler   *handler.OnboardingHandler
-		accessHandler       *handler.AccessHandler
-		remediationHandler  *handler.RemediationHandler
-		marketplaceHandler  *handler.MarketplaceHandler
-		regulatoryHandler   *handler.RegulatoryHandler
-		biaHandler          *handler.BIAHandler
-		analyticsHandler    *handler.AnalyticsHandler
+		authHandler             *handler.AuthHandler
+		organizationHandler     *handler.OrganizationHandler
+		frameworkHandler        *handler.FrameworkHandler
+		controlHandler          *handler.ControlHandler
+		riskHandler             *handler.RiskHandler
+		policyHandler           *handler.PolicyHandler
+		auditHandler            *handler.AuditHandler
+		incidentHandler         *handler.IncidentHandler
+		vendorHandler           *handler.VendorHandler
+		dashboardHandler        *handler.DashboardHandler
+		reportHandler           *handler.ReportHandler
+		notificationHandler     *handler.NotificationHandler
+		dsrHandler              *handler.DSRHandler
+		nis2Handler             *handler.NIS2Handler
+		monitoringHandler       *handler.MonitoringHandler
+		workflowHandler         *handler.WorkflowHandler
+		integrationHandler      *handler.IntegrationHandler
+		onboardingHandler       *handler.OnboardingHandler
+		accessHandler           *handler.AccessHandler
+		remediationHandler      *handler.RemediationHandler
+		marketplaceHandler      *handler.MarketplaceHandler
+		regulatoryHandler       *handler.RegulatoryHandler
+		biaHandler              *handler.BIAHandler
+		analyticsHandler        *handler.AnalyticsHandler
+		exceptionHandler        *handler.ExceptionHandler
+		evidenceTemplateHandler *handler.EvidenceTemplateHandler
+		questionnaireHandler    *handler.QuestionnaireHandler
+		vendorPortalHandler     *handler.VendorPortalHandler
+		ropaHandler             *handler.ROPAHandler
+		boardHandler            *handler.BoardHandler
+		boardPortalHandler      *handler.BoardPortalHandler
 	)
 
 	// Wire repositories, services, and handlers when implementations are available.
@@ -87,6 +94,26 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 			r.Post("/login", authHandler.Login)
 			r.Post("/register", authHandler.Register)
 			r.Post("/refresh", authHandler.Refresh)
+		}
+	})
+
+	// --- Public portal routes (token-authenticated, no JWT) ---
+	r.Route("/api/v1/vendor-portal", func(r chi.Router) {
+		if vendorPortalHandler != nil {
+			r.Get("/{token}", vendorPortalHandler.GetQuestionnaire)
+			r.Put("/{token}/responses", vendorPortalHandler.UpdateResponses)
+			r.Post("/{token}/responses/{questionId}/evidence", vendorPortalHandler.UploadEvidence)
+			r.Post("/{token}/submit", vendorPortalHandler.Submit)
+			r.Get("/{token}/progress", vendorPortalHandler.GetProgress)
+		}
+	})
+
+	r.Route("/api/v1/board-portal", func(r chi.Router) {
+		if boardPortalHandler != nil {
+			r.Get("/{token}", boardPortalHandler.GetOverview)
+			r.Get("/{token}/meetings", boardPortalHandler.GetMeetings)
+			r.Get("/{token}/meetings/{id}/pack", boardPortalHandler.GetMeetingPack)
+			r.Get("/{token}/decisions", boardPortalHandler.GetDecisions)
 		}
 	})
 
@@ -555,6 +582,133 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 					r.Delete("/{id}", analyticsHandler.DeleteDashboard)
 				})
 				r.Get("/widget-types", analyticsHandler.GetWidgetTypes)
+			}
+		})
+
+		// Exceptions
+		r.Route("/exceptions", func(r chi.Router) {
+			if exceptionHandler != nil {
+				r.Get("/", exceptionHandler.List)
+				r.Post("/", exceptionHandler.Create)
+				r.Get("/dashboard", exceptionHandler.GetDashboard)
+				r.Get("/expiring", exceptionHandler.GetExpiring)
+				r.Get("/impact/{id}", exceptionHandler.GetImpactAnalysis)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", exceptionHandler.GetByID)
+					r.Put("/", exceptionHandler.Update)
+					r.Post("/submit", exceptionHandler.Submit)
+					r.Post("/approve", exceptionHandler.Approve)
+					r.Post("/reject", exceptionHandler.Reject)
+					r.Post("/revoke", exceptionHandler.Revoke)
+					r.Post("/renew", exceptionHandler.Renew)
+					r.Post("/review", exceptionHandler.Review)
+				})
+			}
+		})
+
+		// Evidence
+		r.Route("/evidence", func(r chi.Router) {
+			if evidenceTemplateHandler != nil {
+				r.Route("/templates", func(r chi.Router) {
+					r.Get("/", evidenceTemplateHandler.ListTemplates)
+					r.Get("/{id}", evidenceTemplateHandler.GetTemplate)
+					r.Post("/", evidenceTemplateHandler.CreateTemplate)
+				})
+				r.Route("/requirements", func(r chi.Router) {
+					r.Get("/", evidenceTemplateHandler.ListRequirements)
+					r.Post("/generate", evidenceTemplateHandler.GenerateRequirements)
+					r.Put("/{id}", evidenceTemplateHandler.UpdateRequirement)
+					r.Post("/{id}/validate", evidenceTemplateHandler.ValidateRequirement)
+				})
+				r.Get("/gaps", evidenceTemplateHandler.GetEvidenceGaps)
+				r.Get("/schedule", evidenceTemplateHandler.GetEvidenceSchedule)
+				r.Route("/test-suites", func(r chi.Router) {
+					r.Get("/", evidenceTemplateHandler.ListTestSuites)
+					r.Post("/", evidenceTemplateHandler.CreateTestSuite)
+					r.Post("/{id}/run", evidenceTemplateHandler.RunTestSuite)
+					r.Get("/{id}/results", evidenceTemplateHandler.GetTestSuiteResults)
+				})
+				r.Post("/pre-audit-check", evidenceTemplateHandler.RunPreAuditCheck)
+				r.Get("/pre-audit-check/{id}/report", evidenceTemplateHandler.GetPreAuditReport)
+			}
+		})
+
+		// Questionnaires
+		r.Route("/questionnaires", func(r chi.Router) {
+			if questionnaireHandler != nil {
+				r.Get("/", questionnaireHandler.ListQuestionnaires)
+				r.Post("/", questionnaireHandler.CreateQuestionnaire)
+				r.Get("/{id}", questionnaireHandler.GetQuestionnaire)
+				r.Put("/{id}", questionnaireHandler.UpdateQuestionnaire)
+				r.Post("/{id}/clone", questionnaireHandler.CloneQuestionnaire)
+			}
+		})
+
+		// Vendor Assessments
+		r.Route("/vendor-assessments", func(r chi.Router) {
+			if questionnaireHandler != nil {
+				r.Get("/", questionnaireHandler.ListVendorAssessments)
+				r.Post("/", questionnaireHandler.CreateVendorAssessment)
+				r.Get("/compare", questionnaireHandler.CompareAssessments)
+				r.Get("/dashboard", questionnaireHandler.GetAssessmentDashboard)
+				r.Get("/{id}", questionnaireHandler.GetVendorAssessment)
+				r.Post("/{id}/review", questionnaireHandler.ReviewVendorAssessment)
+				r.Post("/{id}/reminder", questionnaireHandler.SendReminder)
+			}
+		})
+
+		// Data Privacy / ROPA
+		r.Route("/data", func(r chi.Router) {
+			if ropaHandler != nil {
+				r.Get("/classifications", ropaHandler.ListClassifications)
+				r.Post("/classifications", ropaHandler.CreateClassification)
+				r.Get("/categories", ropaHandler.ListCategories)
+				r.Post("/categories", ropaHandler.CreateCategory)
+				r.Route("/processing-activities", func(r chi.Router) {
+					r.Get("/", ropaHandler.ListProcessingActivities)
+					r.Post("/", ropaHandler.CreateProcessingActivity)
+					r.Route("/{id}", func(r chi.Router) {
+						r.Get("/", ropaHandler.GetProcessingActivity)
+						r.Put("/", ropaHandler.UpdateProcessingActivity)
+						r.Post("/flows", ropaHandler.CreateDataFlows)
+						r.Get("/flow-diagram", ropaHandler.GetFlowDiagram)
+					})
+				})
+				r.Route("/ropa", func(r chi.Router) {
+					r.Post("/export", ropaHandler.ExportROPA)
+					r.Get("/exports", ropaHandler.ListExports)
+					r.Get("/exports/{id}/download", ropaHandler.DownloadExport)
+					r.Get("/dashboard", ropaHandler.GetDashboard)
+				})
+				r.Get("/high-risk", ropaHandler.GetHighRisk)
+				r.Get("/subject-map/{category}", ropaHandler.GetSubjectMap)
+			}
+		})
+
+		// Board Governance
+		r.Route("/board", func(r chi.Router) {
+			if boardHandler != nil {
+				r.Route("/members", func(r chi.Router) {
+					r.Get("/", boardHandler.ListMembers)
+					r.Post("/", boardHandler.CreateMember)
+					r.Put("/{id}", boardHandler.UpdateMember)
+				})
+				r.Route("/meetings", func(r chi.Router) {
+					r.Get("/", boardHandler.ListMeetings)
+					r.Post("/", boardHandler.CreateMeeting)
+					r.Put("/{id}", boardHandler.UpdateMeeting)
+					r.Post("/{id}/generate-pack", boardHandler.GenerateMeetingPack)
+					r.Get("/{id}/download-pack", boardHandler.DownloadMeetingPack)
+				})
+				r.Route("/decisions", func(r chi.Router) {
+					r.Post("/", boardHandler.CreateDecision)
+					r.Get("/", boardHandler.ListDecisions)
+					r.Put("/{id}/action", boardHandler.UpdateDecisionAction)
+				})
+				r.Get("/reports", boardHandler.ListReports)
+				r.Post("/reports/generate", boardHandler.GenerateReport)
+				r.Get("/dashboard", boardHandler.GetBoardDashboard)
+				r.Get("/nis2-governance", boardHandler.GetNIS2Governance)
 			}
 		})
 	})

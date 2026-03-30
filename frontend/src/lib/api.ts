@@ -828,6 +828,112 @@ class ApiClient {
   };
 
   // ========================================================================
+  // EXCEPTIONS
+  // ========================================================================
+
+  exceptions = {
+    list: (params?: any) => this.get<any>('/exceptions', params),
+    get: (id: string) => this.get<any>(`/exceptions/${id}`),
+    create: (data: any) => this.post<any>('/exceptions', data),
+    update: (id: string, data: any) => this.put<any>(`/exceptions/${id}`, data),
+    approve: (id: string, data?: any) => this.post<any>(`/exceptions/${id}/approve`, data),
+    reject: (id: string, data?: any) => this.post<any>(`/exceptions/${id}/reject`, data),
+    revoke: (id: string, data?: any) => this.post<any>(`/exceptions/${id}/revoke`, data),
+    review: (id: string, data?: any) => this.post<any>(`/exceptions/${id}/review`, data),
+    kpi: () => this.get<any>('/exceptions/kpi'),
+  };
+
+  // ========================================================================
+  // EVIDENCE
+  // ========================================================================
+
+  evidence = {
+    listTemplates: (params?: any) => this.get<any>('/evidence/templates', params),
+    getTemplate: (id: string) => this.get<any>(`/evidence/templates/${id}`),
+    listRequirements: (params?: any) => this.get<any>('/evidence/requirements', params),
+    getRequirement: (id: string) => this.get<any>(`/evidence/requirements/${id}`),
+    updateRequirement: (id: string, data: any) => this.put<any>(`/evidence/requirements/${id}`, data),
+    listTestSuites: () => this.get<any>('/evidence/test-suites'),
+    runTestSuite: (id: string) => this.post<any>(`/evidence/test-suites/${id}/run`),
+    runPreAuditCheck: () => this.post<any>('/evidence/pre-audit-check'),
+  };
+
+  // ========================================================================
+  // QUESTIONNAIRES
+  // ========================================================================
+
+  questionnaires = {
+    list: (params?: any) => this.get<any>('/questionnaires', params),
+    get: (id: string) => this.get<any>(`/questionnaires/${id}`),
+    create: (data: any) => this.post<any>('/questionnaires', data),
+    update: (id: string, data: any) => this.put<any>(`/questionnaires/${id}`, data),
+    delete: (id: string) => this.delete<any>(`/questionnaires/${id}`),
+  };
+
+  // ========================================================================
+  // VENDOR ASSESSMENTS
+  // ========================================================================
+
+  vendorAssessments = {
+    list: (params?: any) => this.get<any>('/vendor-assessments', params),
+    get: (id: string) => this.get<any>(`/vendor-assessments/${id}`),
+    send: (data: any) => this.post<any>('/vendor-assessments', data),
+    complete: (id: string, data?: any) => this.post<any>(`/vendor-assessments/${id}/complete`, data),
+    stats: () => this.get<any>('/vendor-assessments/stats'),
+    compare: (params?: any) => this.get<any>('/vendor-assessments/compare', params),
+  };
+
+  // ========================================================================
+  // VENDOR PORTAL (Public / Token-based)
+  // ========================================================================
+
+  vendorPortal = {
+    getQuestionnaire: (token: string) => this.get<any>(`/vendor-portal/questionnaire`, { token }),
+    saveAnswers: (token: string, data: any) => this.post<any>('/vendor-portal/save', data, { signal: undefined }),
+    submit: (token: string, data: any) => this.post<any>('/vendor-portal/submit', data),
+  };
+
+  // ========================================================================
+  // DATA GOVERNANCE
+  // ========================================================================
+
+  data = {
+    dashboard: () => this.get<any>('/data/dashboard'),
+    listActivities: (params?: any) => this.get<any>('/data/activities', params),
+    getActivity: (id: string) => this.get<any>(`/data/activities/${id}`),
+    createActivity: (data: any) => this.post<any>('/data/activities', data),
+    updateActivity: (id: string, data: any) => this.put<any>(`/data/activities/${id}`, data),
+    deleteActivity: (id: string) => this.delete<any>(`/data/activities/${id}`),
+    exportROPA: (params: any) => this.post<any>('/data/export-ropa', params),
+  };
+
+  // ========================================================================
+  // BOARD MANAGEMENT
+  // ========================================================================
+
+  board = {
+    dashboard: () => this.get<any>('/board/dashboard'),
+    listMembers: (params?: any) => this.get<any>('/board/members', params),
+    getMember: (id: string) => this.get<any>(`/board/members/${id}`),
+    listMeetings: (params?: any) => this.get<any>('/board/meetings', params),
+    getMeeting: (id: string) => this.get<any>(`/board/meetings/${id}`),
+    generateBoardPack: (meetingId: string) => this.post<any>(`/board/meetings/${meetingId}/generate-pack`),
+    listDecisions: (params?: any) => this.get<any>('/board/decisions', params),
+    getDecision: (id: string) => this.get<any>(`/board/decisions/${id}`),
+    listReports: (params?: any) => this.get<any>('/board/reports', params),
+    downloadReport: (id: string) => this.get<Blob>(`/board/reports/${id}/download`),
+  };
+
+  // ========================================================================
+  // BOARD PORTAL (Public / Token-based)
+  // ========================================================================
+
+  boardPortal = {
+    getData: (token: string) => this.get<any>('/board-portal', { token }),
+    downloadPack: (token: string, packId: string) => this.get<Blob>(`/board-portal/packs/${packId}/download`, { token }),
+  };
+
+  // ========================================================================
   // DASHBOARD
   // ========================================================================
 
