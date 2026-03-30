@@ -51,6 +51,10 @@ export const NAV_ITEMS = [
   { label: 'BIA', href: '/bia', icon: 'Zap' },
   { label: 'Analytics', href: '/analytics', icon: 'TrendingUp' },
   { label: 'Workflows', href: '/workflows', icon: 'GitPullRequest' },
+  { label: 'Calendar', href: '/calendar', icon: 'CalendarDays' },
+  { label: 'Knowledge Base', href: '/knowledge', icon: 'BookOpen' },
+  { label: 'Activity', href: '/activity', icon: 'Clock' },
+  { label: 'Search', href: '/search', icon: 'Search' },
   { label: 'Notifications', href: '/settings/notifications', icon: 'Bell' },
   { label: 'Settings', href: '/settings', icon: 'Settings' },
 ] as const;

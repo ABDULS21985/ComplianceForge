@@ -934,6 +934,114 @@ class ApiClient {
   };
 
   // ========================================================================
+  // CALENDAR
+  // ========================================================================
+
+  calendar = {
+    list: (params?: any) => this.get<any>('/calendar/events', params),
+    get: (id: string) => this.get<any>(`/calendar/events/${id}`),
+    create: (data: any) => this.post<any>('/calendar/events', data),
+    update: (id: string, data: any) => this.put<any>(`/calendar/events/${id}`, data),
+    delete: (id: string) => this.delete<any>(`/calendar/events/${id}`),
+    upcoming: (params?: any) => this.get<any>('/calendar/upcoming', params),
+    overdue: () => this.get<any>('/calendar/overdue'),
+  };
+
+  // ========================================================================
+  // SEARCH
+  // ========================================================================
+
+  search = {
+    query: (params?: any) => this.get<any>('/search', params),
+    suggest: (params?: any) => this.get<any>('/search/suggest', params),
+    reindex: () => this.post<any>('/search/reindex'),
+  };
+
+  // ========================================================================
+  // KNOWLEDGE BASE
+  // ========================================================================
+
+  knowledge = {
+    list: (params?: any) => this.get<any>('/knowledge/articles', params),
+    get: (id: string) => this.get<any>(`/knowledge/articles/${id}`),
+    create: (data: any) => this.post<any>('/knowledge/articles', data),
+    update: (id: string, data: any) => this.put<any>(`/knowledge/articles/${id}`, data),
+    delete: (id: string) => this.delete<any>(`/knowledge/articles/${id}`),
+    bookmark: (id: string) => this.post<any>(`/knowledge/articles/${id}/bookmark`),
+    unbookmark: (id: string) => this.delete<any>(`/knowledge/articles/${id}/bookmark`),
+    feedback: (id: string, data: any) => this.post<any>(`/knowledge/articles/${id}/feedback`, data),
+    recommended: () => this.get<any>('/knowledge/recommended'),
+    bookmarks: () => this.get<any>('/knowledge/bookmarks'),
+    categories: () => this.get<any>('/knowledge/categories'),
+  };
+
+  // ========================================================================
+  // COLLABORATION
+  // ========================================================================
+
+  collaboration = {
+    listComments: (entityType: string, entityId: string) =>
+      this.get<any>(`/collaboration/comments`, { entity_type: entityType, entity_id: entityId }),
+    addComment: (data: any) => this.post<any>('/collaboration/comments', data),
+    updateComment: (id: string, data: any) => this.put<any>(`/collaboration/comments/${id}`, data),
+    deleteComment: (id: string) => this.delete<any>(`/collaboration/comments/${id}`),
+    listMentions: () => this.get<any>('/collaboration/mentions'),
+    markMentionRead: (id: string) => this.put<any>(`/collaboration/mentions/${id}/read`),
+    listTags: () => this.get<any>('/collaboration/tags'),
+    tagEntity: (data: any) => this.post<any>('/collaboration/tags', data),
+    removeTag: (id: string) => this.delete<any>(`/collaboration/tags/${id}`),
+  };
+
+  // ========================================================================
+  // ACTIVITY
+  // ========================================================================
+
+  activity = {
+    list: (params?: any) => this.get<any>('/activity', params),
+    get: (id: string) => this.get<any>(`/activity/${id}`),
+    markRead: (id: string) => this.put<any>(`/activity/${id}/read`),
+    markAllRead: () => this.put<any>('/activity/read-all'),
+    unreadCount: () => this.get<{ count: number }>('/activity/unread-count'),
+  };
+
+  // ========================================================================
+  // FOLLOWING
+  // ========================================================================
+
+  following = {
+    list: () => this.get<any>('/following'),
+    follow: (data: { entity_type: string; entity_id: string }) => this.post<any>('/following', data),
+    unfollow: (id: string) => this.delete<any>(`/following/${id}`),
+    isFollowing: (entityType: string, entityId: string) =>
+      this.get<{ following: boolean }>('/following/check', { entity_type: entityType, entity_id: entityId }),
+  };
+
+  // ========================================================================
+  // MOBILE
+  // ========================================================================
+
+  mobile = {
+    registerDevice: (data: any) => this.post<any>('/mobile/devices', data),
+    unregisterDevice: (id: string) => this.delete<any>(`/mobile/devices/${id}`),
+    pushPreferences: () => this.get<any>('/mobile/push-preferences'),
+    updatePushPreferences: (data: any) => this.put<any>('/mobile/push-preferences', data),
+    offlineManifest: () => this.get<any>('/mobile/offline-manifest'),
+  };
+
+  // ========================================================================
+  // BRANDING
+  // ========================================================================
+
+  branding = {
+    get: () => this.get<any>('/settings/branding'),
+    update: (data: any) => this.put<any>('/settings/branding', data),
+    uploadLogo: (formData: FormData) => this.post<any>('/settings/branding/logo', formData, { isFormData: true }),
+    setupDomain: (data: any) => this.post<any>('/settings/branding/domain', data),
+    verifyDomain: () => this.post<any>('/settings/branding/domain/verify'),
+    removeDomain: () => this.delete<any>('/settings/branding/domain'),
+  };
+
+  // ========================================================================
   // DASHBOARD
   // ========================================================================
 

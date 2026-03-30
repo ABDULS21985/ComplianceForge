@@ -72,6 +72,11 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 		ropaHandler             *handler.ROPAHandler
 		boardHandler            *handler.BoardHandler
 		boardPortalHandler      *handler.BoardPortalHandler
+		calendarHandler         *handler.CalendarHandler
+		searchHandler           *handler.SearchHandler
+		collaborationHandler    *handler.CollaborationHandler
+		mobileHandler           *handler.MobileHandler
+		brandingHandler         *handler.BrandingHandler
 	)
 
 	// Wire repositories, services, and handlers when implementations are available.
@@ -105,6 +110,21 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 			r.Post("/{token}/responses/{questionId}/evidence", vendorPortalHandler.UploadEvidence)
 			r.Post("/{token}/submit", vendorPortalHandler.Submit)
 			r.Get("/{token}/progress", vendorPortalHandler.GetProgress)
+		}
+	})
+
+	// --- Public calendar iCal feed (token-authenticated, no JWT) ---
+	r.Route("/api/v1/calendar/ical", func(r chi.Router) {
+		if calendarHandler != nil {
+			r.Get("/{token}", calendarHandler.GetICalFeed)
+		}
+	})
+
+	// --- Public branding routes (no authentication required) ---
+	r.Route("/api/v1/branding", func(r chi.Router) {
+		if brandingHandler != nil {
+			r.Get("/", brandingHandler.GetBranding)
+			r.Get("/css", brandingHandler.GetBrandingCSS)
 		}
 	})
 
@@ -709,6 +729,132 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 				r.Post("/reports/generate", boardHandler.GenerateReport)
 				r.Get("/dashboard", boardHandler.GetBoardDashboard)
 				r.Get("/nis2-governance", boardHandler.GetNIS2Governance)
+			}
+		})
+
+		// Calendar & Scheduling
+		r.Route("/calendar", func(r chi.Router) {
+			if calendarHandler != nil {
+				r.Route("/events", func(r chi.Router) {
+					r.Get("/", calendarHandler.ListEvents)
+					r.Post("/", calendarHandler.CreateEvent)
+					r.Get("/{id}", calendarHandler.GetEvent)
+					r.Put("/{id}/complete", calendarHandler.CompleteEvent)
+					r.Put("/{id}/reschedule", calendarHandler.RescheduleEvent)
+					r.Put("/{id}/assign", calendarHandler.AssignEvent)
+				})
+				r.Get("/deadlines", calendarHandler.GetDeadlines)
+				r.Get("/overdue", calendarHandler.GetOverdue)
+				r.Get("/summary", calendarHandler.GetSummary)
+				r.Get("/subscriptions", calendarHandler.GetSubscriptions)
+				r.Put("/subscriptions", calendarHandler.UpdateSubscriptions)
+				r.Route("/sync", func(r chi.Router) {
+					r.Get("/status", calendarHandler.GetSyncStatus)
+					r.Post("/trigger", calendarHandler.TriggerSync)
+				})
+			}
+		})
+
+		// Global Search
+		r.Route("/search", func(r chi.Router) {
+			if searchHandler != nil {
+				r.Get("/", searchHandler.Search)
+				r.Get("/autocomplete", searchHandler.Autocomplete)
+				r.Get("/related/{entityType}/{entityId}", searchHandler.GetRelated)
+				r.Post("/reindex", searchHandler.Reindex)
+			}
+		})
+
+		// Knowledge Base
+		r.Route("/knowledge", func(r chi.Router) {
+			if searchHandler != nil {
+				r.Get("/", searchHandler.SearchKnowledge)
+				r.Get("/recommended", searchHandler.GetRecommendedArticles)
+				r.Get("/for-control/{frameworkCode}/{controlCode}", searchHandler.GetArticlesForControl)
+				r.Get("/bookmarks", searchHandler.ListBookmarks)
+				r.Post("/bookmarks/{articleId}", searchHandler.CreateBookmark)
+				r.Delete("/bookmarks/{articleId}", searchHandler.DeleteBookmark)
+				r.Route("/articles", func(r chi.Router) {
+					r.Post("/", searchHandler.CreateArticle)
+					r.Put("/{id}", searchHandler.UpdateArticle)
+					r.Post("/{id}/feedback", searchHandler.SubmitArticleFeedback)
+				})
+				r.Get("/{slug}", searchHandler.GetKnowledgeArticle)
+			}
+		})
+
+		// Comments
+		r.Route("/comments", func(r chi.Router) {
+			if collaborationHandler != nil {
+				r.Get("/{entityType}/{entityId}", collaborationHandler.ListComments)
+				r.Post("/{entityType}/{entityId}", collaborationHandler.CreateComment)
+				r.Put("/{id}", collaborationHandler.UpdateComment)
+				r.Delete("/{id}", collaborationHandler.DeleteComment)
+				r.Post("/{id}/pin", collaborationHandler.PinComment)
+				r.Post("/{id}/react", collaborationHandler.ReactToComment)
+			}
+		})
+
+		// Activity Feed
+		r.Route("/activity", func(r chi.Router) {
+			if collaborationHandler != nil {
+				r.Get("/feed", collaborationHandler.GetUserFeed)
+				r.Get("/org", collaborationHandler.GetOrgFeed)
+				r.Get("/unread", collaborationHandler.GetUnreadCount)
+				r.Get("/{entityType}/{entityId}", collaborationHandler.GetEntityActivity)
+				r.Post("/{entityType}/{entityId}/mark-read", collaborationHandler.MarkEntityRead)
+			}
+		})
+
+		// Following
+		r.Route("/following", func(r chi.Router) {
+			if collaborationHandler != nil {
+				r.Get("/", collaborationHandler.ListFollowing)
+				r.Post("/{entityType}/{entityId}", collaborationHandler.Follow)
+				r.Delete("/{entityType}/{entityId}", collaborationHandler.Unfollow)
+			}
+		})
+
+		// Mobile
+		r.Route("/mobile", func(r chi.Router) {
+			if mobileHandler != nil {
+				r.Get("/dashboard", mobileHandler.GetDashboard)
+				r.Route("/approvals", func(r chi.Router) {
+					r.Get("/", mobileHandler.ListApprovals)
+					r.Post("/{id}/approve", mobileHandler.ApproveItem)
+					r.Post("/{id}/reject", mobileHandler.RejectItem)
+				})
+				r.Get("/incidents/active", mobileHandler.GetActiveIncidents)
+				r.Get("/deadlines", mobileHandler.GetDeadlines)
+				r.Get("/activity", mobileHandler.GetActivity)
+				r.Route("/push", func(r chi.Router) {
+					r.Post("/register", mobileHandler.RegisterDevice)
+					r.Delete("/unregister", mobileHandler.UnregisterDevice)
+					r.Get("/preferences", mobileHandler.GetPushPreferences)
+					r.Put("/preferences", mobileHandler.UpdatePushPreferences)
+				})
+			}
+		})
+
+		// Branding (authenticated routes)
+		r.Route("/branding", func(r chi.Router) {
+			if brandingHandler != nil {
+				r.Put("/", brandingHandler.UpdateBranding)
+				r.Post("/logo", brandingHandler.UploadLogo)
+				r.Delete("/logo/{type}", brandingHandler.DeleteLogo)
+				r.Post("/domain/verify", brandingHandler.VerifyDomain)
+				r.Get("/domain/status", brandingHandler.GetDomainStatus)
+				r.Post("/preview", brandingHandler.PreviewBranding)
+			}
+		})
+
+		// Admin Partners (white-label)
+		r.Route("/admin/partners", func(r chi.Router) {
+			if brandingHandler != nil {
+				r.Get("/", brandingHandler.ListPartners)
+				r.Post("/", brandingHandler.CreatePartner)
+				r.Put("/{id}", brandingHandler.UpdatePartner)
+				r.Get("/{id}/tenants", brandingHandler.GetPartnerTenants)
 			}
 		})
 	})
