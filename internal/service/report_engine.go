@@ -4,17 +4,487 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/complianceforge/platform/internal/models"
+	"github.com/complianceforge/platform/internal/pkg/pdf"
+	"github.com/complianceforge/platform/internal/pkg/xlsx"
 )
 
-// ReportEngine generates compliance reports in various formats.
-type ReportEngine struct {
+// ReportEngineService generates compliance reports in PDF, XLSX, CSV, and JSON
+// formats. It implements models.ReportEngine.
+type ReportEngineService struct {
 	pool *pgxpool.Pool
+	pdf  *pdf.ReportPDFGenerator
+	xlsx *xlsx.ExcelizeGenerator
+
+	// In-memory file cache keyed by run ID. In production this would be backed
+	// by object storage (S3/GCS). Entries are evicted after fileRetention.
+	fileMu    sync.RWMutex
+	fileCache map[string]cachedFile
 }
+
+type cachedFile struct {
+	Data        []byte
+	ContentType string
+	FileName    string
+	CreatedAt   time.Time
+}
+
+// Verify interface satisfaction at compile time.
+var _ models.ReportEngine = (*ReportEngineService)(nil)
+
+// NewReportEngineService creates a new report engine with PDF and XLSX renderers.
+func NewReportEngineService(pool *pgxpool.Pool, companyName, logoPath, classification string) *ReportEngineService {
+	return &ReportEngineService{
+		pool:      pool,
+		pdf:       pdf.NewReportPDFGenerator(companyName, logoPath, classification),
+		xlsx:      xlsx.NewExcelizeGenerator(companyName, classification),
+		fileCache: make(map[string]cachedFile),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Report Generation
+// ---------------------------------------------------------------------------
+
+// GenerateReport handles ad-hoc report generation. It gathers data, renders to
+// the requested format (pdf, xlsx, csv, json), and stores the result.
+func (re *ReportEngineService) GenerateReport(ctx context.Context, orgID, userID string, req *models.GenerateReportRequest) (*models.ReportRun, error) {
+	startTime := time.Now()
+	format := req.Format
+	if format == "" {
+		format = "pdf"
+	}
+
+	// Create the report_runs record in 'generating' status.
+	var runID string
+	var createdAt time.Time
+	err := re.pool.QueryRow(ctx, `
+		INSERT INTO report_runs (organization_id, report_definition_id, status, format, generated_by, parameters)
+		VALUES ($1, NULL, 'generating', $2, $3, $4)
+		RETURNING id, created_at`,
+		orgID, format, userID, "{}",
+	).Scan(&runID, &createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("create report run: %w", err)
+	}
+
+	run := &models.ReportRun{
+		ID:             runID,
+		OrganizationID: orgID,
+		ReportType:     req.ReportType,
+		Title:          req.Title,
+		Format:         format,
+		Status:         "generating",
+		CreatedBy:      userID,
+		CreatedAt:      createdAt.Format(time.RFC3339),
+	}
+
+	// Gather data based on report type.
+	reportData, gatherErr := re.gatherData(ctx, orgID, req.ReportType, req.Parameters)
+	if gatherErr != nil {
+		re.failRun(ctx, orgID, runID, run, gatherErr)
+		return run, gatherErr
+	}
+
+	if req.Title != "" {
+		reportData.Title = req.Title
+	}
+
+	// Render to the requested format.
+	fileBytes, contentType, ext, renderErr := re.renderReport(reportData, req.ReportType, format)
+	if renderErr != nil {
+		re.failRun(ctx, orgID, runID, run, renderErr)
+		return run, renderErr
+	}
+
+	// Store the file.
+	fileName := fmt.Sprintf("%s_%s.%s", req.ReportType, time.Now().Format("20060102_150405"), ext)
+	re.storeFile(runID, fileBytes, contentType, fileName)
+
+	// Update run record.
+	elapsed := int(time.Since(startTime).Milliseconds())
+	fileSize := int64(len(fileBytes))
+	filePath := fmt.Sprintf("reports/%s/%s.%s", orgID, runID, ext)
+	now := time.Now()
+	_, _ = re.pool.Exec(ctx, `
+		UPDATE report_runs
+		SET status = 'completed', file_path = $1, file_size_bytes = $2,
+		    generation_time_ms = $3, completed_at = $4
+		WHERE id = $5 AND organization_id = $6`,
+		filePath, fileSize, elapsed, now, runID, orgID)
+
+	run.Status = "completed"
+	run.FileURL = fmt.Sprintf("/api/v1/reports/download/%s", runID)
+	run.CompletedAt = now.Format(time.RFC3339)
+
+	log.Info().
+		Str("run_id", runID).
+		Str("report_type", req.ReportType).
+		Str("format", format).
+		Int("generation_time_ms", elapsed).
+		Int64("file_size", fileSize).
+		Msg("report generated successfully")
+
+	return run, nil
+}
+
+// GetRunStatus retrieves the current status of a report run.
+func (re *ReportEngineService) GetRunStatus(ctx context.Context, orgID, runID string) (*models.ReportRun, error) {
+	var run models.ReportRun
+	var createdAt time.Time
+	var completedAt *time.Time
+	var fileURL, errMsg *string
+	err := re.pool.QueryRow(ctx, `
+		SELECT id, organization_id, COALESCE(report_definition_id::text, ''), status, format,
+		       file_path, error_message, COALESCE(generated_by::text, ''), created_at, completed_at
+		FROM report_runs
+		WHERE id = $1 AND organization_id = $2`, runID, orgID,
+	).Scan(&run.ID, &run.OrganizationID, &run.DefinitionID, &run.Status, &run.Format,
+		&fileURL, &errMsg, &run.CreatedBy, &createdAt, &completedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("report run not found")
+		}
+		return nil, fmt.Errorf("get report run: %w", err)
+	}
+	run.CreatedAt = createdAt.Format(time.RFC3339)
+	if completedAt != nil {
+		run.CompletedAt = completedAt.Format(time.RFC3339)
+	}
+	if fileURL != nil {
+		run.FileURL = fmt.Sprintf("/api/v1/reports/download/%s", runID)
+	}
+	if errMsg != nil {
+		run.Error = *errMsg
+	}
+	return &run, nil
+}
+
+// DownloadReport returns the generated report file for download.
+func (re *ReportEngineService) DownloadReport(ctx context.Context, orgID, runID string) (*models.ReportFile, error) {
+	// Verify the run belongs to this org and is completed.
+	var status string
+	err := re.pool.QueryRow(ctx, `
+		SELECT status FROM report_runs
+		WHERE id = $1 AND organization_id = $2`, runID, orgID,
+	).Scan(&status)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("report run not found")
+		}
+		return nil, fmt.Errorf("check report run: %w", err)
+	}
+	if status != "completed" {
+		return nil, fmt.Errorf("report is not yet completed (status: %s)", status)
+	}
+
+	re.fileMu.RLock()
+	f, ok := re.fileCache[runID]
+	re.fileMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("report file not found in cache (may have expired)")
+	}
+
+	return &models.ReportFile{
+		FileName:    f.FileName,
+		ContentType: f.ContentType,
+		Data:        f.Data,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Definitions CRUD
+// ---------------------------------------------------------------------------
+
+func (re *ReportEngineService) ListDefinitions(ctx context.Context, orgID string, pagination models.PaginationRequest) ([]models.ReportDefinition, int, error) {
+	page, pageSize := normalizePagination(pagination.Page, pagination.PageSize)
+	offset := (page - 1) * pageSize
+
+	var total int
+	if err := re.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM report_definitions WHERE organization_id = $1`, orgID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count definitions: %w", err)
+	}
+
+	rows, err := re.pool.Query(ctx, `
+		SELECT id, organization_id, name, report_type, COALESCE(format, 'pdf'),
+		       COALESCE(created_by::text, ''), created_at, updated_at
+		FROM report_definitions
+		WHERE organization_id = $1
+		ORDER BY name
+		LIMIT $2 OFFSET $3`, orgID, pageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list definitions: %w", err)
+	}
+	defer rows.Close()
+
+	var defs []models.ReportDefinition
+	for rows.Next() {
+		var d models.ReportDefinition
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&d.ID, &d.OrganizationID, &d.Name, &d.ReportType, &d.Format,
+			&d.CreatedBy, &createdAt, &updatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan definition: %w", err)
+		}
+		d.CreatedAt = createdAt.Format(time.RFC3339)
+		d.UpdatedAt = updatedAt.Format(time.RFC3339)
+		defs = append(defs, d)
+	}
+	return defs, total, nil
+}
+
+func (re *ReportEngineService) CreateDefinition(ctx context.Context, orgID, userID string, def *models.ReportDefinition) error {
+	params, _ := json.Marshal(def.Parameters)
+	if def.Format == "" {
+		def.Format = "pdf"
+	}
+	var id string
+	var createdAt time.Time
+	err := re.pool.QueryRow(ctx, `
+		INSERT INTO report_definitions (organization_id, name, report_type, format, filters, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at`,
+		orgID, def.Name, def.ReportType, def.Format, params, userID,
+	).Scan(&id, &createdAt)
+	if err != nil {
+		return fmt.Errorf("create definition: %w", err)
+	}
+	def.ID = id
+	def.OrganizationID = orgID
+	def.CreatedBy = userID
+	def.CreatedAt = createdAt.Format(time.RFC3339)
+	return nil
+}
+
+func (re *ReportEngineService) GetDefinition(ctx context.Context, orgID, defID string) (*models.ReportDefinition, error) {
+	var d models.ReportDefinition
+	var paramsJSON []byte
+	var createdAt, updatedAt time.Time
+	err := re.pool.QueryRow(ctx, `
+		SELECT id, organization_id, name, report_type, COALESCE(format, 'pdf'),
+		       filters, COALESCE(created_by::text, ''), created_at, updated_at
+		FROM report_definitions
+		WHERE id = $1 AND organization_id = $2`, defID, orgID,
+	).Scan(&d.ID, &d.OrganizationID, &d.Name, &d.ReportType, &d.Format,
+		&paramsJSON, &d.CreatedBy, &createdAt, &updatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("definition not found")
+		}
+		return nil, fmt.Errorf("get definition: %w", err)
+	}
+	_ = json.Unmarshal(paramsJSON, &d.Parameters)
+	d.CreatedAt = createdAt.Format(time.RFC3339)
+	d.UpdatedAt = updatedAt.Format(time.RFC3339)
+	return &d, nil
+}
+
+func (re *ReportEngineService) UpdateDefinition(ctx context.Context, orgID string, def *models.ReportDefinition) error {
+	params, _ := json.Marshal(def.Parameters)
+	result, err := re.pool.Exec(ctx, `
+		UPDATE report_definitions
+		SET name = $1, report_type = $2, format = $3, filters = $4, updated_at = NOW()
+		WHERE id = $5 AND organization_id = $6`,
+		def.Name, def.ReportType, def.Format, params, def.ID, orgID)
+	if err != nil {
+		return fmt.Errorf("update definition: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("definition not found")
+	}
+	return nil
+}
+
+func (re *ReportEngineService) DeleteDefinition(ctx context.Context, orgID, defID string) error {
+	result, err := re.pool.Exec(ctx, `
+		DELETE FROM report_definitions WHERE id = $1 AND organization_id = $2`,
+		defID, orgID)
+	if err != nil {
+		return fmt.Errorf("delete definition: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("definition not found")
+	}
+	return nil
+}
+
+func (re *ReportEngineService) GenerateFromDefinition(ctx context.Context, orgID, userID, defID string) (*models.ReportRun, error) {
+	def, err := re.GetDefinition(ctx, orgID, defID)
+	if err != nil {
+		return nil, err
+	}
+	return re.GenerateReport(ctx, orgID, userID, &models.GenerateReportRequest{
+		ReportType: def.ReportType,
+		Title:      def.Name,
+		Format:     def.Format,
+		Parameters: def.Parameters,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Schedules CRUD
+// ---------------------------------------------------------------------------
+
+func (re *ReportEngineService) ListSchedules(ctx context.Context, orgID string, pagination models.PaginationRequest) ([]models.ReportSchedule, int, error) {
+	page, pageSize := normalizePagination(pagination.Page, pagination.PageSize)
+	offset := (page - 1) * pageSize
+
+	var total int
+	if err := re.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM report_schedules WHERE organization_id = $1`, orgID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count schedules: %w", err)
+	}
+
+	rows, err := re.pool.Query(ctx, `
+		SELECT id, organization_id, report_definition_id,
+		       COALESCE(frequency::text, ''), is_active,
+		       COALESCE(created_by::text, ''), created_at, updated_at, next_run_at
+		FROM report_schedules
+		WHERE organization_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3`, orgID, pageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list schedules: %w", err)
+	}
+	defer rows.Close()
+
+	var schedules []models.ReportSchedule
+	for rows.Next() {
+		var s models.ReportSchedule
+		var createdAt, updatedAt time.Time
+		var nextRunAt *time.Time
+		if err := rows.Scan(&s.ID, &s.OrganizationID, &s.DefinitionID,
+			&s.CronExpr, &s.Enabled,
+			&s.CreatedBy, &createdAt, &updatedAt, &nextRunAt); err != nil {
+			return nil, 0, fmt.Errorf("scan schedule: %w", err)
+		}
+		s.CreatedAt = createdAt.Format(time.RFC3339)
+		s.UpdatedAt = updatedAt.Format(time.RFC3339)
+		if nextRunAt != nil {
+			s.NextRunAt = nextRunAt.Format(time.RFC3339)
+		}
+		schedules = append(schedules, s)
+	}
+	return schedules, total, nil
+}
+
+func (re *ReportEngineService) CreateSchedule(ctx context.Context, orgID, userID string, sched *models.ReportSchedule) error {
+	recipients, _ := json.Marshal(sched.Recipients)
+	var id string
+	var createdAt time.Time
+	err := re.pool.QueryRow(ctx, `
+		INSERT INTO report_schedules (organization_id, report_definition_id, frequency,
+		    is_active, recipient_user_ids, created_by, next_run_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '1 hour')
+		RETURNING id, created_at`,
+		orgID, sched.DefinitionID, sched.CronExpr, sched.Enabled, recipients, userID,
+	).Scan(&id, &createdAt)
+	if err != nil {
+		return fmt.Errorf("create schedule: %w", err)
+	}
+	sched.ID = id
+	sched.OrganizationID = orgID
+	sched.CreatedBy = userID
+	sched.CreatedAt = createdAt.Format(time.RFC3339)
+	return nil
+}
+
+func (re *ReportEngineService) UpdateSchedule(ctx context.Context, orgID string, sched *models.ReportSchedule) error {
+	recipients, _ := json.Marshal(sched.Recipients)
+	result, err := re.pool.Exec(ctx, `
+		UPDATE report_schedules
+		SET report_definition_id = $1, frequency = $2, is_active = $3,
+		    recipient_user_ids = $4, updated_at = NOW()
+		WHERE id = $5 AND organization_id = $6`,
+		sched.DefinitionID, sched.CronExpr, sched.Enabled, recipients, sched.ID, orgID)
+	if err != nil {
+		return fmt.Errorf("update schedule: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("schedule not found")
+	}
+	return nil
+}
+
+func (re *ReportEngineService) DeleteSchedule(ctx context.Context, orgID, schedID string) error {
+	result, err := re.pool.Exec(ctx, `
+		DELETE FROM report_schedules WHERE id = $1 AND organization_id = $2`,
+		schedID, orgID)
+	if err != nil {
+		return fmt.Errorf("delete schedule: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("schedule not found")
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+func (re *ReportEngineService) ListHistory(ctx context.Context, orgID string, pagination models.PaginationRequest) ([]models.ReportRun, int, error) {
+	page, pageSize := normalizePagination(pagination.Page, pagination.PageSize)
+	offset := (page - 1) * pageSize
+
+	var total int
+	if err := re.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM report_runs WHERE organization_id = $1`, orgID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count runs: %w", err)
+	}
+
+	rows, err := re.pool.Query(ctx, `
+		SELECT id, organization_id, COALESCE(report_definition_id::text, ''),
+		       status, format, file_path, error_message,
+		       COALESCE(generated_by::text, ''), created_at, completed_at
+		FROM report_runs
+		WHERE organization_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3`, orgID, pageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []models.ReportRun
+	for rows.Next() {
+		var r models.ReportRun
+		var fileURL, errMsg *string
+		var createdAt time.Time
+		var completedAt *time.Time
+		if err := rows.Scan(&r.ID, &r.OrganizationID, &r.DefinitionID,
+			&r.Status, &r.Format, &fileURL, &errMsg,
+			&r.CreatedBy, &createdAt, &completedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan run: %w", err)
+		}
+		r.CreatedAt = createdAt.Format(time.RFC3339)
+		if completedAt != nil {
+			r.CompletedAt = completedAt.Format(time.RFC3339)
+		}
+		if fileURL != nil {
+			r.FileURL = fmt.Sprintf("/api/v1/reports/download/%s", r.ID)
+		}
+		if errMsg != nil {
+			r.Error = *errMsg
+		}
+		runs = append(runs, r)
+	}
+	return runs, total, nil
+}
+
+// ---------------------------------------------------------------------------
+// Internal: Data Gathering
+// ---------------------------------------------------------------------------
 
 // ReportData holds all data needed to render a report.
 type ReportData struct {
@@ -34,151 +504,235 @@ type ReportSection struct {
 	Content interface{} `json:"content"`
 }
 
-// ReportDefinition is a reusable report configuration.
-type ReportDefinition struct {
-	ID             string                   `json:"id"`
-	OrgID          string                   `json:"organization_id"`
-	Name           string                   `json:"name"`
-	Description    string                   `json:"description"`
-	ReportType     string                   `json:"report_type"`
-	Format         string                   `json:"format"`
-	Filters        map[string]interface{}   `json:"filters"`
-	Sections       []map[string]interface{} `json:"sections"`
-	Classification string                   `json:"classification"`
-	CreatedBy      string                   `json:"created_by"`
-}
-
-// ReportRun represents a single report generation attempt.
-type ReportRun struct {
-	ID            string     `json:"id"`
-	DefinitionID  string     `json:"report_definition_id"`
-	ScheduleID    *string    `json:"schedule_id"`
-	Status        string     `json:"status"`
-	Format        string     `json:"format"`
-	FilePath      *string    `json:"file_path"`
-	FileSizeBytes *int64     `json:"file_size_bytes"`
-	PageCount     *int       `json:"page_count"`
-	GenTimeMs     *int       `json:"generation_time_ms"`
-	GeneratedBy   *string    `json:"generated_by"`
-	ErrorMessage  *string    `json:"error_message"`
-	CreatedAt     time.Time  `json:"created_at"`
-	CompletedAt   *time.Time `json:"completed_at"`
-}
-
-// NewReportEngine creates a new ReportEngine.
-func NewReportEngine(pool *pgxpool.Pool) *ReportEngine {
-	return &ReportEngine{pool: pool}
-}
-
-// GenerateReport creates a report run, gathers data, writes a JSON export, and
-// returns the completed run record.
-func (re *ReportEngine) GenerateReport(ctx context.Context, orgID string, definition ReportDefinition) (*ReportRun, error) {
-	startTime := time.Now()
-
-	// Create the report_runs record in 'generating' status.
-	var run ReportRun
-	err := re.pool.QueryRow(ctx, `
-		INSERT INTO report_runs (organization_id, report_definition_id, status, format, generated_by, parameters)
-		VALUES ($1, $2, 'generating', $3, $4, $5)
-		RETURNING id, report_definition_id, status, format, generated_by, created_at`,
-		orgID, definition.ID, definition.Format, definition.CreatedBy, "{}",
-	).Scan(&run.ID, &run.DefinitionID, &run.Status, &run.Format, &run.GeneratedBy, &run.CreatedAt)
-	if err != nil {
-		log.Error().Err(err).Str("org_id", orgID).Msg("failed to create report run")
-		return nil, fmt.Errorf("create report run: %w", err)
-	}
-
-	// Gather report data based on report type.
-	var reportData *ReportData
-	var gatherErr error
-
-	switch definition.ReportType {
-	case "compliance_status", "gap_analysis":
-		reportData, gatherErr = re.GetComplianceReportData(ctx, orgID, definition.Filters)
+func (re *ReportEngineService) gatherData(ctx context.Context, orgID, reportType string, params map[string]interface{}) (*ReportData, error) {
+	switch reportType {
+	case "compliance_status", "gap_analysis", "cross_framework_mapping":
+		return re.getComplianceReportData(ctx, orgID, params)
 	case "risk_register", "risk_heatmap", "kri_dashboard", "treatment_progress":
-		reportData, gatherErr = re.GetRiskReportData(ctx, orgID, definition.Filters)
+		return re.getRiskReportData(ctx, orgID, params)
+	case "audit_summary", "audit_findings":
+		return re.getAuditReportData(ctx, orgID, params)
 	case "executive_summary":
-		reportData, gatherErr = re.GetExecutiveSummaryData(ctx, orgID)
+		return re.getExecutiveSummaryData(ctx, orgID)
 	default:
-		reportData, gatherErr = re.GetComplianceReportData(ctx, orgID, definition.Filters)
+		return re.getComplianceReportData(ctx, orgID, params)
 	}
-
-	if gatherErr != nil {
-		errMsg := gatherErr.Error()
-		now := time.Now()
-		_, _ = re.pool.Exec(ctx, `
-			UPDATE report_runs SET status = 'failed', error_message = $1, completed_at = $2
-			WHERE id = $3 AND organization_id = $4`,
-			errMsg, now, run.ID, orgID)
-		run.Status = "failed"
-		run.ErrorMessage = &errMsg
-		run.CompletedAt = &now
-		log.Error().Err(gatherErr).Str("run_id", run.ID).Msg("report data gathering failed")
-		return &run, gatherErr
-	}
-
-	// Serialize to JSON as the output artifact.
-	reportJSON, err := json.MarshalIndent(reportData, "", "  ")
-	if err != nil {
-		errMsg := err.Error()
-		now := time.Now()
-		_, _ = re.pool.Exec(ctx, `
-			UPDATE report_runs SET status = 'failed', error_message = $1, completed_at = $2
-			WHERE id = $3 AND organization_id = $4`,
-			errMsg, now, run.ID, orgID)
-		run.Status = "failed"
-		run.ErrorMessage = &errMsg
-		run.CompletedAt = &now
-		return &run, fmt.Errorf("serialize report: %w", err)
-	}
-
-	// Compute file metadata.
-	elapsedMs := int(time.Since(startTime).Milliseconds())
-	fileSize := int64(len(reportJSON))
-	filePath := fmt.Sprintf("reports/%s/%s.json", orgID, run.ID)
-	now := time.Now()
-
-	// Update run with completion status.
-	_, err = re.pool.Exec(ctx, `
-		UPDATE report_runs
-		SET status = 'completed', file_path = $1, file_size_bytes = $2,
-		    generation_time_ms = $3, completed_at = $4
-		WHERE id = $5 AND organization_id = $6`,
-		filePath, fileSize, elapsedMs, now, run.ID, orgID)
-	if err != nil {
-		log.Error().Err(err).Str("run_id", run.ID).Msg("failed to update report run status")
-		return nil, fmt.Errorf("update report run: %w", err)
-	}
-
-	run.Status = "completed"
-	run.FilePath = &filePath
-	run.FileSizeBytes = &fileSize
-	run.GenTimeMs = &elapsedMs
-	run.CompletedAt = &now
-
-	log.Info().
-		Str("run_id", run.ID).
-		Str("report_type", definition.ReportType).
-		Int("generation_time_ms", elapsedMs).
-		Msg("report generated successfully")
-
-	return &run, nil
 }
 
-// GetComplianceReportData queries compliance scores, control implementations,
-// gap analysis, and maturity levels for a comprehensive compliance report.
-func (re *ReportEngine) GetComplianceReportData(ctx context.Context, orgID string, filters map[string]interface{}) (*ReportData, error) {
+// ---------------------------------------------------------------------------
+// Internal: Format Rendering
+// ---------------------------------------------------------------------------
+
+// renderReport converts gathered ReportData into the requested output format.
+func (re *ReportEngineService) renderReport(data *ReportData, reportType, format string) ([]byte, string, string, error) {
+	renderData := re.buildRenderData(data)
+
+	switch format {
+	case "pdf":
+		return re.renderPDF(renderData, reportType)
+	case "xlsx":
+		return re.renderXLSX(renderData, reportType)
+	case "csv":
+		// XLSX generator output is also suitable; for true CSV the caller
+		// can use JSON export. Re-use XLSX for structured output.
+		return re.renderXLSX(renderData, reportType)
+	case "json":
+		return re.renderJSON(data)
+	default:
+		return re.renderPDF(renderData, reportType)
+	}
+}
+
+func (re *ReportEngineService) renderPDF(data map[string]interface{}, reportType string) ([]byte, string, string, error) {
+	var bytes []byte
+	var err error
+
+	switch reportType {
+	case "risk_register", "risk_heatmap", "kri_dashboard", "treatment_progress":
+		bytes, err = re.pdf.GenerateRiskReport(data)
+	case "audit_summary", "audit_findings":
+		bytes, err = re.pdf.GenerateAuditReport(data)
+	default:
+		bytes, err = re.pdf.GenerateComplianceReport(data)
+	}
+
+	if err != nil {
+		return nil, "", "", fmt.Errorf("render PDF: %w", err)
+	}
+	return bytes, "application/pdf", "pdf", nil
+}
+
+func (re *ReportEngineService) renderXLSX(data map[string]interface{}, reportType string) ([]byte, string, string, error) {
+	var bytes []byte
+	var err error
+
+	switch reportType {
+	case "risk_register", "risk_heatmap", "kri_dashboard", "treatment_progress":
+		bytes, err = re.xlsx.GenerateRiskReport(data)
+	case "audit_summary", "audit_findings":
+		bytes, err = re.xlsx.GenerateAuditReport(data)
+	default:
+		bytes, err = re.xlsx.GenerateComplianceReport(data)
+	}
+
+	if err != nil {
+		return nil, "", "", fmt.Errorf("render XLSX: %w", err)
+	}
+	return bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx", nil
+}
+
+func (re *ReportEngineService) renderJSON(data *ReportData) ([]byte, string, string, error) {
+	bytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return nil, "", "", fmt.Errorf("render JSON: %w", err)
+	}
+	return bytes, "application/json", "json", nil
+}
+
+// buildRenderData converts the internal ReportData into the flat
+// map[string]interface{} format that the PDF and XLSX generators expect.
+func (re *ReportEngineService) buildRenderData(data *ReportData) map[string]interface{} {
+	result := map[string]interface{}{
+		"title":          data.Title,
+		"organization":   data.Organization,
+		"generated_at":   data.GeneratedAt,
+		"classification": data.Classification,
+	}
+
+	for _, section := range data.Sections {
+		switch section.Title {
+		case "Framework Compliance Scores":
+			result["framework_scores"] = section.Content
+			if scores, ok := section.Content.([]map[string]interface{}); ok {
+				result["frameworks_count"] = len(scores)
+				totalControls := 0
+				var totalScore float64
+				for _, s := range scores {
+					if tc, ok := s["total_controls"].(int); ok {
+						totalControls += tc
+					}
+					if sc, ok := s["compliance_score"].(float64); ok {
+						totalScore += sc
+					}
+				}
+				result["total_controls"] = totalControls
+				if len(scores) > 0 {
+					result["overall_score"] = totalScore / float64(len(scores))
+				}
+			}
+		case "Gap Analysis":
+			result["gaps"] = section.Content
+		case "Risk Register":
+			result["top_risks"] = section.Content
+			if risks, ok := section.Content.([]map[string]interface{}); ok {
+				result["total_risks"] = len(risks)
+				critical := 0
+				for _, r := range risks {
+					if l, ok := r["level"].(string); ok && l == "critical" {
+						critical++
+					}
+				}
+				result["critical_count"] = critical
+			}
+		case "Risk Summary by Level":
+			result["risk_summary"] = section.Content
+		case "Active Risk Treatments":
+			result["treatment_summary"] = section.Content
+			if treatments, ok := section.Content.([]map[string]interface{}); ok {
+				completed := 0
+				total := len(treatments)
+				for _, t := range treatments {
+					if s, ok := t["status"].(string); ok && s == "completed" {
+						completed++
+					}
+				}
+				if total > 0 {
+					result["treatment_completion_rate"] = float64(completed) / float64(total) * 100
+				} else {
+					result["treatment_completion_rate"] = 0.0
+				}
+			}
+		case "Key Risk Indicators":
+			result["kris"] = section.Content
+		case "Audit Findings":
+			if items, ok := section.Content.([]map[string]interface{}); ok {
+				result["findings"] = items
+				result["total_findings"] = len(items)
+				critical, high, open := 0, 0, 0
+				for _, item := range items {
+					if s, ok := item["severity"].(string); ok {
+						if s == "critical" {
+							critical++
+						}
+						if s == "high" {
+							high++
+						}
+					}
+					if s, ok := item["status"].(string); ok && (s == "open" || s == "in_progress") {
+						open++
+					}
+				}
+				result["critical_findings"] = critical
+				result["high_findings"] = high
+				result["open_findings"] = open
+			} else {
+				// KPI-style findings from executive summary
+				result["findings_kpi"] = section.Content
+			}
+		}
+	}
+	return result
+}
+
+// ---------------------------------------------------------------------------
+// Internal: File Storage & Helpers
+// ---------------------------------------------------------------------------
+
+func (re *ReportEngineService) storeFile(runID string, data []byte, contentType, fileName string) {
+	re.fileMu.Lock()
+	defer re.fileMu.Unlock()
+	re.fileCache[runID] = cachedFile{
+		Data:        data,
+		ContentType: contentType,
+		FileName:    fileName,
+		CreatedAt:   time.Now(),
+	}
+}
+
+func (re *ReportEngineService) failRun(ctx context.Context, orgID, runID string, run *models.ReportRun, err error) {
+	errMsg := err.Error()
+	now := time.Now()
+	_, _ = re.pool.Exec(ctx, `
+		UPDATE report_runs SET status = 'failed', error_message = $1, completed_at = $2
+		WHERE id = $3 AND organization_id = $4`,
+		errMsg, now, runID, orgID)
+	run.Status = "failed"
+	run.Error = errMsg
+	run.CompletedAt = now.Format(time.RFC3339)
+}
+
+func normalizePagination(page, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	return page, pageSize
+}
+
+// ---------------------------------------------------------------------------
+// Internal: Data Queries
+// ---------------------------------------------------------------------------
+
+func (re *ReportEngineService) getComplianceReportData(ctx context.Context, orgID string, filters map[string]interface{}) (*ReportData, error) {
 	data := &ReportData{
 		Title:          "Compliance Status Report",
 		GeneratedAt:    time.Now(),
 		Classification: "internal",
-		Format:         "json",
 	}
-
-	// Get organization name.
 	_ = re.pool.QueryRow(ctx, `SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&data.Organization)
 
-	// Section 1: Framework compliance scores.
 	rows, err := re.pool.Query(ctx, `
 		SELECT cf.name, of.compliance_score, of.status,
 		       COUNT(ci.id) AS total_controls,
@@ -207,58 +761,22 @@ func (re *ReportEngine) GetComplianceReportData(ctx context.Context, orgID strin
 			return nil, fmt.Errorf("scan framework score: %w", err)
 		}
 		frameworkScores = append(frameworkScores, map[string]interface{}{
-			"framework":       name,
-			"score":           score,
-			"status":          status,
-			"total_controls":  total,
-			"effective":       effective,
-			"implemented":     implemented,
-			"partial":         partial,
-			"not_implemented": notImpl,
-			"not_applicable":  notApplicable,
+			"framework_name":        name,
+			"framework_version":     "",
+			"compliance_score":      score,
+			"status":                status,
+			"total_controls":        total,
+			"implemented_count":     effective + implemented,
+			"partial_count":         partial,
+			"not_implemented_count": notImpl,
+			"not_applicable_count":  notApplicable,
+			"avg_maturity_level":    0.0,
 		})
 	}
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Framework Compliance Scores",
-		Type:    "table",
-		Content: frameworkScores,
+		Title: "Framework Compliance Scores", Type: "table", Content: frameworkScores,
 	})
 
-	// Section 2: Maturity distribution.
-	maturityRows, err := re.pool.Query(ctx, `
-		SELECT maturity_level, COUNT(*) AS count
-		FROM control_implementations
-		WHERE organization_id = $1 AND deleted_at IS NULL
-		GROUP BY maturity_level
-		ORDER BY maturity_level`, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("query maturity: %w", err)
-	}
-	defer maturityRows.Close()
-
-	maturityDist := make(map[string]int)
-	maturityLabels := map[int]string{
-		0: "Non-existent", 1: "Initial", 2: "Managed",
-		3: "Defined", 4: "Quantitatively Managed", 5: "Optimizing",
-	}
-	for maturityRows.Next() {
-		var level, count int
-		if err := maturityRows.Scan(&level, &count); err != nil {
-			return nil, fmt.Errorf("scan maturity: %w", err)
-		}
-		label := maturityLabels[level]
-		if label == "" {
-			label = fmt.Sprintf("Level %d", level)
-		}
-		maturityDist[label] = count
-	}
-	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Control Maturity Distribution",
-		Type:    "chart",
-		Content: maturityDist,
-	})
-
-	// Section 3: Gap analysis — controls with gaps.
 	gapRows, err := re.pool.Query(ctx, `
 		SELECT fc.control_code, fc.title, ci.gap_description, ci.remediation_plan, ci.remediation_due_date
 		FROM control_implementations ci
@@ -281,9 +799,15 @@ func (re *ReportEngine) GetComplianceReportData(ctx context.Context, orgID strin
 			return nil, fmt.Errorf("scan gap: %w", err)
 		}
 		g := map[string]interface{}{
-			"control_code":    code,
-			"control_title":   title,
-			"gap_description": gapDesc,
+			"control_code":          code,
+			"control_title":         title,
+			"framework_name":        "",
+			"status":                "gap",
+			"risk_if_not_implemented": "high",
+			"owner_name":            "",
+		}
+		if gapDesc != nil {
+			g["gap_description"] = *gapDesc
 		}
 		if remPlan != nil {
 			g["remediation_plan"] = *remPlan
@@ -294,26 +818,20 @@ func (re *ReportEngine) GetComplianceReportData(ctx context.Context, orgID strin
 		gaps = append(gaps, g)
 	}
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Gap Analysis",
-		Type:    "table",
-		Content: gaps,
+		Title: "Gap Analysis", Type: "table", Content: gaps,
 	})
 
 	return data, nil
 }
 
-// GetRiskReportData queries risks, heatmap data, treatments, and KRIs.
-func (re *ReportEngine) GetRiskReportData(ctx context.Context, orgID string, filters map[string]interface{}) (*ReportData, error) {
+func (re *ReportEngineService) getRiskReportData(ctx context.Context, orgID string, filters map[string]interface{}) (*ReportData, error) {
 	data := &ReportData{
 		Title:          "Risk Assessment Report",
 		GeneratedAt:    time.Now(),
 		Classification: "internal",
-		Format:         "json",
 	}
-
 	_ = re.pool.QueryRow(ctx, `SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&data.Organization)
 
-	// Section 1: Risk heatmap data.
 	rows, err := re.pool.Query(ctx, `
 		SELECT id, title, risk_category, likelihood, impact, risk_score, risk_level,
 		       mitigation_status, owner_user_id
@@ -334,24 +852,28 @@ func (re *ReportEngine) GetRiskReportData(ctx context.Context, orgID string, fil
 		if err := rows.Scan(&id, &title, &category, &likelihood, &impact, &score, &level, &mitStatus, &ownerID); err != nil {
 			return nil, fmt.Errorf("scan risk: %w", err)
 		}
+		ref := id
+		if len(ref) > 8 {
+			ref = ref[:8]
+		}
 		risks = append(risks, map[string]interface{}{
-			"id":                id,
-			"title":             title,
-			"category":          category,
-			"likelihood":        likelihood,
-			"impact":            impact,
-			"score":             score,
-			"level":             level,
-			"mitigation_status": mitStatus,
+			"risk_ref":             ref,
+			"title":                title,
+			"category_name":        category,
+			"risk_source":          "",
+			"inherent_risk_score":  score,
+			"residual_risk_score":  score,
+			"residual_risk_level":  level,
+			"financial_impact_eur": 0,
+			"status":               mitStatus,
+			"owner_name":           "",
+			"level":                level,
 		})
 	}
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Risk Register",
-		Type:    "table",
-		Content: risks,
+		Title: "Risk Register", Type: "table", Content: risks,
 	})
 
-	// Section 2: Risk summary by level.
 	summaryRows, err := re.pool.Query(ctx, `
 		SELECT risk_level, COUNT(*) AS count
 		FROM risks
@@ -373,12 +895,9 @@ func (re *ReportEngine) GetRiskReportData(ctx context.Context, orgID string, fil
 		riskSummary[level] = count
 	}
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Risk Summary by Level",
-		Type:    "kpi",
-		Content: riskSummary,
+		Title: "Risk Summary by Level", Type: "kpi", Content: riskSummary,
 	})
 
-	// Section 3: Active risk treatments.
 	treatRows, err := re.pool.Query(ctx, `
 		SELECT rt.id, r.title AS risk_title, rt.treatment_type, rt.status,
 		       rt.description, rt.due_date, rt.progress_percentage
@@ -400,11 +919,8 @@ func (re *ReportEngine) GetRiskReportData(ctx context.Context, orgID string, fil
 			return nil, fmt.Errorf("scan treatment: %w", err)
 		}
 		t := map[string]interface{}{
-			"id":             id,
-			"risk_title":     riskTitle,
-			"treatment_type": tType,
-			"status":         status,
-			"description":    desc,
+			"id": id, "risk_title": riskTitle, "treatment_type": tType,
+			"status": status, "description": desc,
 		}
 		if dueDate != nil {
 			t["due_date"] = dueDate.Format("2006-01-02")
@@ -415,12 +931,9 @@ func (re *ReportEngine) GetRiskReportData(ctx context.Context, orgID string, fil
 		treatments = append(treatments, t)
 	}
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Active Risk Treatments",
-		Type:    "table",
-		Content: treatments,
+		Title: "Active Risk Treatments", Type: "table", Content: treatments,
 	})
 
-	// Section 4: Key Risk Indicators.
 	kriRows, err := re.pool.Query(ctx, `
 		SELECT ri.name, ri.current_value, ri.threshold_green, ri.threshold_amber,
 		       ri.threshold_red, ri.trend, ri.measurement_unit
@@ -462,27 +975,76 @@ func (re *ReportEngine) GetRiskReportData(ctx context.Context, orgID string, fil
 		kris = append(kris, k)
 	}
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Key Risk Indicators",
-		Type:    "kpi",
-		Content: kris,
+		Title: "Key Risk Indicators", Type: "kpi", Content: kris,
 	})
 
 	return data, nil
 }
 
-// GetExecutiveSummaryData queries all KPIs: compliance score, risk summary,
-// incidents, findings, and policies for an executive-level report.
-func (re *ReportEngine) GetExecutiveSummaryData(ctx context.Context, orgID string) (*ReportData, error) {
+func (re *ReportEngineService) getAuditReportData(ctx context.Context, orgID string, filters map[string]interface{}) (*ReportData, error) {
+	data := &ReportData{
+		Title:          "Audit Findings Report",
+		GeneratedAt:    time.Now(),
+		Classification: "internal",
+	}
+	_ = re.pool.QueryRow(ctx, `SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&data.Organization)
+
+	rows, err := re.pool.Query(ctx, `
+		SELECT af.id, af.title, af.severity, af.status, af.finding_type,
+		       af.due_date, a.title AS audit_title
+		FROM audit_findings af
+		JOIN audits a ON a.id = af.audit_id
+		WHERE a.organization_id = $1 AND af.deleted_at IS NULL
+		ORDER BY
+		  CASE af.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+		       WHEN 'medium' THEN 2 ELSE 3 END,
+		  af.due_date ASC NULLS LAST`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("query findings: %w", err)
+	}
+	defer rows.Close()
+
+	var findings []map[string]interface{}
+	for rows.Next() {
+		var id, title, severity, status, findingType, auditTitle string
+		var dueDate *time.Time
+		if err := rows.Scan(&id, &title, &severity, &status, &findingType, &dueDate, &auditTitle); err != nil {
+			return nil, fmt.Errorf("scan finding: %w", err)
+		}
+		ref := id
+		if len(ref) > 8 {
+			ref = ref[:8]
+		}
+		f := map[string]interface{}{
+			"finding_ref":      ref,
+			"title":            title,
+			"audit_title":      auditTitle,
+			"severity":         severity,
+			"status":           status,
+			"finding_type":     findingType,
+			"responsible_name": "",
+			"root_cause":       "",
+		}
+		if dueDate != nil {
+			f["due_date"] = dueDate.Format("2006-01-02")
+		}
+		findings = append(findings, f)
+	}
+	data.Sections = append(data.Sections, ReportSection{
+		Title: "Audit Findings", Type: "table", Content: findings,
+	})
+
+	return data, nil
+}
+
+func (re *ReportEngineService) getExecutiveSummaryData(ctx context.Context, orgID string) (*ReportData, error) {
 	data := &ReportData{
 		Title:          "Executive Summary Report",
 		GeneratedAt:    time.Now(),
 		Classification: "confidential",
-		Format:         "json",
 	}
-
 	_ = re.pool.QueryRow(ctx, `SELECT name FROM organizations WHERE id = $1`, orgID).Scan(&data.Organization)
 
-	// KPI 1: Overall compliance score (average across frameworks).
 	var avgScore *float64
 	_ = re.pool.QueryRow(ctx, `
 		SELECT AVG(compliance_score) FROM organization_frameworks
@@ -492,12 +1054,9 @@ func (re *ReportEngine) GetExecutiveSummaryData(ctx context.Context, orgID strin
 		complianceKPI["overall_compliance_score"] = *avgScore
 	}
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Compliance Overview",
-		Type:    "kpi",
-		Content: complianceKPI,
+		Title: "Compliance Overview", Type: "kpi", Content: complianceKPI,
 	})
 
-	// KPI 2: Risk summary.
 	riskRows, err := re.pool.Query(ctx, `
 		SELECT risk_level, COUNT(*) FROM risks
 		WHERE organization_id = $1 AND deleted_at IS NULL
@@ -517,12 +1076,9 @@ func (re *ReportEngine) GetExecutiveSummaryData(ctx context.Context, orgID strin
 		riskKPI[level] = count
 	}
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Risk Summary",
-		Type:    "kpi",
-		Content: riskKPI,
+		Title: "Risk Summary", Type: "kpi", Content: riskKPI,
 	})
 
-	// KPI 3: Incident summary.
 	incidentKPI := make(map[string]interface{})
 	var totalIncidents, openIncidents, breachNotifiable int
 	_ = re.pool.QueryRow(ctx, `
@@ -536,12 +1092,9 @@ func (re *ReportEngine) GetExecutiveSummaryData(ctx context.Context, orgID strin
 	incidentKPI["open"] = openIncidents
 	incidentKPI["breach_notifiable"] = breachNotifiable
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Incident Summary",
-		Type:    "kpi",
-		Content: incidentKPI,
+		Title: "Incident Summary", Type: "kpi", Content: incidentKPI,
 	})
 
-	// KPI 4: Audit findings.
 	findingsKPI := make(map[string]interface{})
 	var totalFindings, openFindings int
 	_ = re.pool.QueryRow(ctx, `
@@ -554,12 +1107,9 @@ func (re *ReportEngine) GetExecutiveSummaryData(ctx context.Context, orgID strin
 	findingsKPI["total_findings"] = totalFindings
 	findingsKPI["open_findings"] = openFindings
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Audit Findings",
-		Type:    "kpi",
-		Content: findingsKPI,
+		Title: "Audit Findings", Type: "kpi", Content: findingsKPI,
 	})
 
-	// KPI 5: Policy compliance.
 	policyKPI := make(map[string]interface{})
 	var totalPolicies, activePolicies, overdueReview int
 	_ = re.pool.QueryRow(ctx, `
@@ -573,148 +1123,8 @@ func (re *ReportEngine) GetExecutiveSummaryData(ctx context.Context, orgID strin
 	policyKPI["active"] = activePolicies
 	policyKPI["overdue_for_review"] = overdueReview
 	data.Sections = append(data.Sections, ReportSection{
-		Title:   "Policy Status",
-		Type:    "kpi",
-		Content: policyKPI,
+		Title: "Policy Status", Type: "kpi", Content: policyKPI,
 	})
 
 	return data, nil
-}
-
-// ListDefinitions returns all report definitions for an organization.
-func (re *ReportEngine) ListDefinitions(ctx context.Context, orgID string) ([]ReportDefinition, error) {
-	rows, err := re.pool.Query(ctx, `
-		SELECT id, organization_id, name, COALESCE(description, ''), report_type, format,
-		       filters, sections, classification, created_by
-		FROM report_definitions
-		WHERE organization_id = $1
-		ORDER BY name`, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("list report definitions: %w", err)
-	}
-	defer rows.Close()
-
-	var defs []ReportDefinition
-	for rows.Next() {
-		var d ReportDefinition
-		var filtersJSON, sectionsJSON []byte
-		var createdBy *string
-		if err := rows.Scan(&d.ID, &d.OrgID, &d.Name, &d.Description, &d.ReportType,
-			&d.Format, &filtersJSON, &sectionsJSON, &d.Classification, &createdBy); err != nil {
-			return nil, fmt.Errorf("scan report definition: %w", err)
-		}
-		if createdBy != nil {
-			d.CreatedBy = *createdBy
-		}
-		_ = json.Unmarshal(filtersJSON, &d.Filters)
-		_ = json.Unmarshal(sectionsJSON, &d.Sections)
-		if d.Filters == nil {
-			d.Filters = make(map[string]interface{})
-		}
-		defs = append(defs, d)
-	}
-
-	return defs, nil
-}
-
-// CreateDefinition inserts a new report definition.
-func (re *ReportEngine) CreateDefinition(ctx context.Context, orgID string, def ReportDefinition) (*ReportDefinition, error) {
-	filtersJSON, err := json.Marshal(def.Filters)
-	if err != nil {
-		return nil, fmt.Errorf("marshal filters: %w", err)
-	}
-	sectionsJSON, err := json.Marshal(def.Sections)
-	if err != nil {
-		return nil, fmt.Errorf("marshal sections: %w", err)
-	}
-
-	var createdByPtr *string
-	if def.CreatedBy != "" {
-		createdByPtr = &def.CreatedBy
-	}
-
-	err = re.pool.QueryRow(ctx, `
-		INSERT INTO report_definitions (organization_id, name, description, report_type, format,
-		    filters, sections, classification, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id`,
-		orgID, def.Name, def.Description, def.ReportType, def.Format,
-		filtersJSON, sectionsJSON, def.Classification, createdByPtr,
-	).Scan(&def.ID)
-	if err != nil {
-		return nil, fmt.Errorf("insert report definition: %w", err)
-	}
-
-	def.OrgID = orgID
-	log.Info().Str("def_id", def.ID).Str("name", def.Name).Msg("report definition created")
-	return &def, nil
-}
-
-// GetRunStatus retrieves the status of a specific report run.
-func (re *ReportEngine) GetRunStatus(ctx context.Context, orgID, runID string) (*ReportRun, error) {
-	var run ReportRun
-	err := re.pool.QueryRow(ctx, `
-		SELECT id, report_definition_id, schedule_id, status, format, file_path,
-		       file_size_bytes, page_count, generation_time_ms, generated_by,
-		       error_message, created_at, completed_at
-		FROM report_runs
-		WHERE id = $1 AND organization_id = $2`, runID, orgID,
-	).Scan(
-		&run.ID, &run.DefinitionID, &run.ScheduleID, &run.Status, &run.Format,
-		&run.FilePath, &run.FileSizeBytes, &run.PageCount, &run.GenTimeMs,
-		&run.GeneratedBy, &run.ErrorMessage, &run.CreatedAt, &run.CompletedAt,
-	)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("report run not found")
-		}
-		return nil, fmt.Errorf("get report run: %w", err)
-	}
-	return &run, nil
-}
-
-// ListRuns returns a paginated list of report runs for an organization.
-func (re *ReportEngine) ListRuns(ctx context.Context, orgID string, page, pageSize int) ([]ReportRun, int, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
-	offset := (page - 1) * pageSize
-
-	var total int
-	err := re.pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM report_runs WHERE organization_id = $1`, orgID).Scan(&total)
-	if err != nil {
-		return nil, 0, fmt.Errorf("count report runs: %w", err)
-	}
-
-	rows, err := re.pool.Query(ctx, `
-		SELECT id, report_definition_id, schedule_id, status, format, file_path,
-		       file_size_bytes, page_count, generation_time_ms, generated_by,
-		       error_message, created_at, completed_at
-		FROM report_runs
-		WHERE organization_id = $1
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3`, orgID, pageSize, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("list report runs: %w", err)
-	}
-	defer rows.Close()
-
-	var runs []ReportRun
-	for rows.Next() {
-		var r ReportRun
-		if err := rows.Scan(
-			&r.ID, &r.DefinitionID, &r.ScheduleID, &r.Status, &r.Format,
-			&r.FilePath, &r.FileSizeBytes, &r.PageCount, &r.GenTimeMs,
-			&r.GeneratedBy, &r.ErrorMessage, &r.CreatedAt, &r.CompletedAt,
-		); err != nil {
-			return nil, 0, fmt.Errorf("scan report run: %w", err)
-		}
-		runs = append(runs, r)
-	}
-
-	return runs, total, nil
 }

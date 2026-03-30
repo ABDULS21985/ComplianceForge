@@ -204,11 +204,11 @@ type BoardReport struct {
 // BoardService manages governance board operations and reporting.
 type BoardService struct {
 	pool         *pgxpool.Pool
-	reportEngine *ReportEngine
+	reportEngine *ReportEngineService
 }
 
 // NewBoardService creates a new BoardService.
-func NewBoardService(pool *pgxpool.Pool, reportEngine *ReportEngine) *BoardService {
+func NewBoardService(pool *pgxpool.Pool, reportEngine *ReportEngineService) *BoardService {
 	return &BoardService{pool: pool, reportEngine: reportEngine}
 }
 
