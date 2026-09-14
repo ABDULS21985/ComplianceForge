@@ -1,24 +1,42 @@
 import { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CSRF_TOKEN_COOKIE, CSRF_TOKEN_HEADER } from '@/lib/auth-constants';
+import {
+  CSRF_TOKEN_COOKIE,
+  CSRF_TOKEN_HEADER,
+  VENDOR_PORTAL_TOKEN_COOKIE,
+} from '@/lib/auth-constants';
 import { proxyPortalRequest } from '@/lib/server/portal-bff';
 
 const origin = 'https://app.example.test';
 
-function portalRequest(path: string, method = 'GET', body?: string) {
+function portalRequest(
+  path: string,
+  method = 'GET',
+  body?: string,
+  portalToken?: string,
+) {
   const unsafe = method !== 'GET';
+  const cookies = [
+    unsafe && `${CSRF_TOKEN_COOKIE}=csrf-token`,
+    portalToken && `${VENDOR_PORTAL_TOKEN_COOKIE}=${portalToken}`,
+  ].filter(Boolean);
   return new NextRequest(`${origin}${path}`, {
     method,
     body,
-    headers: unsafe
-      ? {
-          cookie: `${CSRF_TOKEN_COOKIE}=csrf-token`,
+    headers:
+      unsafe || cookies.length
+        ? {
+          cookie: cookies.join('; '),
           host: 'app.example.test',
-          origin,
-          'sec-fetch-site': 'same-origin',
-          [CSRF_TOKEN_HEADER]: 'csrf-token',
-          'content-type': 'application/json',
+          ...(unsafe
+            ? {
+                origin,
+                'sec-fetch-site': 'same-origin',
+                [CSRF_TOKEN_HEADER]: 'csrf-token',
+                'content-type': 'application/json',
+              }
+            : {}),
         }
       : undefined,
   });
@@ -29,7 +47,7 @@ describe('public portal BFF allowlist', () => {
     process.env.API_INTERNAL_URL = 'http://api.internal.test/api/v1';
   });
 
-  it('maps a vendor invitation query onto the backend token path without bearer auth', async () => {
+  it('exchanges a vendor invitation body for scoped HttpOnly state without bearer auth', async () => {
     const fetcher = vi.fn().mockResolvedValue(
       Response.json({
         assessment_id: 'assessment-1',
@@ -39,14 +57,25 @@ describe('public portal BFF allowlist', () => {
       }),
     );
     const response = await proxyPortalRequest(
-      portalRequest('/api/portal/vendor-portal/questionnaire?token=signed%2Ftoken'),
-      ['vendor-portal', 'questionnaire'],
+      portalRequest(
+        '/api/portal/vendor-portal/session',
+        'POST',
+        JSON.stringify({ token: 'signed/token' }),
+      ),
+      ['vendor-portal', 'session'],
       fetcher,
     );
 
     expect(response.status).toBe(200);
     expect(fetcher.mock.calls[0][0]).toContain('/vendor-portal/signed%2Ftoken');
     expect(new Headers(fetcher.mock.calls[0][1]?.headers).has('authorization')).toBe(false);
+    expect(response.headers.get('set-cookie')).toContain(
+      `${VENDOR_PORTAL_TOKEN_COOKIE}=signed%2Ftoken`,
+    );
+    expect(response.headers.get('set-cookie')).toContain('HttpOnly');
+    expect(response.headers.get('set-cookie')).toContain('Secure');
+    expect(response.headers.get('set-cookie')).toContain('SameSite=strict');
+    expect(response.headers.get('set-cookie')).toContain('Path=/api/portal/vendor-portal');
     await expect(response.json()).resolves.toMatchObject({
       id: 'assessment-1',
       name: 'Security review',
@@ -57,7 +86,7 @@ describe('public portal BFF allowlist', () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json({ message: 'saved' }));
     const response = await proxyPortalRequest(
       portalRequest(
-        '/api/portal/vendor-portal/save?token=invite',
+        '/api/portal/vendor-portal/save',
         'POST',
         JSON.stringify({
           answers: {
@@ -65,6 +94,7 @@ describe('public portal BFF allowlist', () => {
             q2: { value: ['A', 'B'] },
           },
         }),
+        'invite',
       ),
       ['vendor-portal', 'save'],
       fetcher,
@@ -92,8 +122,12 @@ describe('public portal BFF allowlist', () => {
       }),
     );
     const response = await proxyPortalRequest(
-      portalRequest('/api/portal/board-portal?token=invite'),
-      ['board-portal'],
+      portalRequest(
+        '/api/portal/board-portal/session',
+        'POST',
+        JSON.stringify({ token: 'invite' }),
+      ),
+      ['board-portal', 'session'],
       fetcher,
     );
 
@@ -121,6 +155,18 @@ describe('public portal BFF allowlist', () => {
 
     expect(unknown.status).toBe(404);
     expect(missingCsrf.status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('does not accept a capability from a BFF query string after bootstrap', async () => {
+    const fetcher = vi.fn();
+    const response = await proxyPortalRequest(
+      portalRequest('/api/portal/vendor-portal/questionnaire?token=leaked-token'),
+      ['vendor-portal', 'questionnaire'],
+      fetcher,
+    );
+
+    expect(response.status).toBe(401);
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

@@ -140,6 +140,14 @@ func permissionForProtectedRequest(method, path string) (routePermission, bool) 
 	if segment == "controls" && strings.Contains(lowerPath, "/evidence") {
 		action = mapReadOrUpdate(method)
 	}
+	if segment == "policies" && containsActionSegment(lowerPath, "decision") {
+		action = "approve"
+	}
+	// An acknowledgement is the authenticated principal's own read receipt.
+	// Requiring policy update would prevent read-only employees from complying.
+	if segment == "policies" && containsActionSegment(lowerPath, "acknowledge") {
+		action = "read"
+	}
 
 	if supportedResourceActions[resource][action] {
 		return routePermission{Resource: resource, Action: action}, true

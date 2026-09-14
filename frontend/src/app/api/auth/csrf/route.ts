@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-import { CSRF_TOKEN_COOKIE } from '@/lib/auth-constants';
+import { sessionCookiePolicy } from '@/lib/request-security';
 import { createCsrfToken, setCsrfCookie } from '@/lib/server/session-security';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,8 @@ export function GET(request: NextRequest): NextResponse {
     );
   }
 
-  const existing = request.cookies.get(CSRF_TOKEN_COOKIE)?.value;
+  const cookieName = sessionCookiePolicy(request).csrf;
+  const existing = request.cookies.get(cookieName)?.value;
   const csrfToken =
     existing && /^[A-Za-z0-9_-]{43}$/.test(existing)
       ? existing
@@ -31,6 +32,6 @@ export function GET(request: NextRequest): NextResponse {
       },
     },
   );
-  if (csrfToken !== existing) setCsrfCookie(response, csrfToken);
+  if (csrfToken !== existing) setCsrfCookie(request, response, csrfToken);
   return response;
 }

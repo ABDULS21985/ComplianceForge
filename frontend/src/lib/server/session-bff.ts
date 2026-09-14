@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from '@/lib/auth-constants';
+import { sessionCookiePolicy } from '@/lib/request-security';
 import {
   clearSessionCookies,
   csrfErrorResponse,
@@ -108,9 +108,9 @@ export function refreshSession(
   return pending;
 }
 
-function terminalUnauthorized(): NextResponse {
+function terminalUnauthorized(request: NextRequest): NextResponse {
   const response = jsonError(401, 'SESSION_EXPIRED', 'Session expired');
-  clearSessionCookies(response);
+  clearSessionCookies(request, response);
   return response;
 }
 
@@ -123,10 +123,11 @@ function refreshUnavailable(): NextResponse {
 }
 
 function preserveRotatedSession(
+  request: NextRequest,
   response: NextResponse,
   pair: SessionTokenPair | null,
 ): NextResponse {
-  if (pair) setSessionCookies(response, pair);
+  if (pair) setSessionCookies(request, response, pair);
   return response;
 }
 
@@ -200,14 +201,15 @@ export async function proxyAuthenticatedRequest(
     return jsonError(400, 'INVALID_REQUEST_BODY', 'Unable to read request body');
   }
 
-  let accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
-  const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
+  const cookiePolicy = sessionCookiePolicy(request);
+  let accessToken = request.cookies.get(cookiePolicy.access)?.value;
+  const refreshToken = request.cookies.get(cookiePolicy.refresh)?.value;
   let refreshedPair: SessionTokenPair | null = null;
 
   if (!accessToken) {
-    if (!refreshToken) return terminalUnauthorized();
+    if (!refreshToken) return terminalUnauthorized(request);
     const refreshed = await refreshSession(refreshToken, fetcher);
-    if (refreshed.kind === 'terminal') return terminalUnauthorized();
+    if (refreshed.kind === 'terminal') return terminalUnauthorized(request);
     if (refreshed.kind === 'unavailable') return refreshUnavailable();
     refreshedPair = refreshed.pair;
     accessToken = refreshed.pair.access_token;
@@ -218,6 +220,7 @@ export async function proxyAuthenticatedRequest(
     upstream = await authenticatedFetch(request, pathname, body, accessToken, fetcher);
   } catch {
     return preserveRotatedSession(
+      request,
       jsonError(502, 'UPSTREAM_UNAVAILABLE', 'API service is unavailable'),
       refreshedPair,
     );
@@ -225,7 +228,7 @@ export async function proxyAuthenticatedRequest(
 
   if (upstream.status === 401 && refreshToken && !refreshedPair) {
     const refreshed = await refreshSession(refreshToken, fetcher);
-    if (refreshed.kind === 'terminal') return terminalUnauthorized();
+    if (refreshed.kind === 'terminal') return terminalUnauthorized(request);
     if (refreshed.kind === 'unavailable') return refreshUnavailable();
     refreshedPair = refreshed.pair;
 
@@ -239,15 +242,16 @@ export async function proxyAuthenticatedRequest(
       );
     } catch {
       return preserveRotatedSession(
+        request,
         jsonError(502, 'UPSTREAM_UNAVAILABLE', 'API service is unavailable'),
         refreshedPair,
       );
     }
   }
 
-  if (upstream.status === 401) return terminalUnauthorized();
+  if (upstream.status === 401) return terminalUnauthorized(request);
 
-  return preserveRotatedSession(proxyResponse(upstream), refreshedPair);
+  return preserveRotatedSession(request, proxyResponse(upstream), refreshedPair);
 }
 
 export async function handleCredentialExchange(
@@ -303,7 +307,7 @@ export async function handleCredentialExchange(
       },
     },
   );
-  setSessionCookies(response, data);
+  setSessionCookies(request, response, data);
   return response;
 }
 
@@ -324,14 +328,15 @@ export async function handleSession(
   request: NextRequest,
   fetcher: ServerFetch = fetch,
 ): Promise<NextResponse> {
-  let accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
-  const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
+  const cookiePolicy = sessionCookiePolicy(request);
+  let accessToken = request.cookies.get(cookiePolicy.access)?.value;
+  const refreshToken = request.cookies.get(cookiePolicy.refresh)?.value;
   let refreshedPair: SessionTokenPair | null = null;
 
   if (!accessToken) {
-    if (!refreshToken) return terminalUnauthorized();
+    if (!refreshToken) return terminalUnauthorized(request);
     const refreshed = await refreshSession(refreshToken, fetcher);
-    if (refreshed.kind === 'terminal') return terminalUnauthorized();
+    if (refreshed.kind === 'terminal') return terminalUnauthorized(request);
     if (refreshed.kind === 'unavailable') return refreshUnavailable();
     refreshedPair = refreshed.pair;
     accessToken = refreshed.pair.access_token;
@@ -342,6 +347,7 @@ export async function handleSession(
     upstream = await currentUser(accessToken, fetcher);
   } catch {
     return preserveRotatedSession(
+      request,
       jsonError(502, 'UPSTREAM_UNAVAILABLE', 'Authentication service is unavailable'),
       refreshedPair,
     );
@@ -349,7 +355,7 @@ export async function handleSession(
 
   if (upstream.status === 401 && refreshToken && !refreshedPair) {
     const refreshed = await refreshSession(refreshToken, fetcher);
-    if (refreshed.kind === 'terminal') return terminalUnauthorized();
+    if (refreshed.kind === 'terminal') return terminalUnauthorized(request);
     if (refreshed.kind === 'unavailable') return refreshUnavailable();
     refreshedPair = refreshed.pair;
 
@@ -357,15 +363,16 @@ export async function handleSession(
       upstream = await currentUser(refreshed.pair.access_token, fetcher);
     } catch {
       return preserveRotatedSession(
+        request,
         jsonError(502, 'UPSTREAM_UNAVAILABLE', 'Authentication service is unavailable'),
         refreshedPair,
       );
     }
   }
 
-  if (upstream.status === 401) return terminalUnauthorized();
+  if (upstream.status === 401) return terminalUnauthorized(request);
 
-  return preserveRotatedSession(proxyResponse(upstream), refreshedPair);
+  return preserveRotatedSession(request, proxyResponse(upstream), refreshedPair);
 }
 
 export async function handleRefresh(
@@ -375,11 +382,11 @@ export async function handleRefresh(
   const csrf = verifyCsrf(request);
   if (!csrf.ok) return csrfErrorResponse(csrf.message);
 
-  const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
-  if (!refreshToken) return terminalUnauthorized();
+  const refreshToken = request.cookies.get(sessionCookiePolicy(request).refresh)?.value;
+  if (!refreshToken) return terminalUnauthorized(request);
 
   const refreshed = await refreshSession(refreshToken, fetcher);
-  if (refreshed.kind === 'terminal') return terminalUnauthorized();
+  if (refreshed.kind === 'terminal') return terminalUnauthorized(request);
   if (refreshed.kind === 'unavailable') return refreshUnavailable();
 
   const response = NextResponse.json(
@@ -389,7 +396,7 @@ export async function handleRefresh(
     },
     { headers: { 'Cache-Control': 'no-store' } },
   );
-  setSessionCookies(response, refreshed.pair);
+  setSessionCookies(request, response, refreshed.pair);
   return response;
 }
 
@@ -417,8 +424,9 @@ export async function handleLogout(
   const csrf = verifyCsrf(request);
   if (!csrf.ok) return csrfErrorResponse(csrf.message);
 
-  let accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
-  const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
+  const cookiePolicy = sessionCookiePolicy(request);
+  let accessToken = request.cookies.get(cookiePolicy.access)?.value;
+  const refreshToken = request.cookies.get(cookiePolicy.refresh)?.value;
   const result = accessToken ? await revokeAccessToken(accessToken, fetcher) : null;
 
   if ((!result || result.status === 401) && refreshToken) {
@@ -435,6 +443,6 @@ export async function handleLogout(
     status: 204,
     headers: { 'Cache-Control': 'no-store' },
   });
-  clearSessionCookies(response);
+  clearSessionCookies(request, response);
   return response;
 }

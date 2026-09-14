@@ -27,6 +27,14 @@ func TestRequiredRoutePermissionMap(t *testing.T) {
 		{http.MethodPut, "/api/v1/risks/id/assign", "risks", "assign"},
 		{http.MethodPost, "/api/v1/risks/id/assessments", "risks", "create"},
 		{http.MethodPost, "/api/v1/risks/appetite/id/approve", "risks", "approve"},
+		{http.MethodGet, "/api/v1/policies/id", "policies", "read"},
+		{http.MethodPost, "/api/v1/policies/id/versions", "policies", "create"},
+		{http.MethodPost, "/api/v1/policies/id/submit", "policies", "update"},
+		{http.MethodPost, "/api/v1/policies/id/approval/decision", "policies", "approve"},
+		{http.MethodPut, "/api/v1/policies/id/publish", "policies", "approve"},
+		{http.MethodPut, "/api/v1/policies/id/assign", "policies", "assign"},
+		{http.MethodPut, "/api/v1/policies/id/acknowledge", "policies", "read"},
+		{http.MethodPost, "/api/v1/policies/id/exceptions/id/decision", "policies", "approve"},
 	}
 	for _, test := range tests {
 		permission, ok := permissionForProtectedRequest(test.method, test.path)

@@ -124,6 +124,14 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 		}
 		channelID = payload["id"]
 
+		req, response = requestWithRouteIDBody(t, tenantCtx, http.MethodPut,
+			"/settings/notification-channels/"+channelID, channelID,
+			`{"name":"Primary platform email","channel_type":"email","config":{},"is_active":true}`)
+		handler.UpdateChannel(response, req)
+		if response.Code != http.StatusOK {
+			t.Fatalf("UpdateChannel status=%d body=%s", response.Code, response.Body.String())
+		}
+
 		req, response = request(tenantCtx, http.MethodPost, "/settings/notification-channels", `{
 			"name":"Unsafe","channel_type":"webhook",
 			"config":{"url":"http://169.254.169.254/latest/meta-data","secret":"01234567890123456789012345678901"}}`)
@@ -160,13 +168,42 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 		}
 	})
 
-	templateID := uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO notification_templates
-		(id,organization_id,name,event_type,subject_template,body_text_template)
-		VALUES ($1,$2,'Handler test','risk.escalated','Risk {{.risk_title}}','Review {{.risk_title}}')`,
-		templateID, orgA); err != nil {
-		t.Fatal(err)
-	}
+	var templateID string
+	withTenant(orgA, func(tenantCtx context.Context) {
+		req, response := request(tenantCtx, http.MethodPost, "/settings/notification-templates", `{
+			"name":"Handler test","event_type":"risk.escalated",
+			"subject_template":"Risk {{.risk_title}}",
+			"body_text_template":"Review {{.risk_title}}",
+			"body_html_template":"<p>Review {{.risk_title}}</p>",
+			"variables":["risk_title"]}`)
+		handler.CreateTemplate(response, req)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("CreateTemplate status=%d body=%s", response.Code, response.Body.String())
+		}
+		var created map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		templateID = created["id"]
+
+		req, response = request(tenantCtx, http.MethodGet, "/settings/notification-templates", "")
+		handler.ListTemplates(response, req)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), templateID) {
+			t.Fatalf("ListTemplates status=%d body=%s", response.Code, response.Body.String())
+		}
+
+		req, response = requestWithRouteIDBody(t, tenantCtx, http.MethodPut,
+			"/settings/notification-templates/"+templateID, templateID, `{
+			"name":"Handler risk escalation","event_type":"risk.escalated",
+			"subject_template":"Risk {{.risk_title}}",
+			"body_text_template":"Review risk {{.risk_title}}",
+			"variables":["risk_title"]}`)
+		handler.UpdateTemplate(response, req)
+		if response.Code != http.StatusOK {
+			t.Fatalf("UpdateTemplate status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+	var ruleID string
 	withTenant(orgA, func(tenantCtx context.Context) {
 		body := `{"name":"Critical risk","event_type":"risk.escalated","severity_filter":["critical"],` +
 			`"conditions":{"requires_review":true},"channel_ids":["` + channelID + `"],` +
@@ -177,6 +214,11 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 		if response.Code != http.StatusCreated {
 			t.Fatalf("CreateRule status=%d body=%s", response.Code, response.Body.String())
 		}
+		var createdRule map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &createdRule); err != nil {
+			t.Fatal(err)
+		}
+		ruleID = createdRule["id"]
 
 		req, response = request(tenantCtx, http.MethodGet, "/settings/notification-rules", "")
 		handler.ListRules(response, req)
@@ -189,6 +231,38 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 		handler.TestChannel(response, req)
 		if response.Code != http.StatusOK || len(sender.messages) != 1 {
 			t.Fatalf("TestChannel status=%d messages=%d body=%s", response.Code, len(sender.messages), response.Body.String())
+		}
+
+		req, response = requestWithRouteID(t, tenantCtx, http.MethodDelete,
+			"/settings/notification-channels/"+channelID, channelID)
+		handler.DeleteChannel(response, req)
+		if response.Code != http.StatusConflict {
+			t.Fatalf("DeleteChannel while referenced status=%d body=%s", response.Code, response.Body.String())
+		}
+		req, response = requestWithRouteID(t, tenantCtx, http.MethodDelete,
+			"/settings/notification-templates/"+templateID, templateID)
+		handler.DeleteTemplate(response, req)
+		if response.Code != http.StatusConflict {
+			t.Fatalf("DeleteTemplate while referenced status=%d body=%s", response.Code, response.Body.String())
+		}
+
+		req, response = requestWithRouteID(t, tenantCtx, http.MethodDelete,
+			"/settings/notification-rules/"+ruleID, ruleID)
+		handler.DeleteRule(response, req)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("DeleteRule status=%d body=%s", response.Code, response.Body.String())
+		}
+		req, response = requestWithRouteID(t, tenantCtx, http.MethodDelete,
+			"/settings/notification-templates/"+templateID, templateID)
+		handler.DeleteTemplate(response, req)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("DeleteTemplate status=%d body=%s", response.Code, response.Body.String())
+		}
+		req, response = requestWithRouteID(t, tenantCtx, http.MethodDelete,
+			"/settings/notification-channels/"+channelID, channelID)
+		handler.DeleteChannel(response, req)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("DeleteChannel status=%d body=%s", response.Code, response.Body.String())
 		}
 	})
 
@@ -227,4 +301,18 @@ func requestWithRouteID(
 	routeContext.URLParams.Add("id", id)
 	ctx = context.WithValue(ctx, chi.RouteCtxKey, routeContext)
 	return httptest.NewRequest(method, path, nil).WithContext(ctx), httptest.NewRecorder()
+}
+
+func requestWithRouteIDBody(
+	t *testing.T,
+	ctx context.Context,
+	method, path, id, body string,
+) (*http.Request, *httptest.ResponseRecorder) {
+	t.Helper()
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("id", id)
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, routeContext)
+	request := httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx)
+	request.Header.Set("Content-Type", "application/json")
+	return request, httptest.NewRecorder()
 }

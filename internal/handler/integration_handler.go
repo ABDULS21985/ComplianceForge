@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 
 	"github.com/complianceforge/platform/internal/middleware"
 	"github.com/complianceforge/platform/internal/models"
@@ -69,7 +72,7 @@ func (h *IntegrationHandler) ListIntegrations(w http.ResponseWriter, r *http.Req
 
 	integrations, err := h.svc.ListIntegrations(r.Context(), orgID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to list integrations", err.Error())
+		writeIntegrationInternalError(w, r, "list integrations", "Failed to list integrations", err)
 		return
 	}
 
@@ -86,7 +89,7 @@ func (h *IntegrationHandler) CreateIntegration(w http.ResponseWriter, r *http.Re
 	}
 
 	var body integrationPayload
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeIntegrationJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
@@ -98,7 +101,7 @@ func (h *IntegrationHandler) CreateIntegration(w http.ResponseWriter, r *http.Re
 
 	result, err := h.svc.CreateIntegration(r.Context(), orgID, userID, integration, *configJSON)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to create integration", err.Error())
+		writeIntegrationServiceError(w, r, "create integration", "Failed to create integration", err)
 		return
 	}
 
@@ -114,14 +117,14 @@ func (h *IntegrationHandler) GetIntegration(w http.ResponseWriter, r *http.Reque
 	}
 
 	integID := chi.URLParam(r, "id")
-	if integID == "" {
-		writeError(w, http.StatusBadRequest, "Missing integration ID", "")
+	if _, err := uuid.Parse(integID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid integration ID", "")
 		return
 	}
 
 	integration, err := h.svc.GetIntegration(r.Context(), orgID, integID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Integration not found", err.Error())
+		writeIntegrationServiceError(w, r, "get integration", "Failed to get integration", err)
 		return
 	}
 
@@ -137,13 +140,13 @@ func (h *IntegrationHandler) UpdateIntegration(w http.ResponseWriter, r *http.Re
 	}
 
 	integID := chi.URLParam(r, "id")
-	if integID == "" {
-		writeError(w, http.StatusBadRequest, "Missing integration ID", "")
+	if _, err := uuid.Parse(integID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid integration ID", "")
 		return
 	}
 
 	var body integrationPayload
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeIntegrationJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
@@ -154,7 +157,7 @@ func (h *IntegrationHandler) UpdateIntegration(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.svc.UpdateIntegration(r.Context(), orgID, integID, integration, configJSON); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to update integration", err.Error())
+		writeIntegrationServiceError(w, r, "update integration", "Failed to update integration", err)
 		return
 	}
 
@@ -170,13 +173,13 @@ func (h *IntegrationHandler) DeleteIntegration(w http.ResponseWriter, r *http.Re
 	}
 
 	integID := chi.URLParam(r, "id")
-	if integID == "" {
-		writeError(w, http.StatusBadRequest, "Missing integration ID", "")
+	if _, err := uuid.Parse(integID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid integration ID", "")
 		return
 	}
 
 	if err := h.svc.DeleteIntegration(r.Context(), orgID, integID); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to delete integration", err.Error())
+		writeIntegrationServiceError(w, r, "delete integration", "Failed to delete integration", err)
 		return
 	}
 
@@ -192,14 +195,14 @@ func (h *IntegrationHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 	}
 
 	integID := chi.URLParam(r, "id")
-	if integID == "" {
-		writeError(w, http.StatusBadRequest, "Missing integration ID", "")
+	if _, err := uuid.Parse(integID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid integration ID", "")
 		return
 	}
 
 	status, err := h.svc.TestConnection(r.Context(), orgID, integID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Connection test failed", err.Error())
+		writeIntegrationServiceError(w, r, "test integration connection", "Connection test failed", err)
 		return
 	}
 
@@ -218,8 +221,8 @@ func (h *IntegrationHandler) TriggerSync(w http.ResponseWriter, r *http.Request)
 	}
 
 	integID := chi.URLParam(r, "id")
-	if integID == "" {
-		writeError(w, http.StatusBadRequest, "Missing integration ID", "")
+	if _, err := uuid.Parse(integID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid integration ID", "")
 		return
 	}
 
@@ -227,7 +230,7 @@ func (h *IntegrationHandler) TriggerSync(w http.ResponseWriter, r *http.Request)
 		SyncType string `json:"sync_type"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := decodeIntegrationJSON(w, r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 			return
 		}
@@ -236,10 +239,15 @@ func (h *IntegrationHandler) TriggerSync(w http.ResponseWriter, r *http.Request)
 	if body.SyncType == "" {
 		body.SyncType = "full"
 	}
+	body.SyncType = strings.ToLower(strings.TrimSpace(body.SyncType))
+	if !validScopeSegment(body.SyncType) {
+		writeError(w, http.StatusBadRequest, "Invalid sync type", "sync_type must be a lowercase token")
+		return
+	}
 
 	result, err := h.svc.TriggerSync(r.Context(), orgID, integID, body.SyncType)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to trigger sync", err.Error())
+		writeIntegrationServiceError(w, r, "trigger integration sync", "Failed to trigger sync", err)
 		return
 	}
 
@@ -255,8 +263,8 @@ func (h *IntegrationHandler) GetSyncLogs(w http.ResponseWriter, r *http.Request)
 	}
 
 	integID := chi.URLParam(r, "id")
-	if integID == "" {
-		writeError(w, http.StatusBadRequest, "Missing integration ID", "")
+	if _, err := uuid.Parse(integID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid integration ID", "")
 		return
 	}
 
@@ -264,7 +272,7 @@ func (h *IntegrationHandler) GetSyncLogs(w http.ResponseWriter, r *http.Request)
 
 	logs, total, err := h.svc.GetSyncLogs(r.Context(), orgID, integID, pagination.Page, pagination.PageSize)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get sync logs", err.Error())
+		writeIntegrationServiceError(w, r, "list integration sync logs", "Failed to get sync logs", err)
 		return
 	}
 
@@ -294,7 +302,7 @@ func (h *IntegrationHandler) GetSSOConfig(w http.ResponseWriter, r *http.Request
 
 	config, err := h.svc.GetSSOConfig(r.Context(), orgID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get SSO configuration", err.Error())
+		writeIntegrationInternalError(w, r, "get SSO configuration", "Failed to get SSO configuration", err)
 		return
 	}
 
@@ -310,13 +318,13 @@ func (h *IntegrationHandler) UpdateSSOConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	var body service.UpdateSSOConfigurationInput
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeIntegrationJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
 
 	if err := h.svc.UpdateSSOConfig(r.Context(), orgID, body); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to update SSO configuration", err.Error())
+		writeIntegrationServiceError(w, r, "update SSO configuration", "Failed to update SSO configuration", err)
 		return
 	}
 
@@ -333,7 +341,7 @@ func (h *IntegrationHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request)
 
 	keys, err := h.svc.ListAPIKeys(r.Context(), orgID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to list API keys", err.Error())
+		writeIntegrationInternalError(w, r, "list API keys", "Failed to list API keys", err)
 		return
 	}
 
@@ -355,13 +363,22 @@ func (h *IntegrationHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request
 		RateLimit   int      `json:"rate_limit"`
 		ExpiresAt   *string  `json:"expires_at,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeIntegrationJSON(w, r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
 
+	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
 		writeError(w, http.StatusBadRequest, "Name is required", "")
+		return
+	}
+	if len([]rune(body.Name)) > 200 {
+		writeError(w, http.StatusBadRequest, "Invalid name", "name must not exceed 200 characters")
+		return
+	}
+	if body.RateLimit < 0 || body.RateLimit > 10000 {
+		writeError(w, http.StatusBadRequest, "Invalid rate limit", "rate_limit must be between 1 and 10000 when specified")
 		return
 	}
 
@@ -385,10 +402,12 @@ func (h *IntegrationHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request
 
 	keyRecord, rawKey, err := h.svc.CreateAPIKey(r.Context(), orgID, userID, body.Name, body.Permissions, body.RateLimit, expiresAt)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to create API key", err.Error())
+		writeIntegrationServiceError(w, r, "create API key", "Failed to create API key", err)
 		return
 	}
 
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"data": keyRecord,
 		"key":  rawKey,
@@ -405,13 +424,13 @@ func (h *IntegrationHandler) RevokeAPIKey(w http.ResponseWriter, r *http.Request
 	}
 
 	keyID := chi.URLParam(r, "id")
-	if keyID == "" {
-		writeError(w, http.StatusBadRequest, "Missing API key ID", "")
+	if _, err := uuid.Parse(keyID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid API key ID", "")
 		return
 	}
 
 	if err := h.svc.RevokeAPIKey(r.Context(), orgID, keyID); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to revoke API key", err.Error())
+		writeIntegrationServiceError(w, r, "revoke API key", "Failed to revoke API key", err)
 		return
 	}
 
@@ -482,6 +501,22 @@ func normalizeIntegrationPayload(payload integrationPayload, requireConfiguratio
 		return service.Integration{}, nil, errors.New("configuration is required")
 	}
 	return integration, configJSON, nil
+}
+
+func decodeIntegrationJSON(w http.ResponseWriter, r *http.Request, destination any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain one JSON object")
+		}
+		return err
+	}
+	return nil
 }
 
 func normalizeConfigurationJSON(raw json.RawMessage) (*string, error) {
@@ -555,16 +590,52 @@ func validateAPIKeyPermissions(permissions []string) error {
 		"create": {}, "read": {}, "update": {}, "delete": {},
 		"approve": {}, "assign": {}, "export": {}, "configure": {},
 	}
+	validResources := map[string]struct{}{
+		"organizations": {}, "frameworks": {}, "controls": {}, "risks": {},
+		"policies": {}, "audits": {}, "incidents": {}, "vendors": {},
+		"reports": {}, "users": {}, "settings": {},
+	}
+	seen := make(map[string]struct{}, len(permissions))
 	for _, permission := range permissions {
 		parts := strings.Split(permission, ":")
 		if len(parts) != 2 {
 			return errors.New("permissions must use action:resource format")
 		}
-		if _, ok := validActions[parts[0]]; !ok || !validScopeSegment(parts[1]) {
+		_, validAction := validActions[parts[0]]
+		_, validResource := validResources[parts[1]]
+		if !validAction || !validResource {
 			return errors.New("permission contains an unsupported action or resource")
 		}
+		if _, duplicate := seen[permission]; duplicate {
+			return errors.New("permissions must not contain duplicates")
+		}
+		seen[permission] = struct{}{}
 	}
 	return nil
+}
+
+func writeIntegrationServiceError(w http.ResponseWriter, r *http.Request, operation, fallback string, err error) {
+	switch {
+	case errors.Is(err, service.ErrIntegrationNotFound):
+		writeError(w, http.StatusNotFound, "Integration not found", "")
+	case errors.Is(err, service.ErrAPIKeyNotFound):
+		writeError(w, http.StatusNotFound, "API key not found", "")
+	case errors.Is(err, service.ErrIntegrationInactive):
+		writeError(w, http.StatusConflict, "Integration must be active before it can sync", "")
+	case errors.Is(err, service.ErrInvalidSSOConfig):
+		writeError(w, http.StatusBadRequest, "Invalid SSO configuration", err.Error())
+	default:
+		writeIntegrationInternalError(w, r, operation, fallback, err)
+	}
+}
+
+func writeIntegrationInternalError(w http.ResponseWriter, r *http.Request, operation, message string, err error) {
+	log.Error().
+		Err(err).
+		Str("operation", operation).
+		Str("request_id", middleware.GetRequestIDFromContext(r.Context())).
+		Msg("integration request failed")
+	writeError(w, http.StatusInternalServerError, message, "")
 }
 
 func validScopeSegment(value string) bool {

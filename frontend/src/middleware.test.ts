@@ -1,9 +1,20 @@
 import { NextRequest } from 'next/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { middleware } from '@/middleware';
-import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from '@/lib/auth-constants';
+import {
+  ACCESS_TOKEN_COOKIE,
+  DEVELOPMENT_ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+} from '@/lib/auth-constants';
 import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from '@/lib/routes';
+
+const originalAppEnvironment = process.env.APP_ENV;
+
+afterEach(() => {
+  if (originalAppEnvironment === undefined) delete process.env.APP_ENV;
+  else process.env.APP_ENV = originalAppEnvironment;
+});
 
 describe('authentication middleware routing', () => {
   it.each([ROUTES.portals.vendor, ROUTES.portals.board])(
@@ -45,6 +56,18 @@ describe('authentication middleware routing', () => {
     const response = middleware(
       new NextRequest('https://app.example.test/dashboard', {
         headers: { cookie: `${REFRESH_TOKEN_COOKIE}=present` },
+      }),
+    );
+
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(response.headers.get('location')).toBeNull();
+  });
+
+  it('recognizes the isolated loopback HTTP development cookie', () => {
+    process.env.APP_ENV = 'development';
+    const response = middleware(
+      new NextRequest('http://localhost:3000/dashboard', {
+        headers: { cookie: `${DEVELOPMENT_ACCESS_TOKEN_COOKIE}=present` },
       }),
     );
 

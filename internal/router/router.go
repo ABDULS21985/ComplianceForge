@@ -76,18 +76,18 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	frameworkHandler := dependencies.Frameworks
 	controlHandler := dependencies.Controls
 	riskHandler := dependencies.Risks
-	policyHandler := dependencies.Domains.Policy
+	policyHandler := dependencies.Policies
 	auditHandler := dependencies.Domains.Audit
 	incidentHandler := dependencies.Domains.Incident
 	vendorHandler := dependencies.Domains.Vendor
 	dashboardHandler := dependencies.Domains.Dashboard
 	reportHandler := dependencies.Domains.Report
-	notificationHandler := dependencies.Domains.Notification
+	notificationHandler := dependencies.Notifications
 	dsrHandler := dependencies.Domains.DSR
 	nis2Handler := dependencies.Domains.NIS2
 	monitoringHandler := dependencies.Domains.Monitoring
 	workflowHandler := dependencies.Domains.Workflow
-	integrationHandler := dependencies.Domains.Integration
+	integrationHandler := dependencies.Integrations
 	onboardingHandler := dependencies.Domains.Onboarding
 	accessHandler := dependencies.Domains.Access
 	remediationHandler := dependencies.Domains.Remediation
@@ -220,17 +220,35 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Policies
 		r.Route("/policies", func(r chi.Router) {
-			if policyHandler != nil {
-				r.Post("/", policyHandler.Create)
-				r.Get("/", policyHandler.List)
-				r.Get("/due-for-review", policyHandler.GetDueForReview)
-				r.Get("/{id}", policyHandler.GetByID)
-				r.Put("/{id}", policyHandler.Update)
-				r.Delete("/{id}", policyHandler.Delete)
-				r.Put("/{id}/submit-review", policyHandler.SubmitForReview)
-				r.Put("/{id}/approve", policyHandler.Approve)
-				r.Put("/{id}/publish", policyHandler.Publish)
-			}
+			r.Post("/", policyHandler.Create)
+			r.Get("/", policyHandler.List)
+			r.Get("/categories", policyHandler.ListCategories)
+			r.Get("/due-for-review", policyHandler.GetDueForReview)
+			r.Get("/{id}", policyHandler.GetByID)
+			r.Put("/{id}", policyHandler.Update)
+			r.Patch("/{id}", policyHandler.Update)
+			r.Delete("/{id}", policyHandler.Delete)
+			r.Put("/{id}/assign", policyHandler.AssignOwner)
+			r.Post("/{id}/versions", policyHandler.CreateVersion)
+			r.Get("/{id}/versions", policyHandler.ListVersions)
+			r.Get("/{id}/versions/{versionID}", policyHandler.GetVersion)
+			r.Post("/{id}/submit", policyHandler.SubmitForApproval)
+			r.Post("/{id}/approval/decision", policyHandler.DecideApproval)
+			r.Get("/{id}/approval", policyHandler.GetActiveApproval)
+			r.Put("/{id}/publish", policyHandler.Publish)
+			r.Post("/{id}/reviews", policyHandler.CreateReview)
+			r.Get("/{id}/reviews", policyHandler.ListReviews)
+			r.Get("/{id}/reviews/{reviewID}", policyHandler.GetReview)
+			r.Patch("/{id}/reviews/{reviewID}", policyHandler.UpdateReview)
+			r.Put("/{id}/acknowledge", policyHandler.Acknowledge)
+			r.Get("/{id}/attestations", policyHandler.ListAttestations)
+			r.Post("/{id}/exceptions", policyHandler.CreateException)
+			r.Get("/{id}/exceptions", policyHandler.ListExceptions)
+			r.Get("/{id}/exceptions/{exceptionID}", policyHandler.GetException)
+			r.Post("/{id}/exceptions/{exceptionID}/decision", policyHandler.DecideException)
+			// Backward-compatible aliases use the same workflow-backed behavior.
+			r.Put("/{id}/submit-review", policyHandler.SubmitForReview)
+			r.Put("/{id}/approve", policyHandler.Approve)
 		})
 
 		// Audits
@@ -304,31 +322,33 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Notifications (user-facing)
 		r.Route("/notifications", func(r chi.Router) {
-			if notificationHandler != nil {
-				r.Get("/", notificationHandler.ListNotifications)
-				r.Put("/{id}/read", notificationHandler.MarkAsRead)
-				r.Put("/read-all", notificationHandler.MarkAllAsRead)
-				r.Get("/unread-count", notificationHandler.GetUnreadCount)
-				r.Get("/preferences", notificationHandler.GetPreferences)
-				r.Put("/preferences", notificationHandler.UpdatePreferences)
-			}
+			r.Get("/", notificationHandler.ListNotifications)
+			r.Put("/{id}/read", notificationHandler.MarkAsRead)
+			r.Put("/read-all", notificationHandler.MarkAllAsRead)
+			r.Get("/unread-count", notificationHandler.GetUnreadCount)
+			r.Get("/preferences", notificationHandler.GetPreferences)
+			r.Put("/preferences", notificationHandler.UpdatePreferences)
 		})
 
 		// Notification settings (admin)
 		r.Route("/settings/notification-rules", func(r chi.Router) {
-			if notificationHandler != nil {
-				r.Get("/", notificationHandler.ListRules)
-				r.Post("/", notificationHandler.CreateRule)
-				r.Put("/{id}", notificationHandler.UpdateRule)
-				r.Delete("/{id}", notificationHandler.DeleteRule)
-			}
+			r.Get("/", notificationHandler.ListRules)
+			r.Post("/", notificationHandler.CreateRule)
+			r.Put("/{id}", notificationHandler.UpdateRule)
+			r.Delete("/{id}", notificationHandler.DeleteRule)
+		})
+		r.Route("/settings/notification-templates", func(r chi.Router) {
+			r.Get("/", notificationHandler.ListTemplates)
+			r.Post("/", notificationHandler.CreateTemplate)
+			r.Put("/{id}", notificationHandler.UpdateTemplate)
+			r.Delete("/{id}", notificationHandler.DeleteTemplate)
 		})
 		r.Route("/settings/notification-channels", func(r chi.Router) {
-			if notificationHandler != nil {
-				r.Get("/", notificationHandler.ListChannels)
-				r.Post("/", notificationHandler.CreateChannel)
-				r.Post("/{id}/test", notificationHandler.TestChannel)
-			}
+			r.Get("/", notificationHandler.ListChannels)
+			r.Post("/", notificationHandler.CreateChannel)
+			r.Put("/{id}", notificationHandler.UpdateChannel)
+			r.Delete("/{id}", notificationHandler.DeleteChannel)
+			r.Post("/{id}/test", notificationHandler.TestChannel)
 		})
 
 		// DSR (Data Subject Requests)
@@ -422,26 +442,22 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Integrations
 		r.Route("/integrations", func(r chi.Router) {
-			if integrationHandler != nil {
-				r.Get("/", integrationHandler.ListIntegrations)
-				r.Post("/", integrationHandler.CreateIntegration)
-				r.Get("/{id}", integrationHandler.GetIntegration)
-				r.Put("/{id}", integrationHandler.UpdateIntegration)
-				r.Delete("/{id}", integrationHandler.DeleteIntegration)
-				r.Post("/{id}/test", integrationHandler.TestConnection)
-				r.Post("/{id}/sync", integrationHandler.TriggerSync)
-				r.Get("/{id}/logs", integrationHandler.GetSyncLogs)
-			}
+			r.Get("/", integrationHandler.ListIntegrations)
+			r.Post("/", integrationHandler.CreateIntegration)
+			r.Get("/{id}", integrationHandler.GetIntegration)
+			r.Put("/{id}", integrationHandler.UpdateIntegration)
+			r.Delete("/{id}", integrationHandler.DeleteIntegration)
+			r.Post("/{id}/test", integrationHandler.TestConnection)
+			r.Post("/{id}/sync", integrationHandler.TriggerSync)
+			r.Get("/{id}/logs", integrationHandler.GetSyncLogs)
 		})
 
 		// SSO & API Keys (under settings)
-		if integrationHandler != nil {
-			r.Get("/settings/sso", integrationHandler.GetSSOConfig)
-			r.Put("/settings/sso", integrationHandler.UpdateSSOConfig)
-			r.Get("/settings/api-keys", integrationHandler.ListAPIKeys)
-			r.Post("/settings/api-keys", integrationHandler.CreateAPIKey)
-			r.Delete("/settings/api-keys/{id}", integrationHandler.RevokeAPIKey)
-		}
+		r.Get("/settings/sso", integrationHandler.GetSSOConfig)
+		r.Put("/settings/sso", integrationHandler.UpdateSSOConfig)
+		r.Get("/settings/api-keys", integrationHandler.ListAPIKeys)
+		r.Post("/settings/api-keys", integrationHandler.CreateAPIKey)
+		r.Delete("/settings/api-keys/{id}", integrationHandler.RevokeAPIKey)
 
 		// Access Policies (ABAC)
 		r.Route("/access", func(r chi.Router) {

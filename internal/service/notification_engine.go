@@ -105,6 +105,12 @@ func NewNotificationEngineWithProtector(
 	return engine
 }
 
+// Ready reports whether the engine can persist and deliver every supported
+// production channel without falling back to plaintext secret storage.
+func (ne *NotificationEngine) Ready() bool {
+	return ne != nil && ne.pool != nil && ne.email != nil && ne.secrets != nil && ne.httpClient != nil
+}
+
 // Start begins listening for events from the EventBus and processes them in a background goroutine.
 func (ne *NotificationEngine) Start(ctx context.Context) {
 	ne.startOnce.Do(func() {
@@ -348,6 +354,42 @@ func (ne *NotificationEngine) RenderTemplate(tmplStr string, data map[string]int
 		return "", fmt.Errorf("rendered template exceeds maximum size")
 	}
 	return buf.String(), nil
+}
+
+// ValidateNotificationTemplateDefinition validates a persisted template before
+// it can be selected by a delivery rule. Runtime rendering remains strict, but
+// save-time validation prevents malformed or explicitly unsafe definitions
+// from entering the notification pipeline.
+func ValidateNotificationTemplateDefinition(subject, textBody, htmlBody string) error {
+	if strings.TrimSpace(subject) == "" {
+		return fmt.Errorf("subject_template is required")
+	}
+	if len(subject) > 256*1024 || len(textBody) > 256*1024 || len(htmlBody) > 256*1024 {
+		return fmt.Errorf("each template field must not exceed 256 KiB")
+	}
+	if strings.ContainsAny(subject, "\r\n") {
+		return fmt.Errorf("subject_template must not contain line breaks")
+	}
+	if strings.TrimSpace(textBody) == "" && strings.TrimSpace(htmlBody) == "" {
+		return fmt.Errorf("body_text_template or body_html_template is required")
+	}
+	if _, err := template.New("subject").Option("missingkey=error").Parse(subject); err != nil {
+		return fmt.Errorf("invalid subject_template: %w", err)
+	}
+	if textBody != "" {
+		if _, err := template.New("text").Option("missingkey=error").Parse(textBody); err != nil {
+			return fmt.Errorf("invalid body_text_template: %w", err)
+		}
+	}
+	if htmlBody != "" {
+		if _, err := htmltemplate.New("html").Option("missingkey=error").Parse(htmlBody); err != nil {
+			return fmt.Errorf("invalid body_html_template: %w", err)
+		}
+		if err := validateRenderedHTML(htmlBody); err != nil {
+			return fmt.Errorf("invalid body_html_template: %w", err)
+		}
+	}
+	return nil
 }
 
 func renderHTMLTemplate(tmplStr string, data map[string]interface{}) (string, error) {

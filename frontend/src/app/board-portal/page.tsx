@@ -1,13 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
 import {
   buildPortalApiUrl,
+  cleanPortalUrl,
+  getPortalEntryToken,
   PORTAL_API_ROUTES,
 } from '@/lib/portal-routes';
+import { fetchWithCsrf } from '@/lib/csrf-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -124,26 +127,40 @@ function FollowUpStatusBadge({ status }: { status: string }) {
 function BoardPortalInner() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
+  const initialized = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<BoardPortalData | null>(null);
 
   useEffect(() => {
-    if (!token) {
-      setError('Invalid or missing access token. Please use the link provided in your board pack email.');
-      setLoading(false);
-      return;
+    if (initialized.current) return;
+    initialized.current = true;
+
+    const inviteToken = getPortalEntryToken(token, window.location.hash);
+    if (inviteToken) {
+      window.history.replaceState(
+        window.history.state,
+        '',
+        cleanPortalUrl(window.location.href),
+      );
     }
-    const inviteToken = token;
 
     async function fetchPortalData() {
       try {
-        const res = await fetch(
-          buildPortalApiUrl(PORTAL_API_ROUTES.boardData, inviteToken)
-        );
+        const res = inviteToken
+          ? await fetchWithCsrf(buildPortalApiUrl(PORTAL_API_ROUTES.boardSession), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: inviteToken }),
+            })
+          : await fetch(buildPortalApiUrl(PORTAL_API_ROUTES.boardData));
         if (!res.ok) {
-          throw new Error(res.status === 401 ? 'Token expired or invalid' : 'Failed to load portal');
+          throw new Error(
+            [401, 404].includes(res.status)
+              ? 'Invitation expired or invalid. Please reopen the link from your board pack email.'
+              : 'Failed to load portal',
+          );
         }
         const json = await res.json();
         setData(json);

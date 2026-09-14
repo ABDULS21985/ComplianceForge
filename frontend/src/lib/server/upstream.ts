@@ -72,9 +72,16 @@ export function internalApiBaseUrl(): string {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('API_INTERNAL_URL must use http or https');
   }
+  if (parsed.username || parsed.password) {
+    throw new Error('API_INTERNAL_URL must not contain credentials');
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error('API_INTERNAL_URL must not contain a query string or fragment');
+  }
+  if (/\/{2,}/.test(parsed.pathname)) {
+    throw new Error('API_INTERNAL_URL path must not contain empty segments');
+  }
 
-  parsed.search = '';
-  parsed.hash = '';
   return parsed.toString().replace(/\/+$/, '');
 }
 

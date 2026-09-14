@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
@@ -15,6 +16,8 @@ import (
 	"github.com/complianceforge/platform/internal/database"
 	"github.com/complianceforge/platform/internal/handler"
 	"github.com/complianceforge/platform/internal/middleware"
+	emailpkg "github.com/complianceforge/platform/internal/pkg/email"
+	"github.com/complianceforge/platform/internal/pkg/secretbox"
 	"github.com/complianceforge/platform/internal/repository"
 	"github.com/complianceforge/platform/internal/service"
 )
@@ -29,6 +32,9 @@ type RouterDependencies struct {
 	Frameworks           *handler.FrameworkHandler
 	Controls             *handler.ControlHandler
 	Risks                *handler.RiskHandler
+	Policies             *handler.PolicyHandler
+	Notifications        *handler.NotificationHandler
+	Integrations         *handler.IntegrationHandler
 	AccessTokenValidator middleware.AccessTokenValidator
 	Authorizer           authz.Authorizer
 	HealthCheck          func(context.Context) error
@@ -40,18 +46,15 @@ type RouterDependencies struct {
 // composition slice. Keeping them in the dependency object makes their
 // disabled state explicit instead of creating hidden nil handlers in NewRouter.
 type DomainHandlers struct {
-	Policy           *handler.PolicyHandler
 	Audit            *handler.AuditHandler
 	Incident         *handler.IncidentHandler
 	Vendor           *handler.VendorHandler
 	Dashboard        *handler.DashboardHandler
 	Report           *handler.ReportHandler
-	Notification     *handler.NotificationHandler
 	DSR              *handler.DSRHandler
 	NIS2             *handler.NIS2Handler
 	Monitoring       *handler.MonitoringHandler
 	Workflow         *handler.WorkflowHandler
-	Integration      *handler.IntegrationHandler
 	Onboarding       *handler.OnboardingHandler
 	Access           *handler.AccessHandler
 	Remediation      *handler.RemediationHandler
@@ -88,6 +91,9 @@ var (
 	_ service.RiskManagementRepository        = repository.RiskRepository(nil)
 	_ service.RiskRepository                  = repository.RiskRepository(nil)
 	_ handler.RiskService                     = (*service.RiskService)(nil)
+	_ service.PolicyManagementRepository      = repository.PolicyRepository(nil)
+	_ handler.PolicyService                   = (*service.PolicyService)(nil)
+	_ handler.IntegrationSvc                  = (*service.IntegrationService)(nil)
 )
 
 // BuildDependencies composes repositories -> services -> handlers for the
@@ -110,6 +116,33 @@ func BuildDependencies(pool *pgxpool.Pool, cfg *config.Config) (RouterDependenci
 	complianceService := service.NewFrameworkService(frameworkRepo, controlRepo, log.Logger)
 	var riskRepo service.RiskManagementRepository = repository.NewRiskRepository(pool)
 	riskService := service.NewRiskService(riskRepo, log.Logger)
+	var policyRepo service.PolicyManagementRepository = repository.NewPolicyRepository(pool)
+	policyService := service.NewPolicyService(policyRepo, log.Logger)
+	integrationService, err := service.NewIntegrationService(pool, cfg.Encryption.IntegrationKey)
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building integration service: %w", err)
+	}
+	emailSender, err := emailpkg.NewSMTPEmailService(emailpkg.Config{
+		Host:       cfg.SMTP.Host,
+		Port:       cfg.SMTP.Port,
+		Username:   cfg.SMTP.User,
+		Password:   cfg.SMTP.Password,
+		From:       cfg.SMTP.From,
+		TLSMode:    cfg.SMTP.TLSMode,
+		Timeout:    time.Duration(cfg.SMTP.TimeoutSeconds) * time.Second,
+		HelloName:  cfg.SMTP.HelloName,
+		ServerName: cfg.SMTP.ServerName,
+	})
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building notification email transport: %w", err)
+	}
+	notificationProtector, err := secretbox.NewHex(cfg.Encryption.NotificationKey)
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building notification secret protector: %w", err)
+	}
+	notificationEngine := service.NewNotificationEngineWithProtector(
+		pool, service.NewEventBus(), emailSender, notificationProtector,
+	)
 	authorizer, err := service.NewRBACAuthorizer(pool)
 	if err != nil {
 		return RouterDependencies{}, fmt.Errorf("building authorization service: %w", err)
@@ -121,6 +154,9 @@ func BuildDependencies(pool *pgxpool.Pool, cfg *config.Config) (RouterDependenci
 		Frameworks:           handler.NewFrameworkHandler(complianceService),
 		Controls:             handler.NewControlHandler(complianceService),
 		Risks:                handler.NewRiskHandler(riskService),
+		Policies:             handler.NewPolicyHandler(policyService),
+		Notifications:        handler.NewNotificationHandler(pool, notificationEngine, notificationProtector),
+		Integrations:         handler.NewIntegrationHandler(integrationService),
 		AccessTokenValidator: authService,
 		Authorizer:           authorizer,
 		HealthCheck: func(ctx context.Context) error {
@@ -151,6 +187,15 @@ func (d RouterDependencies) Validate() error {
 	}
 	if d.Risks == nil || !d.Risks.Ready() {
 		missing = append(missing, errors.New("risk handler is required"))
+	}
+	if d.Policies == nil || !d.Policies.Ready() {
+		missing = append(missing, errors.New("policy handler is required"))
+	}
+	if d.Notifications == nil || !d.Notifications.Ready() {
+		missing = append(missing, errors.New("notification handler is required"))
+	}
+	if d.Integrations == nil || !d.Integrations.Ready() {
+		missing = append(missing, errors.New("integration handler is required"))
 	}
 	if d.AccessTokenValidator == nil {
 		missing = append(missing, errors.New("access-token validator is required"))

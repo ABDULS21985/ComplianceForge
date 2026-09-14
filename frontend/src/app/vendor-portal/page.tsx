@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
 import {
   buildPortalApiUrl,
+  cleanPortalUrl,
+  getPortalEntryToken,
   PORTAL_API_ROUTES,
 } from '@/lib/portal-routes';
 import { fetchWithCsrf } from '@/lib/csrf-client';
@@ -218,6 +220,7 @@ function QuestionInput({
 function VendorPortalInner() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
+  const initialized = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -231,20 +234,33 @@ function VendorPortalInner() {
 
   // Token validation & questionnaire fetch
   useEffect(() => {
-    if (!token) {
-      setError('Invalid or missing access token. Please use the link provided in your email.');
-      setLoading(false);
-      return;
+    if (initialized.current) return;
+    initialized.current = true;
+
+    const inviteToken = getPortalEntryToken(token, window.location.hash);
+    if (inviteToken) {
+      window.history.replaceState(
+        window.history.state,
+        '',
+        cleanPortalUrl(window.location.href),
+      );
     }
-    const inviteToken = token;
 
     async function fetchQuestionnaire() {
       try {
-        const res = await fetch(
-          buildPortalApiUrl(PORTAL_API_ROUTES.vendorQuestionnaire, inviteToken)
-        );
+        const res = inviteToken
+          ? await fetchWithCsrf(buildPortalApiUrl(PORTAL_API_ROUTES.vendorSession), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: inviteToken }),
+            })
+          : await fetch(buildPortalApiUrl(PORTAL_API_ROUTES.vendorQuestionnaire));
         if (!res.ok) {
-          throw new Error(res.status === 401 ? 'Token expired or invalid' : 'Failed to load questionnaire');
+          throw new Error(
+            [401, 404].includes(res.status)
+              ? 'Invitation expired or invalid. Please reopen the link from your email.'
+              : 'Failed to load questionnaire',
+          );
         }
         const data = await res.json();
         setQuestionnaire(data);
@@ -263,11 +279,11 @@ function VendorPortalInner() {
 
   // Auto-save
   const autoSave = useCallback(async () => {
-    if (!token || !questionnaire || Object.keys(answers).length === 0) return;
+    if (!questionnaire || Object.keys(answers).length === 0) return true;
     setSaving(true);
     try {
       const response = await fetchWithCsrf(
-        buildPortalApiUrl(PORTAL_API_ROUTES.vendorSave, token),
+        buildPortalApiUrl(PORTAL_API_ROUTES.vendorSave),
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -276,12 +292,14 @@ function VendorPortalInner() {
       );
       if (!response.ok) throw new Error('Unable to save responses');
       setLastSaved(new Date().toLocaleTimeString());
+      return true;
     } catch {
       // Silently fail auto-save
+      return false;
     } finally {
       setSaving(false);
     }
-  }, [token, questionnaire, answers]);
+  }, [questionnaire, answers]);
 
   useEffect(() => {
     const interval = setInterval(autoSave, 30000); // auto-save every 30s
@@ -300,15 +318,14 @@ function VendorPortalInner() {
   };
 
   const handleSubmit = async () => {
-    if (!token || !questionnaire) return;
+    if (!questionnaire) return;
     setSubmitting(true);
     try {
+      if (!(await autoSave())) throw new Error('Unable to save responses before submission');
       const res = await fetchWithCsrf(
-        buildPortalApiUrl(PORTAL_API_ROUTES.vendorSubmit, token),
+        buildPortalApiUrl(PORTAL_API_ROUTES.vendorSubmit),
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ answers }),
         }
       );
       if (!res.ok) throw new Error('Submission failed');

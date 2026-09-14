@@ -96,6 +96,29 @@ type notificationChannelResponse struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
+type notificationTemplateInput struct {
+	Name             string   `json:"name"`
+	EventType        string   `json:"event_type"`
+	SubjectTemplate  string   `json:"subject_template"`
+	BodyHTMLTemplate string   `json:"body_html_template"`
+	BodyTextTemplate string   `json:"body_text_template"`
+	Variables        []string `json:"variables"`
+}
+
+type notificationTemplateResponse struct {
+	ID               string    `json:"id"`
+	OrgID            *string   `json:"organization_id"`
+	Name             string    `json:"name"`
+	EventType        string    `json:"event_type"`
+	SubjectTemplate  string    `json:"subject_template"`
+	BodyHTMLTemplate string    `json:"body_html_template"`
+	BodyTextTemplate string    `json:"body_text_template"`
+	Variables        []string  `json:"variables"`
+	IsSystem         bool      `json:"is_system"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
 // NewNotificationHandler creates a new NotificationHandler.
 func NewNotificationHandler(
 	pool *pgxpool.Pool,
@@ -112,7 +135,7 @@ func NewNotificationHandler(
 // Ready reports whether the handler has all dependencies needed for both
 // persisted notification APIs and channel test delivery.
 func (h *NotificationHandler) Ready() bool {
-	return h != nil && h.pool != nil && h.engine != nil && h.protector != nil
+	return h != nil && h.pool != nil && h.engine != nil && h.engine.Ready() && h.protector != nil
 }
 
 // --------------------------------------------------------------------------
@@ -628,6 +651,202 @@ func (h *NotificationHandler) DeleteRule(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ListTemplates handles GET /settings/notification-templates and returns both
+// immutable system templates and tenant-owned overrides.
+func (h *NotificationHandler) ListTemplates(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgIDFromContext(r.Context())
+	if orgID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required", "")
+		return
+	}
+	pagination := parsePagination(r)
+	offset := (pagination.Page - 1) * pagination.PageSize
+	querier := database.QuerierFromContext(r.Context(), h.pool)
+
+	var total int
+	if err := querier.QueryRow(r.Context(), `
+		SELECT COUNT(*) FROM notification_templates
+		WHERE organization_id IS NULL OR organization_id=$1`, orgID).Scan(&total); err != nil {
+		writeNotificationInternalError(w, r, "count notification templates", "Failed to list templates", err)
+		return
+	}
+	rows, err := querier.Query(r.Context(), `
+		SELECT id, organization_id, name, event_type,
+		       COALESCE(subject_template,''), COALESCE(body_html_template,''),
+		       COALESCE(body_text_template,''), COALESCE(variables,'{}'::text[]),
+		       is_system, created_at, updated_at
+		FROM notification_templates
+		WHERE organization_id IS NULL OR organization_id=$1
+		ORDER BY is_system DESC, name ASC, created_at DESC
+		LIMIT $2 OFFSET $3`, orgID, pagination.PageSize, offset)
+	if err != nil {
+		writeNotificationInternalError(w, r, "list notification templates", "Failed to list templates", err)
+		return
+	}
+	defer rows.Close()
+	templates := make([]notificationTemplateResponse, 0)
+	for rows.Next() {
+		var item notificationTemplateResponse
+		if err := rows.Scan(
+			&item.ID, &item.OrgID, &item.Name, &item.EventType,
+			&item.SubjectTemplate, &item.BodyHTMLTemplate, &item.BodyTextTemplate,
+			&item.Variables, &item.IsSystem, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
+			writeNotificationInternalError(w, r, "scan notification template", "Failed to list templates", err)
+			return
+		}
+		templates = append(templates, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeNotificationInternalError(w, r, "iterate notification templates", "Failed to list templates", err)
+		return
+	}
+
+	totalPages := 0
+	if pagination.PageSize > 0 {
+		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"data": templates,
+		"pagination": models.PaginationResponse{
+			Page: pagination.Page, PageSize: pagination.PageSize,
+			TotalItems: total, TotalPages: totalPages,
+		},
+	})
+}
+
+// CreateTemplate handles POST /settings/notification-templates.
+func (h *NotificationHandler) CreateTemplate(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgIDFromContext(r.Context())
+	if orgID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required", "")
+		return
+	}
+	var input notificationTemplateInput
+	if err := decodeNotificationJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if err := validateNotificationTemplateInput(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid notification template", err.Error())
+		return
+	}
+
+	var templateID string
+	err := database.QuerierFromContext(r.Context(), h.pool).QueryRow(r.Context(), `
+		INSERT INTO notification_templates
+			(organization_id,name,event_type,subject_template,body_html_template,
+			 body_text_template,variables,is_system,created_at,updated_at)
+		VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,false,NOW(),NOW())
+		ON CONFLICT (organization_id,event_type,name) DO NOTHING
+		RETURNING id`, orgID, input.Name, input.EventType, input.SubjectTemplate,
+		input.BodyHTMLTemplate, input.BodyTextTemplate, input.Variables).Scan(&templateID)
+	if err == pgx.ErrNoRows {
+		writeError(w, http.StatusConflict, "A template with this name and event type already exists", "")
+		return
+	}
+	if err != nil {
+		writeNotificationInternalError(w, r, "create notification template", "Failed to create template", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"id": templateID, "message": "Notification template created",
+	})
+}
+
+// UpdateTemplate handles PUT /settings/notification-templates/{id}. System
+// templates are intentionally immutable through tenant APIs.
+func (h *NotificationHandler) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgIDFromContext(r.Context())
+	if orgID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required", "")
+		return
+	}
+	templateID := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(templateID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid template ID", "")
+		return
+	}
+	var input notificationTemplateInput
+	if err := decodeNotificationJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if err := validateNotificationTemplateInput(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid notification template", err.Error())
+		return
+	}
+	querier := database.QuerierFromContext(r.Context(), h.pool)
+	var duplicate bool
+	if err := querier.QueryRow(r.Context(), `
+		SELECT EXISTS(SELECT 1 FROM notification_templates
+		 WHERE organization_id=$1 AND event_type=$2 AND name=$3 AND id<>$4)`,
+		orgID, input.EventType, input.Name, templateID).Scan(&duplicate); err != nil {
+		writeNotificationInternalError(w, r, "check notification template uniqueness", "Failed to update template", err)
+		return
+	}
+	if duplicate {
+		writeError(w, http.StatusConflict, "A template with this name and event type already exists", "")
+		return
+	}
+	result, err := querier.Exec(r.Context(), `
+		UPDATE notification_templates
+		SET name=$1,event_type=$2,subject_template=$3,body_html_template=NULLIF($4,''),
+		    body_text_template=NULLIF($5,''),variables=$6,updated_at=NOW()
+		WHERE id=$7 AND organization_id=$8 AND is_system=false`,
+		input.Name, input.EventType, input.SubjectTemplate, input.BodyHTMLTemplate,
+		input.BodyTextTemplate, input.Variables, templateID, orgID)
+	if err != nil {
+		writeNotificationInternalError(w, r, "update notification template", "Failed to update template", err)
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "Template not found", "")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id": templateID, "message": "Notification template updated",
+	})
+}
+
+// DeleteTemplate handles DELETE /settings/notification-templates/{id}.
+func (h *NotificationHandler) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgIDFromContext(r.Context())
+	if orgID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required", "")
+		return
+	}
+	templateID := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(templateID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid template ID", "")
+		return
+	}
+	querier := database.QuerierFromContext(r.Context(), h.pool)
+	var usedByRule bool
+	if err := querier.QueryRow(r.Context(), `
+		SELECT EXISTS(SELECT 1 FROM notification_rules
+		 WHERE organization_id=$1 AND template_id=$2 AND is_active=true)`, orgID, templateID).Scan(&usedByRule); err != nil {
+		writeNotificationInternalError(w, r, "check notification template references", "Failed to delete template", err)
+		return
+	}
+	if usedByRule {
+		writeError(w, http.StatusConflict, "Template is used by a notification rule", "")
+		return
+	}
+	result, err := querier.Exec(r.Context(), `
+		DELETE FROM notification_templates
+		WHERE id=$1 AND organization_id=$2 AND is_system=false`, templateID, orgID)
+	if err != nil {
+		writeNotificationInternalError(w, r, "delete notification template", "Failed to delete template", err)
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "Template not found", "")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ListChannels handles GET /settings/notification-channels.
 func (h *NotificationHandler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	orgID := middleware.GetOrgIDFromContext(r.Context())
@@ -734,6 +953,113 @@ func (h *NotificationHandler) CreateChannel(w http.ResponseWriter, r *http.Reque
 		"id":      channelID,
 		"message": "Notification channel created",
 	})
+}
+
+// UpdateChannel handles PUT /settings/notification-channels/{id}. Channel
+// configuration is replaced atomically and re-encrypted with tenant- and
+// resource-bound associated data.
+func (h *NotificationHandler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgIDFromContext(r.Context())
+	if orgID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required", "")
+		return
+	}
+	channelID := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(channelID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid channel ID", "")
+		return
+	}
+
+	var input notificationChannelInput
+	if err := decodeNotificationJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if err := validateNotificationChannelInput(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid notification channel", err.Error())
+		return
+	}
+	if h.protector == nil {
+		writeError(w, http.StatusServiceUnavailable, "Notification secret protection is unavailable", "")
+		return
+	}
+	configJSON, err := h.protector.SealJSON(
+		orgID, notificationChannelConfigPurpose(channelID), input.Config,
+	)
+	if err != nil {
+		writeNotificationInternalError(w, r, "protect notification channel", "Failed to protect channel configuration", err)
+		return
+	}
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+
+	result, err := database.QuerierFromContext(r.Context(), h.pool).Exec(r.Context(), `
+		UPDATE notification_channels
+		SET name=$1, channel_type=$2, configuration=$3, is_active=$4, updated_at=NOW()
+		WHERE id=$5 AND organization_id=$6 AND deleted_at IS NULL`,
+		input.Name, input.ChannelType, configJSON, isActive, channelID, orgID,
+	)
+	if err != nil {
+		writeNotificationInternalError(w, r, "update notification channel", "Failed to update channel", err)
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "Channel not found", "")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id":      channelID,
+		"message": "Notification channel updated",
+	})
+}
+
+// DeleteChannel handles DELETE /settings/notification-channels/{id}. A
+// channel used by an active routing rule must first be removed from that rule,
+// avoiding silent loss of mandatory notifications.
+func (h *NotificationHandler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
+	orgID := middleware.GetOrgIDFromContext(r.Context())
+	if orgID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required", "")
+		return
+	}
+	channelID := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(channelID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid channel ID", "")
+		return
+	}
+	querier := database.QuerierFromContext(r.Context(), h.pool)
+
+	var usedByActiveRule bool
+	if err := querier.QueryRow(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1 FROM notification_rules
+			WHERE organization_id=$1 AND is_active=true
+			  AND $2::uuid = ANY(COALESCE(channel_ids, '{}'::uuid[]))
+		)`, orgID, channelID).Scan(&usedByActiveRule); err != nil {
+		writeNotificationInternalError(w, r, "check notification channel references", "Failed to delete channel", err)
+		return
+	}
+	if usedByActiveRule {
+		writeError(w, http.StatusConflict, "Channel is used by an active notification rule", "")
+		return
+	}
+
+	result, err := querier.Exec(r.Context(), `
+		UPDATE notification_channels
+		SET is_active=false, deleted_at=NOW(), configuration='{}'::jsonb, updated_at=NOW()
+		WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL`, channelID, orgID)
+	if err != nil {
+		writeNotificationInternalError(w, r, "delete notification channel", "Failed to delete channel", err)
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "Channel not found", "")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // TestChannel handles POST /settings/notification-channels/{id}/test.
@@ -1002,6 +1328,37 @@ func validateNotificationChannelInput(input *notificationChannelInput) error {
 		return fmt.Errorf("channel_type must be email, in_app, webhook, or slack")
 	}
 	return nil
+}
+
+func validateNotificationTemplateInput(input *notificationTemplateInput) error {
+	input.Name = strings.TrimSpace(input.Name)
+	input.EventType = strings.ToLower(strings.TrimSpace(input.EventType))
+	if input.Name == "" || len([]rune(input.Name)) > 200 {
+		return fmt.Errorf("name is required and must not exceed 200 characters")
+	}
+	if !validNotificationToken(input.EventType, 100) {
+		return fmt.Errorf("event_type must be a lowercase event token")
+	}
+	variables := make([]string, 0, len(input.Variables))
+	seen := make(map[string]struct{}, len(input.Variables))
+	if len(input.Variables) > 100 {
+		return fmt.Errorf("variables cannot contain more than 100 entries")
+	}
+	for _, variable := range input.Variables {
+		variable = strings.ToLower(strings.TrimSpace(variable))
+		if !validNotificationToken(variable, 100) {
+			return fmt.Errorf("variables must contain lowercase event tokens")
+		}
+		if _, exists := seen[variable]; exists {
+			return fmt.Errorf("variables contains a duplicate")
+		}
+		seen[variable] = struct{}{}
+		variables = append(variables, variable)
+	}
+	input.Variables = variables
+	return service.ValidateNotificationTemplateDefinition(
+		input.SubjectTemplate, input.BodyTextTemplate, input.BodyHTMLTemplate,
+	)
 }
 
 func redactNotificationChannelConfig(channelType string, config map[string]any) (map[string]any, error) {

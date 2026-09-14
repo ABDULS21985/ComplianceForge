@@ -911,9 +911,13 @@ class ApiClient {
   // ========================================================================
 
   vendorPortal = {
-    getQuestionnaire: (token: string) => this.get<any>(`/vendor-portal/questionnaire`, { token }),
-    saveAnswers: (token: string, data: any) => this.post<any>('/vendor-portal/save', data, { signal: undefined }),
-    submit: (token: string, data: any) => this.post<any>('/vendor-portal/submit', data),
+    startSession: (token: string) =>
+      this.post<any>('/api/portal/vendor-portal/session', { token }),
+    getQuestionnaire: () =>
+      this.get<any>('/api/portal/vendor-portal/questionnaire'),
+    saveAnswers: (data: any) =>
+      this.post<any>('/api/portal/vendor-portal/save', data, { signal: undefined }),
+    submit: () => this.post<any>('/api/portal/vendor-portal/submit'),
   };
 
   // ========================================================================
@@ -952,8 +956,9 @@ class ApiClient {
   // ========================================================================
 
   boardPortal = {
-    getData: (token: string) => this.get<any>('/board-portal', { token }),
-    downloadPack: (token: string, packId: string) => this.get<Blob>(`/board-portal/packs/${packId}/download`, { token }),
+    startSession: (token: string) =>
+      this.post<any>('/api/portal/board-portal/session', { token }),
+    getData: () => this.get<any>('/api/portal/board-portal'),
   };
 
   // ========================================================================

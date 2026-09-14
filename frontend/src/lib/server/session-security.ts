@@ -3,13 +3,8 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-import {
-  ACCESS_TOKEN_COOKIE,
-  CSRF_ERROR_HEADER,
-  CSRF_TOKEN_COOKIE,
-  CSRF_TOKEN_HEADER,
-  REFRESH_TOKEN_COOKIE,
-} from '@/lib/auth-constants';
+import { CSRF_ERROR_HEADER, CSRF_TOKEN_HEADER } from '@/lib/auth-constants';
+import { publicRequestOrigin, sessionCookiePolicy } from '@/lib/request-security';
 
 const ACCESS_TOKEN_FALLBACK_MAX_AGE_SECONDS = 15 * 60;
 const ACCESS_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
@@ -29,24 +24,28 @@ const sessionCookieOptions = {
   httpOnly: true,
   path: '/',
   sameSite: 'lax' as const,
-  secure: true,
 };
 
 const csrfCookieOptions = {
   httpOnly: true,
   path: '/',
   sameSite: 'strict' as const,
-  secure: true,
 };
 
 export function createCsrfToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
-export function setCsrfCookie(response: NextResponse, token: string): void {
-  response.cookies.set(CSRF_TOKEN_COOKIE, token, {
+export function setCsrfCookie(
+  request: NextRequest,
+  response: NextResponse,
+  token: string,
+): void {
+  const policy = sessionCookiePolicy(request);
+  response.cookies.set(policy.csrf, token, {
     ...csrfCookieOptions,
     maxAge: CSRF_TOKEN_MAX_AGE_SECONDS,
+    secure: policy.secure,
   });
 }
 
@@ -60,36 +59,38 @@ function accessTokenMaxAge(expiresAt: string): number {
   return Math.max(1, Math.min(remaining, ACCESS_TOKEN_MAX_AGE_SECONDS));
 }
 
-export function setSessionCookies(response: NextResponse, pair: SessionTokenPair): void {
-  response.cookies.set(ACCESS_TOKEN_COOKIE, pair.access_token, {
+export function setSessionCookies(
+  request: NextRequest,
+  response: NextResponse,
+  pair: SessionTokenPair,
+): void {
+  const policy = sessionCookiePolicy(request);
+  response.cookies.set(policy.access, pair.access_token, {
     ...sessionCookieOptions,
     maxAge: accessTokenMaxAge(pair.expires_at),
+    secure: policy.secure,
   });
-  response.cookies.set(REFRESH_TOKEN_COOKIE, pair.refresh_token, {
+  response.cookies.set(policy.refresh, pair.refresh_token, {
     ...sessionCookieOptions,
     maxAge: REFRESH_TOKEN_MAX_AGE_SECONDS,
+    secure: policy.secure,
   });
 }
 
-export function clearSessionCookies(response: NextResponse): void {
+export function clearSessionCookies(request: NextRequest, response: NextResponse): void {
+  const policy = sessionCookiePolicy(request);
   for (const [name, options] of [
-    [ACCESS_TOKEN_COOKIE, sessionCookieOptions],
-    [REFRESH_TOKEN_COOKIE, sessionCookieOptions],
-    [CSRF_TOKEN_COOKIE, csrfCookieOptions],
+    [policy.access, sessionCookieOptions],
+    [policy.refresh, sessionCookieOptions],
+    [policy.csrf, csrfCookieOptions],
   ] as const) {
     response.cookies.set(name, '', {
       ...options,
       expires: new Date(0),
       maxAge: 0,
+      secure: policy.secure,
     });
   }
-}
-
-function expectedOrigin(request: NextRequest): string {
-  // Next constructs nextUrl from the effective request URL. Avoid trusting
-  // client-supplied X-Forwarded-* values unless the deployment has explicitly
-  // normalized them before the request reaches this process.
-  return request.nextUrl.origin;
 }
 
 function securelyEqual(left: string, right: string): boolean {
@@ -116,14 +117,14 @@ export function verifyCsrf(request: NextRequest): CsrfVerification {
   }
 
   try {
-    if (new URL(origin).origin !== new URL(expectedOrigin(request)).origin) {
+    if (new URL(origin).origin !== publicRequestOrigin(request)) {
       return { ok: false, message: 'Request origin does not match' };
     }
   } catch {
     return { ok: false, message: 'Invalid request origin' };
   }
 
-  const cookieToken = request.cookies.get(CSRF_TOKEN_COOKIE)?.value;
+  const cookieToken = request.cookies.get(sessionCookiePolicy(request).csrf)?.value;
   const headerToken = request.headers.get(CSRF_TOKEN_HEADER);
   if (!cookieToken || !headerToken || !securelyEqual(cookieToken, headerToken)) {
     return { ok: false, message: 'CSRF token is missing or invalid' };

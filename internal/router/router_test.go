@@ -10,12 +10,16 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	authdomain "github.com/complianceforge/platform/internal/auth"
 	"github.com/complianceforge/platform/internal/authz"
 	"github.com/complianceforge/platform/internal/config"
 	"github.com/complianceforge/platform/internal/handler"
 	"github.com/complianceforge/platform/internal/models"
+	emailpkg "github.com/complianceforge/platform/internal/pkg/email"
+	"github.com/complianceforge/platform/internal/pkg/secretbox"
+	"github.com/complianceforge/platform/internal/service"
 )
 
 const (
@@ -23,11 +27,16 @@ const (
 	testOrgID       = "20000000-0000-0000-0000-000000000010"
 	testFrameworkID = "30000000-0000-0000-0000-000000000010"
 	testControlID   = "40000000-0000-0000-0000-000000000010"
+	testPolicyID    = "90000000-0000-0000-0000-000000000010"
 )
 
 type routerAuthService struct {
 	user *models.User
 }
+
+type routerEmailSender struct{}
+
+func (routerEmailSender) Send(context.Context, emailpkg.Message) error { return nil }
 
 func (s *routerAuthService) Login(context.Context, authdomain.LoginRequest) (*authdomain.TokenPair, error) {
 	return routerTokenPair(s.user), nil
@@ -75,6 +84,27 @@ type routerOrganizationService struct {
 type routerComplianceService struct{}
 
 type routerRiskService struct{ risk *models.Risk }
+
+type routerPolicyService struct {
+	handler.PolicyService
+	policy *models.Policy
+}
+
+func (s routerPolicyService) Create(context.Context, string, string, models.PolicyCreateInput) (*models.Policy, error) {
+	return s.policy, nil
+}
+
+func (s routerPolicyService) GetByID(context.Context, string, string) (*models.Policy, error) {
+	return s.policy, nil
+}
+
+func (s routerPolicyService) List(context.Context, string, models.PolicyListFilter) ([]models.Policy, int, error) {
+	return []models.Policy{*s.policy}, 1, nil
+}
+
+func (routerPolicyService) ListCategories(context.Context, string) ([]models.PolicyCategory, error) {
+	return []models.PolicyCategory{}, nil
+}
 
 func (s routerRiskService) Create(context.Context, string, models.RiskCreateInput) (*models.Risk, error) {
 	return s.risk, nil
@@ -206,6 +236,12 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"unconfigured control handler", func(d *RouterDependencies) { d.Controls = handler.NewControlHandler(nil) }, "control handler is required"},
 		{"risk handler", func(d *RouterDependencies) { d.Risks = nil }, "risk handler is required"},
 		{"unconfigured risk handler", func(d *RouterDependencies) { d.Risks = handler.NewRiskHandler(nil) }, "risk handler is required"},
+		{"policy handler", func(d *RouterDependencies) { d.Policies = nil }, "policy handler is required"},
+		{"unconfigured policy handler", func(d *RouterDependencies) { d.Policies = handler.NewPolicyHandler(nil) }, "policy handler is required"},
+		{"notification handler", func(d *RouterDependencies) { d.Notifications = nil }, "notification handler is required"},
+		{"unconfigured notification handler", func(d *RouterDependencies) { d.Notifications = handler.NewNotificationHandler(nil, nil) }, "notification handler is required"},
+		{"integration handler", func(d *RouterDependencies) { d.Integrations = nil }, "integration handler is required"},
+		{"unconfigured integration handler", func(d *RouterDependencies) { d.Integrations = handler.NewIntegrationHandler(nil) }, "integration handler is required"},
 		{"token validator", func(d *RouterDependencies) { d.AccessTokenValidator = nil }, "access-token validator is required"},
 		{"authorizer", func(d *RouterDependencies) { d.Authorizer = nil }, "authorizer is required"},
 		{"typed nil authorizer", func(d *RouterDependencies) { var authorizer *routerAuthorizer; d.Authorizer = authorizer }, "authorizer is required"},
@@ -311,6 +347,9 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 		{name: "risk matrix", method: http.MethodGet, path: "/api/v1/risks/matrix", authorized: true, wantStatus: http.StatusOK},
 		{name: "risk categories", method: http.MethodGet, path: "/api/v1/risks/categories", authorized: true, wantStatus: http.StatusOK},
 		{name: "create assessment", method: http.MethodPost, path: "/api/v1/risks/80000000-0000-0000-0000-000000000010/assessments", body: `{"assessment_type":"periodic","likelihood_after":3,"impact_after":4}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "list policies", method: http.MethodGet, path: "/api/v1/policies", authorized: true, wantStatus: http.StatusOK},
+		{name: "create policy", method: http.MethodPost, path: "/api/v1/policies", body: `{"title":"Security policy","initial_version":{"content_text":"Policy content"}}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "policy categories", method: http.MethodGet, path: "/api/v1/policies/categories", authorized: true, wantStatus: http.StatusOK},
 	}
 
 	for _, tt := range tests {
@@ -359,6 +398,18 @@ func TestRouterHealthEndpoints(t *testing.T) {
 }
 
 func testRouterDependencies() RouterDependencies {
+	dummyPool := new(pgxpool.Pool)
+	notificationProtector, err := secretbox.NewHex(strings.Repeat("ab", 32))
+	if err != nil {
+		panic(err)
+	}
+	notificationEngine := service.NewNotificationEngineWithProtector(
+		dummyPool, service.NewEventBus(), routerEmailSender{}, notificationProtector,
+	)
+	integrationService, err := service.NewIntegrationService(dummyPool, strings.Repeat("cd", 32))
+	if err != nil {
+		panic(err)
+	}
 	user := &models.User{
 		TenantModel: models.TenantModel{
 			BaseModel:      models.BaseModel{ID: testUserID},
@@ -382,12 +433,19 @@ func testRouterDependencies() RouterDependencies {
 		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: "80000000-0000-0000-0000-000000000010"}, OrganizationID: testOrgID},
 		RiskRef:     "RSK-0001", Title: "Availability", Status: models.RiskStatusIdentified,
 	}
+	policy := &models.Policy{
+		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testPolicyID}, OrganizationID: testOrgID},
+		PolicyRef:   "POL-0001", Title: "Security policy", Status: models.PolicyStateDraft,
+	}
 	return RouterDependencies{
 		Auth:          handler.NewAuthHandler(&routerAuthService{user: user}),
 		Organizations: handler.NewOrganizationHandler(&routerOrganizationService{organization: organization}),
 		Frameworks:    handler.NewFrameworkHandler(routerComplianceService{}),
 		Controls:      handler.NewControlHandler(routerComplianceService{}),
 		Risks:         handler.NewRiskHandler(routerRiskService{risk: risk}),
+		Policies:      handler.NewPolicyHandler(routerPolicyService{policy: policy}),
+		Notifications: handler.NewNotificationHandler(dummyPool, notificationEngine, notificationProtector),
+		Integrations:  handler.NewIntegrationHandler(integrationService),
 		AccessTokenValidator: routerTokenValidator{claims: &authdomain.Claims{
 			UserID:         testUserID,
 			OrganizationID: testOrgID,

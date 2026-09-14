@@ -102,9 +102,15 @@ func policyReferenceChecks() string {
 		AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM policy_categories c WHERE c.id=$4::uuid AND (c.organization_id IS NULL OR c.organization_id=$1::uuid)))
 		AND ($6::uuid IS NULL OR EXISTS (SELECT 1 FROM users u WHERE u.id=$6::uuid AND u.organization_id=$1::uuid AND u.deleted_at IS NULL))
 		AND ($7::uuid IS NULL OR EXISTS (SELECT 1 FROM users u WHERE u.id=$7::uuid AND u.organization_id=$1::uuid AND u.deleted_at IS NULL))
-		AND ($20::uuid IS NULL OR EXISTS (SELECT 1 FROM policies x WHERE x.id=$20::uuid AND x.organization_id=$1::uuid AND x.deleted_at IS NULL))
-		AND ($21::uuid IS NULL OR EXISTS (SELECT 1 FROM policies x WHERE x.id=$21::uuid AND x.organization_id=$1::uuid AND x.deleted_at IS NULL))
-		AND NOT EXISTS (SELECT 1 FROM unnest($17::uuid[]) id WHERE NOT EXISTS (SELECT 1 FROM risks r WHERE r.id=id AND r.organization_id=$1::uuid AND r.deleted_at IS NULL))`
+		AND ($18::uuid IS NULL OR EXISTS (SELECT 1 FROM policies x WHERE x.id=$18::uuid AND x.organization_id=$1::uuid AND x.deleted_at IS NULL))
+		AND ($19::uuid IS NULL OR EXISTS (SELECT 1 FROM policies x WHERE x.id=$19::uuid AND x.organization_id=$1::uuid AND x.deleted_at IS NULL))
+		AND NOT EXISTS (SELECT 1 FROM unnest($15::uuid[]) AS linked(id) WHERE NOT EXISTS (
+			SELECT 1 FROM compliance_frameworks f WHERE f.id=linked.id AND f.deleted_at IS NULL
+			AND (f.organization_id IS NULL OR f.organization_id=$1::uuid)))
+		AND NOT EXISTS (SELECT 1 FROM unnest($16::uuid[]) AS linked(id) WHERE NOT EXISTS (
+			SELECT 1 FROM framework_controls fc JOIN compliance_frameworks f ON f.id=fc.framework_id
+			WHERE fc.id=linked.id AND f.deleted_at IS NULL AND (f.organization_id IS NULL OR f.organization_id=$1::uuid)))
+		AND NOT EXISTS (SELECT 1 FROM unnest($17::uuid[]) AS linked(id) WHERE NOT EXISTS (SELECT 1 FROM risks r WHERE r.id=linked.id AND r.organization_id=$1::uuid AND r.deleted_at IS NULL))`
 }
 
 func (r *policyRepo) Create(ctx context.Context, orgID, userID string, input models.PolicyCreateInput, wordCount int) (*models.Policy, error) {
@@ -132,8 +138,8 @@ func (r *policyRepo) Create(ctx context.Context, orgID, userID string, input mod
 		attestation_frequency_months, metadata)
 		SELECT $1::uuid, NULLIF($2,''), $3, $4::uuid, $5, $6::uuid, $8::uuid,
 			$7::uuid, $9::uuid, $10, $11, $12::uuid[], $13::text[], $14::text[],
-			$15::uuid[], $16::uuid[], $17::uuid[], $20::uuid, $21::uuid,
-			$22::date, $23::text[], $24, $25, $26, $27, $28::jsonb
+			$15::uuid[], $16::uuid[], $17::uuid[], $18::uuid, $19::uuid,
+			$20::date, $21::text[], $22, $23, $24, $25, $26::jsonb
 		WHERE EXISTS (SELECT 1 FROM users u WHERE u.id=$8::uuid AND u.organization_id=$1::uuid AND u.deleted_at IS NULL)`+
 		policyReferenceChecks()+`
 		RETURNING `+policyColumns, orgID, input.PolicyRef, input.Title, input.CategoryID,
@@ -141,7 +147,7 @@ func (r *policyRepo) Create(ctx context.Context, orgID, userID string, input mod
 		input.DepartmentID, input.ReviewFrequencyMonths, *input.AppliesToAll,
 		input.ApplicableDepartments, input.ApplicableRoles, input.ApplicableLocations,
 		input.LinkedFrameworkIDs, input.LinkedControlIDs, input.LinkedRiskIDs,
-		nil, nil, input.ParentPolicyID, input.SupersedesPolicyID, input.ExpiryDate,
+		input.ParentPolicyID, input.SupersedesPolicyID, input.ExpiryDate,
 		input.Tags, input.Priority, *input.IsMandatory, *input.RequiresAttestation,
 		input.AttestationFrequencyMonths, input.Metadata))
 	if err != nil {
@@ -199,10 +205,10 @@ func (r *policyRepo) Update(ctx context.Context, orgID string, p *models.Policy)
 			applicable_departments=$11::uuid[], applicable_roles=$12::text[],
 			applicable_locations=$13::text[], linked_framework_ids=$14::uuid[],
 			linked_control_ids=$15::uuid[], linked_risk_ids=$16::uuid[],
-			parent_policy_id=$20::uuid, supersedes_policy_id=$21::uuid,
-			expiry_date=$22::date, tags=$23::text[], priority=$24,
-			is_mandatory=$25, requires_attestation=$26,
-			attestation_frequency_months=$27, metadata=$28::jsonb
+			parent_policy_id=$18::uuid, supersedes_policy_id=$19::uuid,
+			expiry_date=$20::date, tags=$21::text[], priority=$22,
+			is_mandatory=$23, requires_attestation=$24,
+			attestation_frequency_months=$25, metadata=$26::jsonb
 		WHERE p.id=$2::uuid AND p.organization_id=$1::uuid AND p.deleted_at IS NULL`+
 		policyReferenceChecks()+`
 		RETURNING `+policyColumns, orgID, p.ID, p.Title, p.CategoryID,
@@ -210,7 +216,7 @@ func (r *policyRepo) Update(ctx context.Context, orgID string, p *models.Policy)
 		p.DepartmentID, p.ReviewFrequencyMonths, p.AppliesToAll,
 		p.ApplicableDepartments, p.ApplicableRoles, p.ApplicableLocations,
 		p.LinkedFrameworkIDs, p.LinkedControlIDs, p.LinkedRiskIDs,
-		nil, nil, p.ParentPolicyID, p.SupersedesPolicyID, p.ExpiryDate,
+		p.ParentPolicyID, p.SupersedesPolicyID, p.ExpiryDate,
 		p.Tags, p.Priority, p.IsMandatory, p.RequiresAttestation,
 		p.AttestationFrequencyMonths, p.Metadata))
 	if err != nil {
@@ -620,8 +626,8 @@ func (r *policyRepo) GetReview(ctx context.Context, orgID, policyID, reviewID st
 
 func (r *policyRepo) UpdateReview(ctx context.Context, orgID, policyID string, review *models.PolicyReview) (*models.PolicyReview, error) {
 	return scanPolicyReview(database.QuerierFromContext(ctx, r.pool).QueryRow(ctx, `WITH updated AS (
-		UPDATE policy_reviews r SET status=$4,outcome=$5,findings=$6,recommendations=$7,
-			new_version_id=$8::uuid,completed_date=CASE WHEN $4='completed' THEN CURRENT_DATE ELSE completed_date END
+		UPDATE policy_reviews r SET status=$4::varchar,outcome=$5,findings=$6,recommendations=$7,
+			new_version_id=$8::uuid,completed_date=CASE WHEN $4::varchar='completed' THEN CURRENT_DATE ELSE completed_date END
 		FROM policies p WHERE r.id=$3::uuid AND r.policy_id=$2::uuid AND r.organization_id=$1::uuid
 		AND p.id=r.policy_id AND p.deleted_at IS NULL
 		AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM policy_versions v WHERE v.id=$8::uuid AND v.policy_id=$2::uuid AND v.organization_id=$1::uuid))
@@ -699,14 +705,14 @@ func (r *policyRepo) Acknowledge(ctx context.Context, orgID, policyID, userID, i
 	a, err := scanAttestation(tx.QueryRow(ctx, `WITH existing AS (
 		SELECT id FROM policy_attestations WHERE organization_id=$1::uuid AND policy_id=$2::uuid AND policy_version_id=$3::uuid AND user_id=$4::uuid ORDER BY created_at DESC LIMIT 1
 	), updated AS (
-		UPDATE policy_attestations a SET status=$5,attested_at=CASE WHEN $5='attested' THEN NOW() ELSE NULL END,
+		UPDATE policy_attestations a SET status=$5::varchar,attested_at=CASE WHEN $5::varchar='attested' THEN NOW() ELSE NULL END,
 			attested_from_ip=NULLIF($6,'')::inet,attestation_method=$7,attestation_text=COALESCE($8,a.attestation_text),
-			declined_reason=$9,expires_at=CASE WHEN $5='attested' THEN NOW()+($10||' months')::interval ELSE NULL END,metadata=$11::jsonb
+			declined_reason=$9,expires_at=CASE WHEN $5::varchar='attested' THEN NOW()+($10::int||' months')::interval ELSE NULL END,metadata=$11::jsonb
 		FROM existing WHERE a.id=existing.id RETURNING a.*
 	), inserted AS (
 		INSERT INTO policy_attestations AS a (policy_id,policy_version_id,organization_id,user_id,status,attested_at,attested_from_ip,attestation_method,attestation_text,declined_reason,expires_at,metadata)
-		SELECT $2::uuid,$3::uuid,$1::uuid,$4::uuid,$5,CASE WHEN $5='attested' THEN NOW() ELSE NULL END,NULLIF($6,'')::inet,$7,$8,$9,
-			CASE WHEN $5='attested' THEN NOW()+($10||' months')::interval ELSE NULL END,$11::jsonb
+		SELECT $2::uuid,$3::uuid,$1::uuid,$4::uuid,$5::varchar,CASE WHEN $5::varchar='attested' THEN NOW() ELSE NULL END,NULLIF($6,'')::inet,$7,$8,$9,
+			CASE WHEN $5::varchar='attested' THEN NOW()+($10::int||' months')::interval ELSE NULL END,$11::jsonb
 		WHERE NOT EXISTS(SELECT 1 FROM existing) AND EXISTS(SELECT 1 FROM users u WHERE u.id=$4::uuid AND u.organization_id=$1::uuid AND u.deleted_at IS NULL) RETURNING a.*
 	)
 	SELECT `+attestationColumns+` FROM updated a UNION ALL SELECT `+attestationColumns+` FROM inserted a`, orgID, policyID, versionID, userID, status, ip, input.AttestationMethod, input.AttestationText, input.DeclinedReason, months, input.Metadata))
@@ -789,7 +795,14 @@ func (r *policyRepo) GetException(ctx context.Context, orgID, policyID, exceptio
 }
 
 func (r *policyRepo) UpdateExceptionDecision(ctx context.Context, orgID, policyID, exceptionID, userID string, input models.PolicyExceptionDecisionInput) (*models.PolicyException, error) {
-	return scanPolicyException(database.QuerierFromContext(ctx, r.pool).QueryRow(ctx, `UPDATE policy_exceptions e SET status=$5,conditions=$6,expiry_date=COALESCE($7::date,expiry_date),approved_by=CASE WHEN $5='approved' THEN $4::uuid ELSE approved_by END,approved_at=CASE WHEN $5='approved' THEN NOW() ELSE approved_at END,effective_date=CASE WHEN $5='approved' THEN COALESCE(effective_date,CURRENT_DATE) ELSE effective_date END FROM policies p WHERE e.id=$3::uuid AND e.policy_id=$2::uuid AND e.organization_id=$1::uuid AND p.id=e.policy_id AND p.deleted_at IS NULL RETURNING `+exceptionColumns, orgID, policyID, exceptionID, userID, input.Decision, input.Conditions, input.ExpiryDate))
+	return scanPolicyException(database.QuerierFromContext(ctx, r.pool).QueryRow(ctx, `UPDATE policy_exceptions e SET
+		status=$5::varchar,conditions=$6,expiry_date=COALESCE($7::date,e.expiry_date),
+		approved_by=CASE WHEN $5::varchar='approved' THEN $4::uuid ELSE e.approved_by END,
+		approved_at=CASE WHEN $5::varchar='approved' THEN NOW() ELSE e.approved_at END,
+		effective_date=CASE WHEN $5::varchar='approved' THEN COALESCE(e.effective_date,CURRENT_DATE) ELSE e.effective_date END
+		FROM policies p WHERE e.id=$3::uuid AND e.policy_id=$2::uuid AND e.organization_id=$1::uuid
+		AND p.id=e.policy_id AND p.deleted_at IS NULL RETURNING `+exceptionColumns,
+		orgID, policyID, exceptionID, userID, input.Decision, input.Conditions, input.ExpiryDate))
 }
 
 func (r *policyRepo) ListExceptions(ctx context.Context, orgID, policyID string, p models.PaginationRequest) ([]models.PolicyException, int, error) {

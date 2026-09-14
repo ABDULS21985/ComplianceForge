@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   ACCESS_TOKEN_COOKIE,
   CSRF_ERROR_HEADER,
   CSRF_TOKEN_COOKIE,
   CSRF_TOKEN_HEADER,
+  DEVELOPMENT_ACCESS_TOKEN_COOKIE,
+  DEVELOPMENT_CSRF_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
 } from '@/lib/auth-constants';
 import {
@@ -30,10 +32,20 @@ function csrfRequest(overrides: Record<string, string> = {}) {
   });
 }
 
+const originalAppEnvironment = process.env.APP_ENV;
+const originalProxyTrust = process.env.TRUST_PROXY_HEADERS;
+
+afterEach(() => {
+  if (originalAppEnvironment === undefined) delete process.env.APP_ENV;
+  else process.env.APP_ENV = originalAppEnvironment;
+  if (originalProxyTrust === undefined) delete process.env.TRUST_PROXY_HEADERS;
+  else process.env.TRUST_PROXY_HEADERS = originalProxyTrust;
+});
+
 describe('session cookie security', () => {
   it('sets bearer credentials only as host-scoped secure HttpOnly cookies', () => {
     const response = NextResponse.json({ ok: true });
-    setSessionCookies(response, {
+    setSessionCookies(csrfRequest(), response, {
       access_token: 'access-secret',
       refresh_token: 'refresh-secret',
       expires_at: new Date(Date.now() + 60_000).toISOString(),
@@ -52,7 +64,7 @@ describe('session cookie security', () => {
 
   it('sets the CSRF synchronizer cookie as strict, secure, and HttpOnly', () => {
     const response = NextResponse.json({ ok: true });
-    setCsrfCookie(response, 'csrf-secret');
+    setCsrfCookie(csrfRequest(), response, 'csrf-secret');
 
     const cookieHeader = response.headers.get('set-cookie') ?? '';
     expect(cookieHeader).toContain(`${CSRF_TOKEN_COOKIE}=csrf-secret`);
@@ -61,9 +73,29 @@ describe('session cookie security', () => {
     expect(cookieHeader).toMatch(/SameSite=strict/i);
   });
 
+  it('uses HttpOnly development cookies that browsers accept on loopback HTTP', () => {
+    process.env.APP_ENV = 'development';
+    const request = new NextRequest('http://localhost:3000/api/auth/login');
+    const response = NextResponse.json({ ok: true });
+    setSessionCookies(request, response, {
+      access_token: 'local-access',
+      refresh_token: 'local-refresh',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      user: { id: 'local-user' },
+    });
+    setCsrfCookie(request, response, 'local-csrf');
+
+    const cookieHeader = response.headers.get('set-cookie') ?? '';
+    expect(cookieHeader).toContain(`${DEVELOPMENT_ACCESS_TOKEN_COOKIE}=local-access`);
+    expect(cookieHeader).toContain(`${DEVELOPMENT_CSRF_TOKEN_COOKIE}=local-csrf`);
+    expect(cookieHeader).toContain('HttpOnly');
+    expect(cookieHeader).not.toMatch(/; Secure/i);
+    expect(cookieHeader).not.toContain('__Host-');
+  });
+
   it('expires access, refresh, and CSRF cookies together', () => {
     const response = new NextResponse(null, { status: 204 });
-    clearSessionCookies(response);
+    clearSessionCookies(csrfRequest(), response);
 
     expect(response.cookies.getAll().map(({ name }) => name)).toEqual([
       ACCESS_TOKEN_COOKIE,
@@ -77,6 +109,24 @@ describe('session cookie security', () => {
 describe('CSRF validation', () => {
   it('accepts an exact same-origin request with a matching token', () => {
     expect(verifyCsrf(csrfRequest())).toEqual({ ok: true });
+  });
+
+  it('validates the browser origin behind an explicitly trusted TLS proxy', () => {
+    process.env.TRUST_PROXY_HEADERS = 'true';
+    const request = new NextRequest('http://frontend:3000/api/bff/risks', {
+      method: 'POST',
+      headers: {
+        cookie: `${CSRF_TOKEN_COOKIE}=known-token`,
+        host: 'app.example.test',
+        origin: 'https://app.example.test',
+        'sec-fetch-site': 'same-origin',
+        'x-forwarded-host': 'app.example.test',
+        'x-forwarded-proto': 'https',
+        [CSRF_TOKEN_HEADER]: 'known-token',
+      },
+    });
+
+    expect(verifyCsrf(request)).toEqual({ ok: true });
   });
 
   it.each([

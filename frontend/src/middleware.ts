@@ -3,11 +3,10 @@ import type { NextRequest } from 'next/server';
 
 import { AUTH_REDIRECT_QUERY_PARAM, isPublicRoute, ROUTES } from '@/lib/routes';
 import {
-  ACCESS_TOKEN_COOKIE,
   LEGACY_ACCESS_TOKEN_KEY,
   LEGACY_REFRESH_TOKEN_KEY,
-  REFRESH_TOKEN_COOKIE,
 } from '@/lib/auth-constants';
+import { sessionCookiePolicy } from '@/lib/request-security';
 
 function clearLegacyCookie(request: NextRequest, response: NextResponse): NextResponse {
   for (const name of [LEGACY_ACCESS_TOKEN_KEY, LEGACY_REFRESH_TOKEN_KEY]) {
@@ -46,8 +45,9 @@ export function middleware(request: NextRequest) {
   }
 
   // A refresh-only session is allowed through so the BFF can rotate it.
-  const accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
-  const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
+  const cookiePolicy = sessionCookiePolicy(request);
+  const accessToken = request.cookies.get(cookiePolicy.access)?.value;
+  const refreshToken = request.cookies.get(cookiePolicy.refresh)?.value;
 
   // If no token and trying to access a protected page, redirect to login
   if (!accessToken && !refreshToken) {

@@ -1,11 +1,14 @@
 version: "2"
+
 run:
-  modules-download-mode: readonly
   tests: true
+  modules-download-mode: readonly
+
 output:
   formats:
     text:
       path: stdout
+
 linters:
   enable:
     - goconst
@@ -20,6 +23,7 @@ linters:
     gocyclo:
       min-complexity: 15
     gosec:
+      # G104 is covered by errcheck, which produces more actionable output.
       excludes:
         - G104
     govet:
@@ -53,13 +57,14 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - linters:
+      - path: _test\.go
+        linters:
           - errcheck
           - goconst
           - gocyclo
           - gosec
-        path: _test\.go
-      - linters:
+      - path: .*_gen\.go
+        linters:
           - errcheck
           - goconst
           - gocyclo
@@ -68,25 +73,26 @@ linters:
           - revive
           - staticcheck
           - unused
-        path: .*_gen\.go
-      - linters:
+      - path: mock_.*\.go
+        linters:
           - errcheck
           - govet
           - revive
           - staticcheck
           - unused
-        path: mock_.*\.go
-      - linters:
+      - path: internal/database/migrations/
+        linters:
           - goconst
           - gocyclo
-        path: internal/database/migrations/
     paths:
       - third_party$
       - builtin$
       - examples$
+
 issues:
   max-issues-per-linter: 50
   max-same-issues: 5
+
 formatters:
   exclusions:
     generated: lax

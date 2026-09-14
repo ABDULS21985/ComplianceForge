@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
+import { portalCookiePolicy } from '@/lib/request-security';
+
 import { csrfErrorResponse, jsonError, verifyCsrf } from './session-security';
 import {
   buildUpstreamUrl,
@@ -13,14 +15,26 @@ import {
 } from './upstream';
 
 const MAX_PORTAL_BODY_BYTES = 5 * 1024 * 1024;
+const MAX_PORTAL_TOKEN_BODY_BYTES = 16 * 1024;
+const PORTAL_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 
-type PortalOperation = 'vendor-questionnaire' | 'vendor-save' | 'vendor-submit' | 'board-overview';
+type PortalOperation =
+  | 'vendor-session'
+  | 'vendor-questionnaire'
+  | 'vendor-save'
+  | 'vendor-submit'
+  | 'board-session'
+  | 'board-overview';
+
+type PortalKind = 'board' | 'vendor';
 
 function resolveOperation(path: string[]): PortalOperation | null {
   const key = path.join('/');
+  if (key === 'vendor-portal/session') return 'vendor-session';
   if (key === 'vendor-portal/questionnaire') return 'vendor-questionnaire';
   if (key === 'vendor-portal/save') return 'vendor-save';
   if (key === 'vendor-portal/submit') return 'vendor-submit';
+  if (key === 'board-portal/session') return 'board-session';
   if (key === 'board-portal') return 'board-overview';
   return null;
 }
@@ -32,10 +46,53 @@ function allowedMethod(operation: PortalOperation, method: string): boolean {
   return method === 'POST';
 }
 
-function portalToken(request: NextRequest): string | null {
-  const token = request.nextUrl.searchParams.get('token')?.trim();
+function portalKind(operation: PortalOperation): PortalKind {
+  return operation.startsWith('vendor-') ? 'vendor' : 'board';
+}
+
+function validPortalToken(value: unknown): string | null {
+  const token = typeof value === 'string' ? value.trim() : '';
   if (!token || token.length > 4096 || /[\u0000-\u001f]/.test(token)) return null;
   return token;
+}
+
+async function exchangeToken(request: NextRequest): Promise<string | null> {
+  const bytes = await readLimitedRequestBody(request, MAX_PORTAL_TOKEN_BODY_BYTES);
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  if (!parsed || typeof parsed !== 'object') return null;
+  return validPortalToken((parsed as Record<string, unknown>).token);
+}
+
+function setPortalSessionCookie(
+  request: NextRequest,
+  response: NextResponse,
+  portal: PortalKind,
+  token: string,
+): void {
+  const policy = portalCookiePolicy(request, portal);
+  response.cookies.set(policy.name, token, {
+    httpOnly: true,
+    maxAge: PORTAL_SESSION_MAX_AGE_SECONDS,
+    path: `/api/portal/${portal}-portal`,
+    sameSite: 'strict',
+    secure: policy.secure,
+  });
+}
+
+function clearPortalSessionCookie(
+  request: NextRequest,
+  response: NextResponse,
+  portal: PortalKind,
+): void {
+  const policy = portalCookiePolicy(request, portal);
+  response.cookies.set(policy.name, '', {
+    expires: new Date(0),
+    httpOnly: true,
+    maxAge: 0,
+    path: `/api/portal/${portal}-portal`,
+    sameSite: 'strict',
+    secure: policy.secure,
+  });
 }
 
 function normalizeQuestionnaire(value: unknown): unknown {
@@ -142,7 +199,11 @@ async function compatibilityResponse(
   operation: PortalOperation,
 ): Promise<NextResponse> {
   if (!upstream.ok) return proxyResponse(upstream);
-  if (operation !== 'vendor-questionnaire' && operation !== 'board-overview') {
+  if (
+    !['vendor-session', 'vendor-questionnaire', 'board-session', 'board-overview'].includes(
+      operation,
+    )
+  ) {
     return proxyResponse(upstream);
   }
 
@@ -156,7 +217,7 @@ async function compatibilityResponse(
   }
 
   return NextResponse.json(
-    operation === 'vendor-questionnaire'
+    operation === 'vendor-session' || operation === 'vendor-questionnaire'
       ? normalizeQuestionnaire(data)
       : normalizeBoardOverview(data),
     {
@@ -182,7 +243,9 @@ export async function proxyPortalRequest(
     const response = jsonError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
     response.headers.set(
       'Allow',
-      operation === 'vendor-questionnaire' || operation === 'board-overview' ? 'GET' : 'POST',
+      operation === 'vendor-questionnaire' || operation === 'board-overview'
+        ? 'GET'
+        : 'POST',
     );
     return response;
   }
@@ -192,14 +255,35 @@ export async function proxyPortalRequest(
     if (!csrf.ok) return csrfErrorResponse(csrf.message);
   }
 
-  const token = portalToken(request);
-  if (!token) return jsonError(400, 'INVALID_PORTAL_TOKEN', 'Portal token is required');
+  const kind = portalKind(operation);
+  const isSessionExchange = operation === 'vendor-session' || operation === 'board-session';
+  let token: string | null;
+  if (isSessionExchange) {
+    try {
+      token = await exchangeToken(request);
+    } catch (error) {
+      if (error instanceof PayloadTooLargeError) {
+        return jsonError(413, 'PAYLOAD_TOO_LARGE', error.message);
+      }
+      return jsonError(400, 'INVALID_PORTAL_TOKEN', 'Portal token must be valid JSON');
+    }
+  } else {
+    const cookieName = portalCookiePolicy(request, kind).name;
+    token = validPortalToken(request.cookies.get(cookieName)?.value);
+  }
+  if (!token) {
+    return jsonError(
+      isSessionExchange ? 400 : 401,
+      isSessionExchange ? 'INVALID_PORTAL_TOKEN' : 'PORTAL_SESSION_REQUIRED',
+      isSessionExchange ? 'Portal token is required' : 'Portal session is missing or expired',
+    );
+  }
   const encodedToken = encodeURIComponent(token);
 
   let pathname: string;
   let method: string;
   let body: BodyInit | undefined;
-  if (operation === 'vendor-questionnaire') {
+  if (operation === 'vendor-session' || operation === 'vendor-questionnaire') {
     pathname = `/vendor-portal/${encodedToken}`;
     method = 'GET';
   } else if (operation === 'vendor-save') {
@@ -229,13 +313,20 @@ export async function proxyPortalRequest(
 
   const headers = forwardedRequestHeaders(request);
   if (body) headers.set('Content-Type', 'application/json');
+  else headers.delete('Content-Type');
 
   try {
     const upstream = await fetcher(
       buildUpstreamUrl(pathname),
       serverFetchInit({ method, headers, body }),
     );
-    return compatibilityResponse(upstream, operation);
+    const response = await compatibilityResponse(upstream, operation);
+    if (response.ok && isSessionExchange) {
+      setPortalSessionCookie(request, response, kind, token);
+    } else if ([401, 403, 404, 410].includes(response.status)) {
+      clearPortalSessionCookie(request, response, kind);
+    }
+    return response;
   } catch {
     return jsonError(502, 'UPSTREAM_UNAVAILABLE', 'Portal service is unavailable');
   }
