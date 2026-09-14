@@ -1,22 +1,21 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
 import { AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, Database, History, LockKeyhole, MapPin, Pencil, Server, Shield, Tags, Trash2, UserRound } from 'lucide-react';
-
+import type { AssetLifecycleEvent, AssetStatus } from '@/types/asset';
+import { assetNextStatuses, assetPersonName, formatAssetError, humanizeAssetToken } from '@/lib/asset';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn, formatDateTime, getRiskLevelColor, getStatusColor } from '@/lib/utils';
+import { useAsset, useAssetEvents } from '@/lib/api-hooks';
+import { useParams, useRouter } from 'next/navigation';
 import { AssetDeleteDialog } from '@/components/assets/asset-delete-dialog';
 import { AssetEditorDialog } from '@/components/assets/asset-editor-dialog';
 import { AssetStatusDialog } from '@/components/assets/asset-status-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAssetPermissions } from '@/hooks/use-asset-permissions';
-import { useAsset, useAssetEvents } from '@/lib/api-hooks';
-import { assetNextStatuses, assetPersonName, formatAssetError, humanizeAssetToken } from '@/lib/asset';
-import { cn, formatDateTime, getRiskLevelColor, getStatusColor } from '@/lib/utils';
-import type { AssetLifecycleEvent, AssetStatus } from '@/types/asset';
 
 const CLASSIFICATION_STYLES = { public: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200', internal: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200', confidential: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200', restricted: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200' } as const;
 

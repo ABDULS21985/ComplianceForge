@@ -1,9 +1,8 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { IncidentDeleteDialog } from '@/components/incidents/incident-delete-dialog';
+import { render, screen } from '@testing-library/react';
 import type { Incident } from '@/types/incident';
+import { IncidentDeleteDialog } from '@/components/incidents/incident-delete-dialog';
+import userEvent from '@testing-library/user-event';
 
 const mutateAsync = vi.fn();
 vi.mock('@/lib/api-hooks', () => ({

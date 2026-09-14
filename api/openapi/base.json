@@ -1,0 +1,276 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "ComplianceForge Production API",
+    "version": "1.0.0",
+    "summary": "Tenant-isolated governance, risk, and compliance API",
+    "description": "The production contract for the required API slice. Tenant identity is never accepted from a caller-selected header: authenticated user operations derive organization_id from the validated access token, while automation operations derive it from the API-key principal. Optional nil-mounted legacy domains are deliberately excluded.",
+    "contact": {
+      "name": "ComplianceForge API Platform"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.example.com",
+      "description": "Production; replace with the organization-managed endpoint"
+    }
+  ],
+  "tags": [
+    {"name": "health", "description": "Process and dependency health."},
+    {"name": "auth", "description": "Authentication and session lifecycle."},
+    {"name": "organizations", "description": "Organization administration."},
+    {"name": "frameworks", "description": "Compliance framework catalogue and adoption."},
+    {"name": "controls", "description": "Control implementation and evidence."},
+    {"name": "risks", "description": "Risk register, assessments, treatments, and indicators."},
+    {"name": "policies", "description": "Policy lifecycle and attestations."},
+    {"name": "audits", "description": "Audit engagements and findings."},
+    {"name": "incidents", "description": "Incident, breach, assignment, and timeline lifecycle."},
+    {"name": "assets", "description": "Tenant asset inventory."},
+    {"name": "vendors", "description": "Vendor lifecycle and third-party records."},
+    {"name": "notifications", "description": "User notifications and tenant delivery configuration."},
+    {"name": "integrations", "description": "Integrations, SSO, and API keys."},
+    {"name": "access", "description": "Permissions and managed role administration."},
+    {"name": "capabilities", "description": "Product capabilities, entitlements, limits, and tenant feature flags."},
+    {"name": "automation", "description": "Read-only, API-key-scoped automation surface."}
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Short-lived access token. The validated organization_id claim establishes the tenant boundary. Refresh tokens are not accepted here."
+      },
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Hashed, revocable tenant credential. Every automation operation also requires its exact read scope and applies a per-key quota."
+      }
+    },
+    "parameters": {
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "required": false,
+        "description": "One-based result page.",
+        "schema": {"type": "integer", "minimum": 1, "default": 1}
+      },
+      "PageSize": {
+        "name": "page_size",
+        "in": "query",
+        "required": false,
+        "description": "Results per page; handlers cap oversized values.",
+        "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}
+      }
+    },
+    "headers": {
+      "RequestID": {
+        "description": "Correlation identifier for logs and support.",
+        "schema": {"type": "string", "minLength": 1, "maxLength": 200}
+      }
+    },
+    "responses": {
+      "BadRequest": {"description": "Malformed or invalid request.", "headers": {"X-Request-ID": {"$ref": "#/components/headers/RequestID"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "Unauthorized": {"description": "Missing, expired, or invalid credential.", "headers": {"X-Request-ID": {"$ref": "#/components/headers/RequestID"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "Forbidden": {"description": "Authenticated principal lacks the required permission or scope.", "headers": {"X-Request-ID": {"$ref": "#/components/headers/RequestID"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "NotFound": {"description": "Tenant-scoped resource was not found.", "headers": {"X-Request-ID": {"$ref": "#/components/headers/RequestID"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "Conflict": {"description": "Version or state transition conflict.", "headers": {"X-Request-ID": {"$ref": "#/components/headers/RequestID"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "RateLimited": {"description": "Request or API-key quota exceeded.", "headers": {"X-Request-ID": {"$ref": "#/components/headers/RequestID"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "InternalError": {"description": "Internal failure; implementation details are never returned.", "headers": {"X-Request-ID": {"$ref": "#/components/headers/RequestID"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "ServiceUnavailable": {"description": "A required dependency is not ready.", "headers": {"X-Request-ID": {"$ref": "#/components/headers/RequestID"}}, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}}}
+    },
+    "schemas": {
+      "GenericResponse": {
+        "type": "object",
+        "description": "Domain response whose detailed schema is not yet part of material cross-client drift enforcement.",
+        "additionalProperties": true
+      },
+      "GenericMutation": {
+        "type": "object",
+        "description": "Domain mutation payload; operation-specific handler validation still applies.",
+        "additionalProperties": true
+      },
+      "MessageResponse": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {"message": {"type": "string"}},
+        "additionalProperties": true
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["code", "error_code", "message"],
+        "properties": {
+          "code": {"type": "integer", "minimum": 400, "maximum": 599},
+          "error_code": {"type": "string", "enum": ["invalid_request", "authentication_required", "permission_denied", "resource_not_found", "method_not_allowed", "state_conflict", "request_too_large", "validation_failed", "rate_limit_exceeded", "service_unavailable", "internal_error", "request_failed"]},
+          "message": {"type": "string"},
+          "details": {"type": "string"},
+          "request_id": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {"status": {"type": "string", "enum": ["healthy", "ready", "unready"]}},
+        "additionalProperties": false
+      },
+      "Pagination": {
+        "type": "object",
+        "required": ["page", "page_size", "total_items", "total_pages"],
+        "properties": {
+          "page": {"type": "integer", "minimum": 1},
+          "page_size": {"type": "integer", "minimum": 1},
+          "total_items": {"type": "integer", "minimum": 0},
+          "total_pages": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false
+      },
+      "PaginatedGeneric": {
+        "type": "object",
+        "required": ["data", "pagination"],
+        "properties": {
+          "data": {"type": "array", "items": {}},
+          "pagination": {"$ref": "#/components/schemas/Pagination"}
+        },
+        "additionalProperties": false
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": {"type": "string", "format": "email", "maxLength": 320},
+          "password": {"type": "string", "format": "password", "minLength": 8, "writeOnly": true},
+          "organization_id": {"type": "string", "format": "uuid"}
+        },
+        "additionalProperties": false
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["email", "password", "first_name", "last_name", "organization_id"],
+        "properties": {
+          "email": {"type": "string", "format": "email", "maxLength": 320},
+          "password": {"type": "string", "format": "password", "minLength": 8, "writeOnly": true},
+          "first_name": {"type": "string", "minLength": 1, "maxLength": 100},
+          "last_name": {"type": "string", "minLength": 1, "maxLength": 100},
+          "organization_id": {"type": "string", "format": "uuid"},
+          "department": {"type": "string", "maxLength": 200}
+        },
+        "additionalProperties": false
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "required": ["refresh_token"],
+        "properties": {"refresh_token": {"type": "string", "minLength": 1, "writeOnly": true}},
+        "additionalProperties": false
+      },
+      "User": {
+        "type": "object",
+        "required": ["id", "organization_id", "email", "first_name", "last_name", "status", "language", "created_at", "updated_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"},
+          "email": {"type": "string", "format": "email"}, "first_name": {"type": "string"}, "last_name": {"type": "string"},
+          "job_title": {"type": "string"}, "department": {"type": "string"}, "phone": {"type": "string"}, "avatar_url": {"type": "string", "format": "uri"},
+          "status": {"type": "string"}, "is_super_admin": {"type": "boolean"}, "timezone": {"type": "string"}, "language": {"type": "string"},
+          "last_login_at": {"type": ["string", "null"], "format": "date-time"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"},
+          "roles": {"type": "array", "items": {"$ref": "#/components/schemas/ManagedRole"}}
+        },
+        "additionalProperties": true
+      },
+      "TokenResponse": {
+        "type": "object",
+        "required": ["access_token", "refresh_token", "expires_at", "user"],
+        "properties": {
+          "access_token": {"type": "string", "writeOnly": true},
+          "refresh_token": {"type": "string", "writeOnly": true},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "user": {"$ref": "#/components/schemas/User"}
+        },
+        "additionalProperties": false
+      },
+      "Organization": {
+        "type": "object",
+        "required": ["id", "name", "slug", "status", "tier", "created_at", "updated_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "name": {"type": "string"}, "slug": {"type": "string"},
+          "legal_name": {"type": "string"}, "industry": {"type": "string"}, "country_code": {"type": "string"},
+          "status": {"type": "string"}, "tier": {"type": "string"}, "timezone": {"type": "string"}, "default_language": {"type": "string"},
+          "employee_count_range": {"type": "string"}, "settings": {"type": "object"}, "branding": {"type": "object"},
+          "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "additionalProperties": true
+      },
+      "OrganizationInput": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}, "slug": {"type": "string"}, "legal_name": {"type": "string"}, "industry": {"type": "string"}, "country_code": {"type": "string"}, "timezone": {"type": "string"}}, "additionalProperties": true},
+      "OrganizationList": {"type": "array", "items": {"$ref": "#/components/schemas/Organization"}},
+      "Framework": {"type": "object", "required": ["id", "code", "name", "version"], "properties": {"id": {"type": "string", "format": "uuid"}, "code": {"type": "string"}, "name": {"type": "string"}, "version": {"type": "string"}, "description": {"type": "string"}, "is_active": {"type": "boolean"}}, "additionalProperties": true},
+      "FrameworkList": {"type": "array", "items": {"$ref": "#/components/schemas/Framework"}},
+      "Control": {"type": "object", "required": ["id", "framework_id", "code", "title"], "properties": {"id": {"type": "string", "format": "uuid"}, "framework_id": {"type": "string", "format": "uuid"}, "code": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}}, "additionalProperties": true},
+      "ControlList": {"type": "array", "items": {"$ref": "#/components/schemas/Control"}},
+      "EvidenceList": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+      "Risk": {"type": "object", "required": ["id", "organization_id", "risk_ref", "title", "status"], "properties": {"id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"}, "risk_ref": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "status": {"type": "string"}, "likelihood": {"type": "integer"}, "impact": {"type": "integer"}, "risk_score": {"type": "number"}}, "additionalProperties": true},
+      "RiskList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Risk"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "Policy": {"type": "object", "required": ["id", "organization_id", "policy_ref", "title", "status"], "properties": {"id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"}, "policy_ref": {"type": "string"}, "title": {"type": "string"}, "status": {"type": "string"}, "version": {"type": "integer"}}, "additionalProperties": true},
+      "PolicyList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Policy"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "Audit": {"type": "object", "required": ["id", "organization_id", "audit_ref", "title", "type", "status"], "properties": {"id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"}, "audit_ref": {"type": "string"}, "title": {"type": "string"}, "type": {"type": "string"}, "status": {"type": "string"}}, "additionalProperties": true},
+      "AuditList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Audit"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "Finding": {"type": "object", "required": ["id", "audit_id", "title", "status"], "properties": {"id": {"type": "string", "format": "uuid"}, "audit_id": {"type": "string", "format": "uuid"}, "title": {"type": "string"}, "status": {"type": "string"}, "severity": {"type": "string"}}, "additionalProperties": true},
+      "Incident": {
+        "type": "object",
+        "required": ["id", "organization_id", "created_at", "updated_at", "incident_ref", "title", "description", "category", "severity", "status", "reporter_id", "reported_at", "root_cause", "impact", "lessons_learned", "is_data_breach", "breach_assessment_status", "is_breach_notifiable", "data_categories", "special_category_data", "cross_border", "breach_nature", "likely_consequences", "mitigation_measures", "version", "legal_hold", "metadata"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "deleted_at": {"type": ["string", "null"], "format": "date-time"},
+          "incident_ref": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "category": {"type": "string"}, "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]}, "status": {"type": "string", "enum": ["reported", "triaged", "investigating", "contained", "resolved", "closed", "cancelled"]},
+          "reporter_id": {"type": "string", "format": "uuid"}, "assignee_id": {"type": ["string", "null"], "format": "uuid"}, "detected_at": {"type": ["string", "null"], "format": "date-time"}, "reported_at": {"type": "string", "format": "date-time"}, "occurred_at": {"type": ["string", "null"], "format": "date-time"}, "triaged_at": {"type": ["string", "null"], "format": "date-time"}, "investigation_started_at": {"type": ["string", "null"], "format": "date-time"}, "contained_at": {"type": ["string", "null"], "format": "date-time"}, "resolved_at": {"type": ["string", "null"], "format": "date-time"}, "closed_at": {"type": ["string", "null"], "format": "date-time"}, "cancelled_at": {"type": ["string", "null"], "format": "date-time"}, "cancellation_reason": {"type": "string"}, "reopened_at": {"type": ["string", "null"], "format": "date-time"},
+          "root_cause": {"type": "string"}, "impact": {"type": "string"}, "lessons_learned": {"type": "string"}, "related_asset_id": {"type": ["string", "null"], "format": "uuid"}, "followup_date": {"type": ["string", "null"], "format": "date-time"},
+          "is_data_breach": {"type": "boolean"}, "breach_assessment_status": {"type": "string", "enum": ["pending", "not_notifiable", "notifiable"]}, "is_breach_notifiable": {"type": "boolean"}, "breach_assessment_reason": {"type": "string"}, "breach_assessed_at": {"type": ["string", "null"], "format": "date-time"}, "breach_assessed_by": {"type": ["string", "null"], "format": "uuid"}, "breach_awareness_at": {"type": ["string", "null"], "format": "date-time"}, "notification_deadline": {"type": ["string", "null"], "format": "date-time"},
+          "data_subjects_affected": {"type": "integer", "minimum": 0}, "records_affected": {"type": "integer", "minimum": 0}, "data_categories": {"type": "array", "items": {"type": "string"}}, "special_category_data": {"type": "boolean"}, "cross_border": {"type": "boolean"}, "breach_nature": {"type": "string"}, "likely_consequences": {"type": "string"}, "mitigation_measures": {"type": "string"},
+          "dpa_notified_at": {"type": ["string", "null"], "format": "date-time"}, "dpa_notification_reference": {"type": "string"}, "dpa_notification_reason": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "retention_until": {"type": ["string", "null"], "format": "date-time"}, "legal_hold": {"type": "boolean"}, "metadata": {"type": "object"}, "deadline_state": {"type": "string"}, "hours_remaining": {"type": "number"}
+        },
+        "additionalProperties": false
+      },
+      "IncidentCreateInput": {"type": "object", "required": ["title", "description", "category", "severity"], "properties": {"title": {"type": "string"}, "description": {"type": "string"}, "category": {"type": "string"}, "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]}, "detected_at": {"type": "string", "format": "date-time"}, "occurred_at": {"type": "string", "format": "date-time"}, "related_asset_id": {"type": "string", "format": "uuid"}, "followup_date": {"type": "string", "format": "date-time"}, "retention_until": {"type": "string", "format": "date-time"}, "metadata": {"type": "object"}}, "additionalProperties": false},
+      "IncidentPatch": {"type": "object", "required": ["version"], "properties": {"version": {"type": "integer", "minimum": 1}, "title": {"type": "string"}, "description": {"type": "string"}, "category": {"type": "string"}, "severity": {"type": "string"}, "status": {"type": "string"}, "reason": {"type": "string"}}, "additionalProperties": true},
+      "IncidentList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Incident"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "IncidentStatistics": {"type": "object", "required": ["total", "active", "by_status", "by_severity"], "properties": {"total": {"type": "integer"}, "active": {"type": "integer"}, "overdue_breaches": {"type": "integer"}, "urgent_breaches": {"type": "integer"}, "notified_breaches": {"type": "integer"}, "average_resolution_hours": {"type": "number"}, "by_status": {"type": "object", "additionalProperties": {"type": "integer"}}, "by_severity": {"type": "object", "additionalProperties": {"type": "integer"}}}, "additionalProperties": false},
+      "IncidentEventList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"type": "object", "additionalProperties": true}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "Asset": {
+        "type": "object",
+        "required": ["id", "organization_id", "created_at", "updated_at", "asset_ref", "name", "asset_type", "criticality", "classification", "processes_personal_data", "status", "tags", "metadata", "version", "created_by"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "deleted_at": {"type": ["string", "null"], "format": "date-time"},
+          "asset_ref": {"type": "string"}, "name": {"type": "string"}, "asset_type": {"type": "string", "enum": ["hardware", "software", "data", "service", "network", "people", "facility"]}, "category": {"type": "string"}, "description": {"type": "string"}, "criticality": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+          "owner_user_id": {"type": ["string", "null"], "format": "uuid"}, "owner": {"type": "object", "additionalProperties": true}, "location": {"type": "string"}, "ip_address": {"type": "string"}, "classification": {"type": "string", "enum": ["public", "internal", "confidential", "restricted"]}, "processes_personal_data": {"type": "boolean"}, "linked_vendor_id": {"type": ["string", "null"], "format": "uuid"}, "status": {"type": "string", "enum": ["active", "inactive", "decommissioned"]}, "tags": {"type": "array", "items": {"type": "string"}}, "metadata": {"type": "object"}, "version": {"type": "integer", "minimum": 1}, "created_by": {"type": "string", "format": "uuid"}
+        },
+        "additionalProperties": false
+      },
+      "AssetInput": {"type": "object", "required": ["name", "asset_type", "criticality", "classification", "processes_personal_data"], "properties": {"name": {"type": "string"}, "asset_type": {"type": "string"}, "criticality": {"type": "string"}, "classification": {"type": "string"}, "processes_personal_data": {"type": "boolean"}, "expected_version": {"type": "integer"}}, "additionalProperties": true},
+      "AssetList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Asset"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "AssetStats": {"type": "object", "required": ["total", "critical", "personal_data", "active", "by_type"], "properties": {"total": {"type": "integer"}, "critical": {"type": "integer"}, "personal_data": {"type": "integer"}, "active": {"type": "integer"}, "by_type": {"type": "object", "additionalProperties": {"type": "integer"}}}, "additionalProperties": false},
+      "Vendor": {"type": "object", "required": ["id", "organization_id", "vendor_ref", "name", "status", "criticality", "vendor_tier", "risk_tier", "version"], "properties": {"id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"}, "vendor_ref": {"type": "string"}, "name": {"type": "string"}, "status": {"type": "string"}, "criticality": {"type": "string"}, "vendor_tier": {"type": "string"}, "risk_tier": {"type": "string"}, "version": {"type": "integer"}}, "additionalProperties": true},
+      "VendorList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Vendor"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "Notification": {"type": "object", "required": ["id", "organization_id", "event_type", "recipient_user_id", "channel_type", "subject", "body", "status", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"}, "event_type": {"type": "string"}, "recipient_user_id": {"type": "string", "format": "uuid"}, "channel_type": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "status": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "read_at": {"type": ["string", "null"], "format": "date-time"}}, "additionalProperties": true},
+      "NotificationList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Notification"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "Integration": {"type": "object", "required": ["id", "organization_id", "integration_type", "name", "status", "health_status", "capabilities", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "organization_id": {"type": "string", "format": "uuid"}, "integration_type": {"type": "string"}, "name": {"type": "string"}, "description": {"type": ["string", "null"]}, "status": {"type": "string"}, "health_status": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "created_at": {"type": "string", "format": "date-time"}}, "additionalProperties": true},
+      "IntegrationList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Integration"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "SSOConfiguration": {"type": "object", "required": ["organization_id", "protocol", "is_enabled", "is_enforced", "oidc_client_secret_configured", "auto_provision_users", "allowed_domains", "jit_provisioning"], "properties": {"organization_id": {"type": "string", "format": "uuid"}, "protocol": {"type": "string", "enum": ["saml2", "oidc"]}, "is_enabled": {"type": "boolean"}, "is_enforced": {"type": "boolean"}, "oidc_client_secret_configured": {"type": "boolean"}, "auto_provision_users": {"type": "boolean"}, "allowed_domains": {"type": "array", "items": {"type": "string"}}, "jit_provisioning": {"type": "boolean"}}, "additionalProperties": true},
+      "APIKey": {"type": "object", "required": ["id", "name", "key_prefix", "permissions", "rate_limit_per_minute", "created_at"], "properties": {"id": {"type": "string", "format": "uuid"}, "name": {"type": "string"}, "key_prefix": {"type": "string"}, "permissions": {"type": "array", "items": {"type": "string"}}, "rate_limit_per_minute": {"type": "integer"}, "created_at": {"type": "string", "format": "date-time"}}, "additionalProperties": true},
+      "PermissionGrant": {"type": "object", "required": ["resource", "action"], "properties": {"id": {"type": "string", "format": "uuid"}, "resource": {"type": "string"}, "action": {"type": "string"}, "description": {"type": "string"}}, "additionalProperties": false},
+      "ManagedRole": {
+        "type": "object",
+        "required": ["id", "name", "slug", "is_system_role", "is_custom", "version", "permissions", "assigned_users", "created_at", "updated_at"],
+        "properties": {
+          "id": {"type": "string", "format": "uuid"}, "organization_id": {"type": ["string", "null"], "format": "uuid"}, "name": {"type": "string"}, "slug": {"type": "string"}, "description": {"type": "string"}, "is_system_role": {"type": "boolean"}, "is_custom": {"type": "boolean"}, "version": {"type": "integer", "minimum": 1}, "created_by": {"type": ["string", "null"], "format": "uuid"}, "updated_by": {"type": ["string", "null"], "format": "uuid"}, "permissions": {"type": "array", "items": {"$ref": "#/components/schemas/PermissionGrant"}}, "assigned_users": {"type": "integer", "minimum": 0}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "deleted_at": {"type": ["string", "null"], "format": "date-time"}
+        },
+        "additionalProperties": false
+      },
+      "ManagedRoleInput": {"type": "object", "required": ["name", "permissions"], "properties": {"name": {"type": "string"}, "slug": {"type": "string"}, "description": {"type": "string"}, "permissions": {"type": "array", "items": {"$ref": "#/components/schemas/PermissionGrant"}}, "expected_version": {"type": "integer"}}, "additionalProperties": true},
+      "ManagedRoleList": {"type": "object", "required": ["data", "pagination"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/ManagedRole"}}, "pagination": {"$ref": "#/components/schemas/Pagination"}}, "additionalProperties": false},
+      "ProductCapability": {"type": "object", "required": ["key", "display_name"], "properties": {"key": {"type": "string"}, "display_name": {"type": "string"}, "description": {"type": "string"}, "category": {"type": "string"}}, "additionalProperties": true},
+      "FeatureFlagEvaluation": {"type": "object", "required": ["capability", "enabled", "entitled", "in_rollout", "variant"], "properties": {"capability": {"$ref": "#/components/schemas/ProductCapability"}, "enabled": {"type": "boolean"}, "entitled": {"type": "boolean"}, "in_rollout": {"type": "boolean"}, "variant": {"type": "object"}, "reason": {"type": "string"}}, "additionalProperties": true},
+      "FeatureFlagList": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/FeatureFlagEvaluation"}}}, "additionalProperties": true},
+      "EntitlementSnapshot": {"type": "object", "required": ["organization_id", "source", "tier", "features", "limits", "usage"], "properties": {"organization_id": {"type": "string", "format": "uuid"}, "source": {"type": "string"}, "tier": {"type": "string"}, "features": {"type": "object", "additionalProperties": {"type": "boolean"}}, "limits": {"type": "object", "additionalProperties": {"type": "integer"}}, "usage": {"type": "object", "additionalProperties": {"type": "integer"}}}, "additionalProperties": true},
+      "EntitlementLimitDecision": {"type": "object", "required": ["metric", "allowed", "limit", "usage", "requested"], "properties": {"metric": {"type": "string"}, "allowed": {"type": "boolean"}, "limit": {"type": "integer"}, "usage": {"type": "integer"}, "requested": {"type": "integer"}}, "additionalProperties": true}
+    }
+  }
+}

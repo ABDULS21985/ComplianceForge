@@ -1,7 +1,7 @@
-import type { PermissionMap } from '@/types/access';
 import type { AssetCollectionEnvelope, AssetPage, AssetStatus } from '@/types/asset';
-import type { User } from '@/types';
 import type { ApiError } from '@/lib/api';
+import type { PermissionMap } from '@/types/access';
+import type { User } from '@/types';
 
 export const ASSET_RESOURCE = 'assets';
 

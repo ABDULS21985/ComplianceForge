@@ -1,4 +1,3 @@
-import type { PermissionMap } from '@/types/access';
 import type {
   Incident,
   IncidentCollectionEnvelope,
@@ -6,8 +5,9 @@ import type {
   IncidentSeverity,
   IncidentStatus,
 } from '@/types/incident';
-import type { User } from '@/types';
 import type { ApiError } from '@/lib/api';
+import type { PermissionMap } from '@/types/access';
+import type { User } from '@/types';
 
 export const INCIDENT_RESOURCE = 'incidents';
 

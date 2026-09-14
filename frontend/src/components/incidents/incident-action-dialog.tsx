@@ -1,9 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { Loader2 } from 'lucide-react';
-
-import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -12,7 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+import {
+  formatIncidentError,
+  humanizeIncidentToken,
+  incidentEscalationOptions,
+} from '@/lib/incident';
+import type { Incident, IncidentSeverity, IncidentStatus } from '@/types/incident';
 import {
   Select,
   SelectContent,
@@ -20,19 +22,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import {
   useCloseIncident,
   useEscalateIncident,
   useIncidentReasonAction,
   useIncidentTransition,
 } from '@/lib/api-hooks';
-import {
-  formatIncidentError,
-  humanizeIncidentToken,
-  incidentEscalationOptions,
-} from '@/lib/incident';
-import type { Incident, IncidentSeverity, IncidentStatus } from '@/types/incident';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Loader2 } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 
 export type IncidentAction =
   | { kind: 'transition'; status: IncidentStatus }

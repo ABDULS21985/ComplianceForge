@@ -1,15 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { Loader2 } from 'lucide-react';
-
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useDeleteIncident } from '@/lib/api-hooks';
 import { formatIncidentError } from '@/lib/incident';
 import type { Incident } from '@/types/incident';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Loader2 } from 'lucide-react';
+import { useDeleteIncident } from '@/lib/api-hooks';
 
 export function IncidentDeleteDialog({ incident, open, onOpenChange, onDeleted }: { incident: Incident; open: boolean; onOpenChange: (open: boolean) => void; onDeleted: () => void }) {
   const mutation = useDeleteIncident();

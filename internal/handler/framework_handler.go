@@ -74,6 +74,8 @@ func writePaginated(w http.ResponseWriter, data any, total int, p models.Paginat
 
 func writeComplianceError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, service.ErrSubscriptionLimitExceeded):
+		writeError(w, http.StatusPaymentRequired, "Subscription framework limit reached", "Upgrade the subscription or remove an existing framework before adopting another")
 	case errors.Is(err, service.ErrInvalidComplianceID), errors.Is(err, service.ErrInvalidControlPatch), errors.Is(err, service.ErrInvalidEvidence):
 		writeError(w, http.StatusBadRequest, "Invalid compliance request", err.Error())
 	case errors.Is(err, service.ErrFrameworkNotFound), errors.Is(err, service.ErrControlNotFound):

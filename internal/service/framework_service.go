@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/complianceforge/platform/internal/models"
+	"github.com/complianceforge/platform/internal/repository"
 )
 
 var (
@@ -74,6 +75,9 @@ func (s *FrameworkService) AdoptFramework(ctx context.Context, orgID, userID, fr
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFrameworkNotFound
 	}
+	if errors.Is(err, repository.ErrEntitlementLimitExceeded) {
+		return nil, fmt.Errorf("%w: framework capacity is exhausted", ErrSubscriptionLimitExceeded)
+	}
 	if err == nil {
 		s.logger.Info().Str("organization_id", orgID).Str("framework_id", frameworkID).Msg("framework adopted")
 	}
@@ -132,6 +136,9 @@ func (s *FrameworkService) AttachControlEvidence(ctx context.Context, orgID, use
 	evidence, err := s.controls.AttachEvidence(ctx, orgID, userID, controlID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrControlNotFound
+	}
+	if errors.Is(err, repository.ErrEntitlementLimitExceeded) {
+		return nil, fmt.Errorf("%w: evidence storage capacity is exhausted", ErrSubscriptionLimitExceeded)
 	}
 	return evidence, err
 }

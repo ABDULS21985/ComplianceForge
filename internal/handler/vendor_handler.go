@@ -351,6 +351,8 @@ func vendorHorizon(r *http.Request) (int, int, error) {
 
 func writeVendorError(w http.ResponseWriter, r *http.Request, err error, fallback string) {
 	switch {
+	case errors.Is(err, service.ErrSubscriptionLimitExceeded):
+		writeError(w, http.StatusPaymentRequired, "Subscription vendor limit reached", "Upgrade the subscription or retire an existing vendor before creating another")
 	case errors.Is(err, service.ErrVendorInvalid), errors.Is(err, service.ErrVendorInvalidID), errors.Is(err, service.ErrVendorInvalidTransition):
 		writeError(w, http.StatusBadRequest, "Invalid vendor request", err.Error())
 	case errors.Is(err, service.ErrVendorNotFound):

@@ -101,6 +101,19 @@ func (r *frameworkRepo) Adopt(ctx context.Context, orgID, userID, frameworkID st
 		return nil, fmt.Errorf("beginning framework adoption: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockEntitlementCapacity(ctx, tx, orgID, "frameworks"); err != nil {
+		return nil, err
+	}
+	var alreadyAdopted bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM organization_frameworks
+		WHERE organization_id=$1::uuid AND framework_id=$2::uuid)`, orgID, frameworkID).Scan(&alreadyAdopted); err != nil {
+		return nil, fmt.Errorf("checking existing framework adoption: %w", err)
+	}
+	if !alreadyAdopted {
+		if err := ensureEntitlementCapacityLocked(ctx, tx, orgID, "frameworks", 1); err != nil {
+			return nil, err
+		}
+	}
 
 	var adoption models.OrganizationFramework
 	err = tx.QueryRow(ctx, `

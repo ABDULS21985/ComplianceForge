@@ -1,34 +1,24 @@
 'use client';
 
-import { useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { z } from 'zod';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import {
+  Activity,
   AlertCircle,
   Building2,
-  Users,
-  ShieldCheck,
-  ScrollText,
-  Search,
-  Plus,
-  Edit,
-  UserX,
   ChevronLeft,
   ChevronRight,
   Clock,
-  Activity,
+  Edit,
   Globe,
   Lock,
+  Plus,
+  ScrollText,
+  Search,
+  ShieldCheck,
+  Users,
+  UserX,
 } from 'lucide-react';
-
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { AuditLogEntry, Organization, User as UserType } from '@/types';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -38,20 +28,28 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-
-import { cn } from '@/lib/utils';
 import { formatDateTime, getStatusColor } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  useAuditLog,
+  useCreateUser,
+  useDeactivateUser,
   useOrganization,
   useUpdateOrganization,
   useUsers,
-  useCreateUser,
-  useDeactivateUser,
-  useRoles,
-  useAuditLog,
 } from '@/lib/api-hooks';
-import type { Organization, User as UserType, Role, AuditLogEntry } from '@/types';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import Link from 'next/link';
 import type { PaginatedResponse } from '@/lib/api';
+import { useForm } from 'react-hook-form';
+import { useSearchParams } from 'next/navigation';
+import { useState } from 'react';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -507,77 +505,14 @@ function UsersTab() {
 // ---------------------------------------------------------------------------
 
 function RolesTab() {
-  const rolesQuery = useRoles();
-  const roles = rolesQuery.data as Role[] | undefined;
-
-  if (rolesQuery.isLoading) {
-    return (
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-6">
-              <div className="animate-pulse space-y-3">
-                <div className="h-5 w-32 rounded bg-muted" />
-                <div className="h-4 w-full rounded bg-muted" />
-                <div className="h-3 w-20 rounded bg-muted" />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    );
-  }
-
-  if (rolesQuery.error) {
-    return (
-      <Card>
-        <CardContent className="flex items-center gap-2 p-6 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <span>Failed to load roles.</span>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!roles?.length) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-          <ShieldCheck className="h-12 w-12 text-muted-foreground/50" />
-          <h3 className="mt-4 text-lg font-semibold">No roles configured</h3>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {roles.map((role) => (
-        <Card key={role.id}>
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">{role.name}</h3>
-                  {role.is_system_role && (
-                    <Badge variant="secondary" className="mt-0.5 text-xs">
-                      <Lock className="mr-1 h-3 w-3" />
-                      System
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            </div>
-            {role.description && (
-              <p className="mt-3 text-sm text-muted-foreground">{role.description}</p>
-            )}
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <Card>
+      <CardContent className="flex flex-col items-center gap-4 p-12 text-center">
+        <div className="rounded-full bg-primary/10 p-3"><ShieldCheck aria-hidden="true" className="h-8 w-8 text-primary" /></div>
+        <div><h3 className="text-lg font-semibold">Enterprise role administration</h3><p className="mt-1 max-w-xl text-sm text-muted-foreground">Review the canonical permission catalogue, manage custom and system roles, assess permission impact, assign users, and inspect append-only change history.</p></div>
+        <Button asChild><Link href="/settings/access-policies">Manage roles and permissions</Link></Button>
+      </CardContent>
+    </Card>
   );
 }
 

@@ -1,25 +1,24 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
 import { AlertTriangle, ArrowLeft, Bell, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Clock3, History, LockKeyhole, Pencil, Plus, RotateCcw, ShieldAlert, Trash2, UserMinus, UsersRound, XCircle, Zap } from 'lucide-react';
-
+import { canDeleteIncident, formatIncidentError, humanizeIncidentToken, incidentDeadline, incidentEscalationOptions, incidentNextStatuses } from '@/lib/incident';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn, formatDate, formatDateTime, getRiskLevelColor, getStatusColor } from '@/lib/utils';
+import type { Incident, IncidentAssignment, IncidentEvent, IncidentStatus } from '@/types/incident';
+import { type IncidentAction, IncidentActionDialog } from '@/components/incidents/incident-action-dialog';
+import { useIncident, useIncidentAssignments, useIncidentTimeline } from '@/lib/api-hooks';
+import { useParams, useRouter } from 'next/navigation';
+import { Badge } from '@/components/ui/badge';
 import { BreachAssessmentDialog } from '@/components/incidents/breach-assessment-dialog';
+import { Button } from '@/components/ui/button';
 import { DPANotificationDialog } from '@/components/incidents/dpa-notification-dialog';
-import { IncidentActionDialog, type IncidentAction } from '@/components/incidents/incident-action-dialog';
 import { IncidentAssignmentDialog } from '@/components/incidents/incident-assignment-dialog';
 import { IncidentDeleteDialog } from '@/components/incidents/incident-delete-dialog';
 import { IncidentEditorDialog } from '@/components/incidents/incident-editor-dialog';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useIncidentPermissions } from '@/hooks/use-incident-permissions';
-import { useIncident, useIncidentAssignments, useIncidentTimeline } from '@/lib/api-hooks';
-import { canDeleteIncident, formatIncidentError, humanizeIncidentToken, incidentDeadline, incidentEscalationOptions, incidentNextStatuses } from '@/lib/incident';
-import { cn, formatDate, formatDateTime, getRiskLevelColor, getStatusColor } from '@/lib/utils';
-import type { Incident, IncidentAssignment, IncidentEvent, IncidentStatus } from '@/types/incident';
 
 const LIFECYCLE: Exclude<IncidentStatus, 'cancelled'>[] = ['reported', 'triaged', 'investigating', 'contained', 'resolved', 'closed'];
 

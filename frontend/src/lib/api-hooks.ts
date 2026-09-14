@@ -128,7 +128,6 @@ export const queryKeys = {
   users: ["settings", "users"] as const,
   usersList: (params?: Record<string, unknown>) => ["settings", "users", "list", params] as const,
   user: (id: string) => ["settings", "users", id] as const,
-  roles: ["settings", "roles"] as const,
   auditLog: (params?: Record<string, unknown>) => ["settings", "audit-log", params] as const,
 
   // Reports
@@ -1231,15 +1230,6 @@ export function useAssignRole() {
     onError: () => {
       toast.error("Failed to assign role.");
     },
-  });
-}
-
-export function useRoles(options?: Partial<UseQueryOptions>) {
-  return useQuery({
-    queryKey: queryKeys.roles,
-    queryFn: () => api.settings.listRoles(),
-    staleTime: 5 * 60 * 1000,
-    ...options,
   });
 }
 

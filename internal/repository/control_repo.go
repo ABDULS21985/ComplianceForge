@@ -161,39 +161,51 @@ func (r *controlRepo) AttachEvidence(ctx context.Context, orgID, userID, control
 	if len(metadata) == 0 {
 		metadata = []byte(`{}`)
 	}
-	evidence := &models.ControlEvidence{}
-	var raw []byte
-	err := q.QueryRow(ctx, `INSERT INTO control_evidence (
-		organization_id, control_implementation_id, title, description,
-		evidence_type, file_name, file_size_bytes, mime_type, file_hash,
-		collection_method, collected_by, valid_from, valid_until, metadata)
-	SELECT $1::uuid, ci.id, $3, $4, $5, $6, $7, $8, $9, $10,
-		CASE WHEN EXISTS (SELECT 1 FROM users u WHERE u.id=$11::uuid AND u.organization_id=$1::uuid AND u.deleted_at IS NULL) THEN $11::uuid ELSE NULL END,
-		$12::date, $13::date, $14::jsonb
-	FROM control_implementations ci
-	JOIN framework_controls fc ON fc.id = ci.framework_control_id
-	JOIN compliance_frameworks cf ON cf.id = fc.framework_id
-	WHERE ci.framework_control_id = $2::uuid AND ci.organization_id = $1::uuid
-	  AND ci.deleted_at IS NULL AND cf.deleted_at IS NULL
-	  AND (cf.organization_id IS NULL OR cf.organization_id = $1::uuid)
-	RETURNING id, organization_id, control_implementation_id, title, description,
-		evidence_type, file_name, file_size_bytes, mime_type, file_hash,
-		collection_method, collected_at, collected_by, valid_from, valid_until,
-		is_current, review_status, metadata, created_at, updated_at, deleted_at`,
-		orgID, controlID, input.Title, input.Description, input.EvidenceType,
-		input.FileName, input.FileSizeBytes, input.MIMEType, input.FileHash, method,
-		userID, input.ValidFrom, input.ValidUntil, metadata).Scan(
-		&evidence.ID, &evidence.OrganizationID, &evidence.ControlImplementationID,
-		&evidence.Title, &evidence.Description, &evidence.EvidenceType,
-		&evidence.FileName, &evidence.FileSizeBytes, &evidence.MIMEType,
-		&evidence.FileHash, &evidence.CollectionMethod, &evidence.CollectedAt,
-		&evidence.CollectedBy, &evidence.ValidFrom, &evidence.ValidUntil,
-		&evidence.IsCurrent, &evidence.ReviewStatus, &raw, &evidence.CreatedAt,
-		&evidence.UpdatedAt, &evidence.DeletedAt)
+	var evidence *models.ControlEvidence
+	err := withTransaction(ctx, q, func(tx pgx.Tx) error {
+		if input.FileSizeBytes != nil && *input.FileSizeBytes > 0 {
+			if err := EnsureEntitlementCapacity(ctx, tx, orgID, "storage_bytes", *input.FileSizeBytes); err != nil {
+				return err
+			}
+		}
+		item := &models.ControlEvidence{}
+		var raw []byte
+		if err := tx.QueryRow(ctx, `INSERT INTO control_evidence (
+			organization_id, control_implementation_id, title, description,
+			evidence_type, file_name, file_size_bytes, mime_type, file_hash,
+			collection_method, collected_by, valid_from, valid_until, metadata)
+		SELECT $1::uuid, ci.id, $3, $4, $5, $6, $7, $8, $9, $10,
+			CASE WHEN EXISTS (SELECT 1 FROM users u WHERE u.id=$11::uuid AND u.organization_id=$1::uuid AND u.deleted_at IS NULL) THEN $11::uuid ELSE NULL END,
+			$12::date, $13::date, $14::jsonb
+		FROM control_implementations ci
+		JOIN framework_controls fc ON fc.id = ci.framework_control_id
+		JOIN compliance_frameworks cf ON cf.id = fc.framework_id
+		WHERE ci.framework_control_id = $2::uuid AND ci.organization_id = $1::uuid
+		  AND ci.deleted_at IS NULL AND cf.deleted_at IS NULL
+		  AND (cf.organization_id IS NULL OR cf.organization_id = $1::uuid)
+		RETURNING id, organization_id, control_implementation_id, title, description,
+			evidence_type, file_name, file_size_bytes, mime_type, file_hash,
+			collection_method, collected_at, collected_by, valid_from, valid_until,
+			is_current, review_status, metadata, created_at, updated_at, deleted_at`,
+			orgID, controlID, input.Title, input.Description, input.EvidenceType,
+			input.FileName, input.FileSizeBytes, input.MIMEType, input.FileHash, method,
+			userID, input.ValidFrom, input.ValidUntil, metadata).Scan(
+			&item.ID, &item.OrganizationID, &item.ControlImplementationID,
+			&item.Title, &item.Description, &item.EvidenceType,
+			&item.FileName, &item.FileSizeBytes, &item.MIMEType,
+			&item.FileHash, &item.CollectionMethod, &item.CollectedAt,
+			&item.CollectedBy, &item.ValidFrom, &item.ValidUntil,
+			&item.IsCurrent, &item.ReviewStatus, &raw, &item.CreatedAt,
+			&item.UpdatedAt, &item.DeletedAt); err != nil {
+			return err
+		}
+		item.Metadata = raw
+		evidence = item
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("attaching control evidence: %w", err)
 	}
-	evidence.Metadata = raw
 	return evidence, nil
 }
 

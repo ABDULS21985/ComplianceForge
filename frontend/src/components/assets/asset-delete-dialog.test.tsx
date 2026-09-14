@@ -1,9 +1,8 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { AssetDeleteDialog } from '@/components/assets/asset-delete-dialog';
+import { render, screen } from '@testing-library/react';
 import type { Asset } from '@/types/asset';
+import { AssetDeleteDialog } from '@/components/assets/asset-delete-dialog';
+import userEvent from '@testing-library/user-event';
 
 const mutateAsync = vi.fn();
 vi.mock('@/lib/api-hooks', () => ({ useDeleteAsset: () => ({ mutateAsync, isPending: false, error: null }) }));

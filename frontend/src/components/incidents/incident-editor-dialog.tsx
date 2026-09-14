@@ -1,12 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2 } from 'lucide-react';
-import { useForm } from 'react-hook-form';
-import { z } from 'zod';
-
-import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -15,8 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import {
+  formatIncidentError,
+  localDateTimeToIso,
+  toLocalDateTimeInput,
+} from '@/lib/incident';
+import type { Incident, IncidentCreateInput, IncidentPatch } from '@/types/incident';
 import {
   Select,
   SelectContent,
@@ -24,14 +22,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { useCreateIncident, useUpdateIncident } from '@/lib/api-hooks';
-import {
-  formatIncidentError,
-  localDateTimeToIso,
-  toLocalDateTimeInput,
-} from '@/lib/incident';
-import type { Incident, IncidentCreateInput, IncidentPatch } from '@/types/incident';
+import { useForm, useWatch } from 'react-hook-form';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Loader2 } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 const optionalUuid = z.union([z.literal(''), z.string().uuid('Enter a valid UUID.')]);
 
@@ -90,6 +89,7 @@ export function IncidentEditorDialog({
     resolver: zodResolver(incidentEditorSchema),
     defaultValues: defaults(incident),
   });
+  const severity = useWatch({ control: form.control, name: 'severity' });
   const isEditing = Boolean(incident);
   const mutation = isEditing ? updateIncident : createIncident;
 
@@ -180,7 +180,7 @@ export function IncidentEditorDialog({
             <Field label="Severity" htmlFor="incident-severity" required>
               <Select
                 disabled={isEditing}
-                value={form.watch('severity')}
+                value={severity}
                 onValueChange={(value) => form.setValue('severity', value as IncidentEditorValues['severity'])}
               >
                 <SelectTrigger id="incident-severity"><SelectValue /></SelectTrigger>

@@ -208,6 +208,8 @@ func stableHTTPErrorCode(status int) string {
 		return "authentication_required"
 	case http.StatusForbidden:
 		return "permission_denied"
+	case http.StatusPaymentRequired:
+		return "entitlement_required"
 	case http.StatusNotFound:
 		return "resource_not_found"
 	case http.StatusMethodNotAllowed:

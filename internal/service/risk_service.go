@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/complianceforge/platform/internal/models"
+	"github.com/complianceforge/platform/internal/repository"
 )
 
 var (
@@ -395,6 +396,9 @@ func (s *RiskService) ListIndicatorValues(ctx context.Context, orgID, riskID, in
 func mapRiskWriteError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, repository.ErrEntitlementLimitExceeded) {
+		return fmt.Errorf("%w: risk capacity is exhausted", ErrSubscriptionLimitExceeded)
 	}
 	var pgError *pgconn.PgError
 	if errors.As(err, &pgError) && pgError.Code == "23505" {

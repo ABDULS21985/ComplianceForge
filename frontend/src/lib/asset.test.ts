@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest';
-
 import { assetNextStatuses, hasAssetPermission, normalizeAssetCollection, normalizeAssetTags } from '@/lib/asset';
+import { describe, expect, it } from 'vitest';
 import type { User } from '@/types';
 
 const USER = { id: 'user-1', organization_id: 'org-1', email: 'owner@example.test', first_name: 'Ari', last_name: 'Owner', status: 'active', is_super_admin: false, language: 'en', created_at: '2026-09-14T00:00:00Z', updated_at: '2026-09-14T00:00:00Z' } satisfies User;

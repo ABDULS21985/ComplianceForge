@@ -7,6 +7,7 @@ import { Toaster } from "sonner";
 import { useEffect, useState } from "react";
 
 import { purgeLegacyBrowserCredentials } from "@/lib/auth";
+import { ProductAccessFeedback } from "@/components/layout/product-access-feedback";
 
 import "./globals.css";
 
@@ -44,6 +45,7 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <QueryClientProvider client={queryClient}>
             {children}
+            <ProductAccessFeedback />
             <Toaster richColors position="top-right" />
           </QueryClientProvider>
         </ThemeProvider>

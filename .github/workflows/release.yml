@@ -121,6 +121,42 @@ jobs:
           cache-from: type=gha,scope=release-${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=release-${{ matrix.component }}
 
+      - name: Install checksum-pinned Trivy
+        env:
+          SECURITY_TOOLS_ONLY: trivy
+          TOOLS_DIR: ${{ runner.temp }}/complianceforge-release-tools/bin
+        run: ./scripts/ci/install-security-tools.sh
+
+      - name: Scan immutable release digest for vulnerabilities
+        id: release-vulnerability-scan
+        continue-on-error: true
+        env:
+          RELEASE_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.component }}
+          RELEASE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: >-
+          trivy image "$RELEASE_IMAGE@$RELEASE_DIGEST"
+          --scanners vuln --severity HIGH,CRITICAL --exit-code 1
+          --format json --output release-vulnerabilities.json
+
+      - name: Upload immutable release scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-scan-${{ matrix.component }}-${{ github.sha }}
+          path: release-vulnerabilities.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Enforce immutable release gates before signing
+        if: always()
+        env:
+          VULNERABILITY_SCAN: ${{ steps.release-vulnerability-scan.outcome }}
+        run: |
+          if [ "$VULNERABILITY_SCAN" != success ]; then
+            echo "Release vulnerability scan: $VULNERABILITY_SCAN" >&2
+            exit 1
+          fi
+
       - name: Create GitHub/Sigstore build attestation
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:

@@ -466,6 +466,8 @@ func (s *VendorService) translateError(err error) error {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return ErrVendorNotFound
+	case errors.Is(err, repository.ErrEntitlementLimitExceeded):
+		return fmt.Errorf("%w: vendor capacity is exhausted", ErrSubscriptionLimitExceeded)
 	case errors.Is(err, repository.ErrVendorVersionConflict):
 		return ErrVendorVersionConflict
 	case errors.Is(err, repository.ErrVendorUserInvalid):

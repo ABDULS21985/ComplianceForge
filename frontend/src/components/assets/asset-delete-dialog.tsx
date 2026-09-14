@@ -1,15 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { Loader2 } from 'lucide-react';
-
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import type { Asset } from '@/types/asset';
 import { Button } from '@/components/ui/button';
+import { formatAssetError } from '@/lib/asset';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Loader2 } from 'lucide-react';
 import { useDeleteAsset } from '@/lib/api-hooks';
-import { formatAssetError } from '@/lib/asset';
-import type { Asset } from '@/types/asset';
 
 export function AssetDeleteDialog({ asset, open, onOpenChange, onDeleted, onRefresh }: { asset: Asset; open: boolean; onOpenChange: (open: boolean) => void; onDeleted: () => void; onRefresh: () => void }) {
   const mutation = useDeleteAsset();

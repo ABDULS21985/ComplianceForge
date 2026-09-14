@@ -3,3 +3,8 @@
 3ead0a92a8bf1f66ff24b0cf9a961f205507830f:internal/config/config_test.go:generic-api-key:130
 ad60a944fd47a49bbdcf4e9acc07f7d9c5eb15c5:internal/config/config_test.go:generic-api-key:68
 1a54d54f1193147033950df57b05e98839a94ab1:internal/service/notification_delivery_test.go:generic-api-key:102
+# UUID-shaped incident idempotency fixture and local metrics bearer-token
+# fixture. Both are synthetic test values in immutable history; fingerprint
+# scope keeps any future match blocking.
+90717a95fcd120b37fe879e72ec6a5e796615de1:frontend/src/lib/incident-api-contract.test.ts:generic-api-key:57
+90717a95fcd120b37fe879e72ec6a5e796615de1:internal/observability/observability_test.go:generic-api-key:109

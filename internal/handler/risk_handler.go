@@ -347,6 +347,8 @@ func writeRiskPaginated(w http.ResponseWriter, data any, total int, p models.Pag
 
 func writeRiskError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, service.ErrSubscriptionLimitExceeded):
+		writeError(w, http.StatusPaymentRequired, "Subscription risk limit reached", "Upgrade the subscription or archive an existing risk before creating another")
 	case errors.Is(err, service.ErrInvalidRisk), errors.Is(err, service.ErrInvalidRiskID),
 		errors.Is(err, service.ErrInvalidAssessment), errors.Is(err, service.ErrInvalidTreatment),
 		errors.Is(err, service.ErrInvalidRiskAppetite), errors.Is(err, service.ErrInvalidRiskIndicator):

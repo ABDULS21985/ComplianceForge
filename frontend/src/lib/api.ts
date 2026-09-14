@@ -29,6 +29,17 @@ import type {
   UpdateSSOConfigurationInput,
 } from "@/types/enterprise-settings";
 import type {
+  Asset,
+  AssetCollectionEnvelope,
+  AssetCreateInput,
+  AssetLifecycleEvent,
+  AssetListParams,
+  AssetPage,
+  AssetPatch,
+  AssetStats,
+} from '@/types/asset';
+import { ASSET_API_ROUTES, normalizeAssetCollection } from './asset';
+import type {
   Audit,
   AuditCollectionEnvelope,
   AuditCreateInput,
@@ -43,17 +54,9 @@ import type {
   AuditPage,
   AuditPatch,
 } from '@/types/audit';
-import type { PermissionMap } from '@/types/access';
-import type {
-  Asset,
-  AssetCollectionEnvelope,
-  AssetCreateInput,
-  AssetLifecycleEvent,
-  AssetListParams,
-  AssetPage,
-  AssetPatch,
-  AssetStats,
-} from '@/types/asset';
+import { AUDIT_API_ROUTES, normalizeAuditCollection } from './audit';
+import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from "./routes";
+import { fetchWithCsrf, resetCsrfToken } from "./csrf-client";
 import type {
   Incident,
   IncidentAssignment,
@@ -62,8 +65,8 @@ import type {
   IncidentBreachAssessmentInput,
   IncidentCollectionEnvelope,
   IncidentCreateInput,
-  IncidentDPANotificationInput,
   IncidentDataEnvelope,
+  IncidentDPANotificationInput,
   IncidentEscalationInput,
   IncidentEvent,
   IncidentListParams,
@@ -74,11 +77,33 @@ import type {
   IncidentTransitionInput,
   IncidentUnassignmentInput,
 } from '@/types/incident';
-import { AUDIT_API_ROUTES, normalizeAuditCollection } from './audit';
-import { ASSET_API_ROUTES, normalizeAssetCollection } from './asset';
 import { INCIDENT_API_ROUTES, normalizeIncidentCollection } from './incident';
-import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from "./routes";
-import { fetchWithCsrf, resetCsrfToken } from "./csrf-client";
+import type {
+  EntitlementLimitDecision,
+  EntitlementSnapshot,
+  FeatureFlagChangeEvent,
+  FeatureFlagEvaluation,
+  FeatureFlagOverrideInput,
+  FeatureFlagResetInput,
+  TenantFeatureFlagOverride,
+} from '@/types/feature-flag';
+import { FEATURE_FLAG_ROUTES } from './feature-flags';
+import type {
+  ManagedRole,
+  ManagedRoleAssignment,
+  ManagedRoleAssignmentInput,
+  ManagedRoleCloneInput,
+  ManagedRoleCreateInput,
+  ManagedRoleImpact,
+  ManagedRoleListParams,
+  ManagedRolePatch,
+  ManagedRoleUnassignmentInput,
+  PermissionGrant,
+  RoleChangeEvent,
+} from '@/types/access-admin';
+import { ACCESS_ADMIN_ROUTES } from './access-admin';
+import { productAccessFailure, publishProductAccessFailure } from './product-access';
+import type { PermissionMap } from '@/types/access';
 import { SESSION_EXPIRED_EVENT } from "./auth-constants";
 import type { User } from "@/types";
 
@@ -252,6 +277,8 @@ class ApiClient {
         message: (data as Record<string, string>)?.message ?? response.statusText,
         detail: data,
       };
+      const accessFailure = productAccessFailure(apiError, path);
+      if (accessFailure) publishProductAccessFailure(accessFailure);
       throw apiError;
     }
 
@@ -630,9 +657,6 @@ class ApiClient {
     assignRole: (userId: string, data: { role_ids: string[] }) =>
       this.post<unknown>(`/settings/users/${userId}/roles`, data),
 
-    listRoles: () =>
-      this.get<unknown[]>("/settings/roles"),
-
     auditLog: (params?: PaginationParams & { user_id?: string; action?: string; from_date?: string; to_date?: string }) =>
       this.get<PaginatedResponse<unknown>>("/settings/audit-log", params as Record<string, unknown>),
   };
@@ -920,20 +944,70 @@ class ApiClient {
   };
 
   // ========================================================================
-  // ACCESS (ABAC)
+  // ACCESS ADMINISTRATION
   // ========================================================================
 
   access = {
-    listPolicies: () => this.get<any>('/access/policies'),
-    createPolicy: (data: any) => this.post<any>('/access/policies', data),
-    updatePolicy: (id: string, data: any) => this.put<any>(`/access/policies/${id}`, data),
-    deletePolicy: (id: string) => this.delete<any>(`/access/policies/${id}`),
-    assignPolicy: (id: string, data: any) => this.post<any>(`/access/policies/${id}/assignments`, data),
-    removeAssignment: (policyId: string, assignmentId: string) => this.delete<any>(`/access/policies/${policyId}/assignments/${assignmentId}`),
-    testEvaluate: (data: any) => this.post<any>('/access/evaluate', data),
-    auditLog: (params?: any) => this.get<any>('/access/audit-log', params),
     myPermissions: () => this.get<DataEnvelope<PermissionMap>>('/access/my-permissions'),
-    fieldPermissions: (resourceType: string) => this.get<any>(`/access/field-permissions?resource_type=${resourceType}`),
+    fieldPermissions: (resourceType: string) => this.get<unknown>(`/access/field-permissions?resource_type=${resourceType}`),
+    permissionCatalogue: () =>
+      this.get<DataEnvelope<PermissionGrant[]>>(ACCESS_ADMIN_ROUTES.permissions),
+    listRoles: (params?: ManagedRoleListParams) =>
+      this.get<PaginatedDataEnvelope<ManagedRole>>(
+        ACCESS_ADMIN_ROUTES.roles,
+        params as Record<string, unknown>
+      ),
+    createRole: (data: ManagedRoleCreateInput) =>
+      this.post<ManagedRole>(ACCESS_ADMIN_ROUTES.roles, data),
+    getRole: (roleId: string) =>
+      this.get<ManagedRole>(ACCESS_ADMIN_ROUTES.role(roleId)),
+    updateRole: (roleId: string, data: ManagedRolePatch) =>
+      this.patch<ManagedRole>(ACCESS_ADMIN_ROUTES.role(roleId), data),
+    replaceRole: (roleId: string, data: ManagedRolePatch) =>
+      this.put<ManagedRole>(ACCESS_ADMIN_ROUTES.role(roleId), data),
+    deleteRole: (roleId: string, expectedVersion: number) =>
+      this.delete<void>(`${ACCESS_ADMIN_ROUTES.role(roleId)}?expected_version=${expectedVersion}`),
+    cloneRole: (roleId: string, data: ManagedRoleCloneInput) =>
+      this.post<ManagedRole>(ACCESS_ADMIN_ROUTES.clone(roleId), data),
+    previewRoleImpact: (roleId: string, permissions: PermissionGrant[]) =>
+      this.post<ManagedRoleImpact>(ACCESS_ADMIN_ROUTES.impact(roleId), { permissions }),
+    listRoleAssignments: (roleId: string) =>
+      this.get<DataEnvelope<ManagedRoleAssignment[]>>(ACCESS_ADMIN_ROUTES.assignments(roleId)),
+    assignRole: (roleId: string, data: ManagedRoleAssignmentInput) =>
+      this.post<MessageResponse>(ACCESS_ADMIN_ROUTES.assignments(roleId), data),
+    unassignRole: (roleId: string, userId: string, data: ManagedRoleUnassignmentInput) =>
+      this.request<void>('DELETE', ACCESS_ADMIN_ROUTES.assignment(roleId, userId), { body: data }),
+    listRoleEvents: (roleId: string, params?: { page?: number; page_size?: number }) =>
+      this.get<PaginatedDataEnvelope<RoleChangeEvent>>(
+        ACCESS_ADMIN_ROUTES.events(roleId),
+        params as Record<string, unknown>
+      ),
+  };
+
+  // ========================================================================
+  // PRODUCT CAPABILITIES & ENTITLEMENTS
+  // ========================================================================
+
+  featureFlags = {
+    listCapabilities: () =>
+      this.get<DataEnvelope<FeatureFlagEvaluation[]>>(FEATURE_FLAG_ROUTES.capabilities),
+    listEvaluations: () =>
+      this.get<DataEnvelope<FeatureFlagEvaluation[]>>(FEATURE_FLAG_ROUTES.flags),
+    evaluate: (key: string) =>
+      this.get<FeatureFlagEvaluation>(FEATURE_FLAG_ROUTES.evaluation(key)),
+    entitlements: () =>
+      this.get<EntitlementSnapshot>(FEATURE_FLAG_ROUTES.entitlements),
+    checkLimit: (metric: string, requested: number) =>
+      this.get<EntitlementLimitDecision>(FEATURE_FLAG_ROUTES.limit(metric), { requested }),
+    upsertOverride: (key: string, data: FeatureFlagOverrideInput) =>
+      this.put<TenantFeatureFlagOverride>(FEATURE_FLAG_ROUTES.flag(key), data),
+    resetOverride: (key: string, data: FeatureFlagResetInput) =>
+      this.post<void>(FEATURE_FLAG_ROUTES.reset(key), data),
+    history: (key: string, params?: { page?: number; page_size?: number }) =>
+      this.get<PaginatedDataEnvelope<FeatureFlagChangeEvent>>(
+        FEATURE_FLAG_ROUTES.history(key),
+        params as Record<string, unknown>
+      ),
   };
 
   // ========================================================================

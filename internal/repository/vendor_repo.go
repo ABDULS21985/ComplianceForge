@@ -103,6 +103,9 @@ func (r *vendorRepo) Create(ctx context.Context, organizationID, actorID string,
 	querier := database.QuerierFromContext(ctx, r.pool)
 	var created *models.Vendor
 	err := withTransaction(ctx, querier, func(tx pgx.Tx) error {
+		if err := EnsureEntitlementCapacity(ctx, tx, organizationID, "vendors", 1); err != nil {
+			return err
+		}
 		if input.OwnerUserID != nil {
 			if err := ensureVendorUser(ctx, tx, organizationID, *input.OwnerUserID); err != nil {
 				return err

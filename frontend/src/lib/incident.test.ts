@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   canDeleteIncident,
   hasIncidentPermission,
@@ -8,6 +6,7 @@ import {
   incidentNextStatuses,
   normalizeIncidentCollection,
 } from '@/lib/incident';
+import { describe, expect, it } from 'vitest';
 import type { Incident } from '@/types/incident';
 import type { User } from '@/types';
 

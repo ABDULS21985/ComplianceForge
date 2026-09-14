@@ -1,772 +1,222 @@
 'use client';
 
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as React from 'react';
+import {
+  accessAdminKeys,
+  formatAccessError,
+  groupPermissions,
+  humanizeAccessToken,
+  permissionKey,
+} from '@/lib/access-admin';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  KeyRound,
+  LockKeyhole,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Users,
+} from 'lucide-react';
+import type { ManagedRole, ManagedRoleListParams, PermissionGrant } from '@/types/access-admin';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import Link from 'next/link';
+import { RoleCloneDialog } from '@/components/access-admin/role-clone-dialog';
+import { RoleEditorDialog } from '@/components/access-admin/role-editor-dialog';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAccessAdminPermissions } from '@/hooks/use-access-admin-permissions';
+import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+const PAGE_SIZE = 20;
 
-interface SubjectCondition {
-  attribute: string;
-  operator: string;
-  value: string;
-}
-
-interface PolicyFormData {
-  name: string;
-  description: string;
-  effect: 'allow' | 'deny';
-  subject_conditions: SubjectCondition[];
-  resource_type: string;
-  resource_conditions: SubjectCondition[];
-  actions: string[];
-  require_mfa: boolean;
-  ip_range: string;
-  time_window_start: string;
-  time_window_end: string;
-  valid_from: string;
-  valid_until: string;
-  priority: number;
-}
-
-interface Policy {
-  id: string;
-  name: string;
-  description: string;
-  effect: 'allow' | 'deny';
-  resource_type: string;
-  actions: string[];
-  priority: number;
-  assignments: { id: string; type: 'user' | 'role'; name: string }[];
-}
-
-const EMPTY_CONDITION: SubjectCondition = { attribute: '', operator: 'equals', value: '' };
-
-const ACTIONS = ['read', 'create', 'update', 'delete', 'approve', 'export'];
-
-const OPERATORS = ['equals', 'not_equals', 'contains', 'in', 'not_in', 'greater_than', 'less_than'];
-
-const RESOURCE_TYPES = [
-  'risk', 'policy', 'framework', 'control', 'audit', 'incident', 'vendor', 'asset', 'report', 'user', 'setting',
-];
-
-const DEFAULT_FORM: PolicyFormData = {
-  name: '',
-  description: '',
-  effect: 'allow',
-  subject_conditions: [{ ...EMPTY_CONDITION }],
-  resource_type: '',
-  resource_conditions: [],
-  actions: [],
-  require_mfa: false,
-  ip_range: '',
-  time_window_start: '',
-  time_window_end: '',
-  valid_from: '',
-  valid_until: '',
-  priority: 100,
-};
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
-export default function AccessPoliciesPage() {
-  const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'policies' | 'test' | 'audit'>('policies');
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [form, setForm] = useState<PolicyFormData>({ ...DEFAULT_FORM });
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [assignDialog, setAssignDialog] = useState<{ policyId: string; policyName: string } | null>(null);
-  const [assignType, setAssignType] = useState<'user' | 'role'>('user');
-  const [assignValue, setAssignValue] = useState('');
-
-  // Test evaluation state
-  const [testUser, setTestUser] = useState('');
-  const [testAction, setTestAction] = useState('read');
-  const [testResource, setTestResource] = useState('');
-  const [testResult, setTestResult] = useState<{ allowed: boolean; reason: string } | null>(null);
-
-  // Queries
-  const { data: policies, isLoading, error } = useQuery({
-    queryKey: ['access-policies'],
-    queryFn: () => api.access.listPolicies(),
+export default function AccessAdministrationPage() {
+  const router = useRouter();
+  const permission = useAccessAdminPermissions();
+  const [page, setPage] = React.useState(1);
+  const [search, setSearch] = React.useState('');
+  const deferredSearch = React.useDeferredValue(search.trim());
+  const [includeSystem, setIncludeSystem] = React.useState(true);
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [cloning, setCloning] = React.useState<ManagedRole | null>(null);
+  const roleParams: ManagedRoleListParams = {
+    include_system: includeSystem,
+    page,
+    page_size: PAGE_SIZE,
+    search: deferredSearch || undefined,
+  };
+  const rolesQuery = useQuery({
+    queryKey: accessAdminKeys.roles(roleParams as Record<string, unknown>),
+    queryFn: () => api.access.listRoles(roleParams),
+    enabled: permission.canRead,
   });
-
-  const { data: auditLog } = useQuery({
-    queryKey: ['access-audit-log'],
-    queryFn: () => api.access.auditLog(),
-    enabled: activeTab === 'audit',
+  const catalogueQuery = useQuery({
+    queryKey: accessAdminKeys.permissions,
+    queryFn: () => api.access.permissionCatalogue(),
+    enabled: permission.canRead,
+    staleTime: 10 * 60_000,
   });
+  const roles = rolesQuery.data?.data ?? [];
+  const pagination = rolesQuery.data?.pagination;
+  const catalogue = catalogueQuery.data?.data ?? [];
 
-  // Mutations
-  const createPolicy = useMutation({
-    mutationFn: (data: any) => api.access.createPolicy(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['access-policies'] });
-      resetForm();
-    },
-  });
-
-  const updatePolicy = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) => api.access.updatePolicy(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['access-policies'] });
-      resetForm();
-    },
-  });
-
-  const deletePolicy = useMutation({
-    mutationFn: (id: string) => api.access.deletePolicy(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['access-policies'] }),
-  });
-
-  const assignPolicy = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) => api.access.assignPolicy(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['access-policies'] });
-      setAssignDialog(null);
-      setAssignValue('');
-    },
-  });
-
-  const removeAssignment = useMutation({
-    mutationFn: ({ policyId, assignmentId }: { policyId: string; assignmentId: string }) =>
-      api.access.removeAssignment(policyId, assignmentId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['access-policies'] }),
-  });
-
-  const testEvaluate = useMutation({
-    mutationFn: (data: any) => api.access.testEvaluate(data),
-    onSuccess: (data: any) => setTestResult(data),
-  });
-
-  function resetForm() {
-    setShowCreateForm(false);
-    setEditingId(null);
-    setForm({ ...DEFAULT_FORM });
+  if (permission.isLoading) return <PageSkeleton />;
+  if (permission.isError) {
+    return <PageError title="Access could not be checked" message="Your current permissions could not be loaded." onRetry={() => void permission.retry()} />;
   }
-
-  function handleSubmit() {
-    const payload = {
-      ...form,
-      subject_conditions: form.subject_conditions.filter((c) => c.attribute),
-      resource_conditions: form.resource_conditions.filter((c) => c.attribute),
-    };
-    if (editingId) {
-      updatePolicy.mutate({ id: editingId, data: payload });
-    } else {
-      createPolicy.mutate(payload);
-    }
-  }
-
-  function editPolicy(policy: Policy) {
-    setForm({
-      name: policy.name,
-      description: policy.description,
-      effect: policy.effect,
-      subject_conditions: [{ ...EMPTY_CONDITION }],
-      resource_type: policy.resource_type,
-      resource_conditions: [],
-      actions: policy.actions,
-      require_mfa: false,
-      ip_range: '',
-      time_window_start: '',
-      time_window_end: '',
-      valid_from: '',
-      valid_until: '',
-      priority: policy.priority,
-    });
-    setEditingId(policy.id);
-    setShowCreateForm(true);
-  }
-
-  // Condition row helpers
-  function updateCondition(
-    list: SubjectCondition[],
-    index: number,
-    field: keyof SubjectCondition,
-    value: string,
-  ): SubjectCondition[] {
-    return list.map((c, i) => (i === index ? { ...c, [field]: value } : c));
-  }
-
-  const policyList: Policy[] = policies?.items ?? policies ?? [];
-  const auditLogItems: any[] = auditLog?.items ?? auditLog ?? [];
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
-  if (isLoading) {
+  if (!permission.canRead) {
     return (
-      <div className="p-6 space-y-4">
-        <h1 className="text-2xl font-bold">Access Policies</h1>
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-16 rounded-lg bg-gray-100 animate-pulse" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-bold mb-4">Access Policies</h1>
-        <div className="bg-red-50 text-red-700 rounded-lg p-4">Failed to load access policies.</div>
-      </div>
+      <Card className="mx-auto max-w-xl">
+        <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+          <LockKeyhole aria-hidden="true" className="h-10 w-10 text-muted-foreground" />
+          <h1 className="text-xl font-semibold">Access administration unavailable</h1>
+          <p className="text-sm text-muted-foreground">Your role does not grant organization settings access.</p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Access Policies (ABAC)</h1>
-        {!showCreateForm && activeTab === 'policies' && (
-          <button
-            onClick={() => setShowCreateForm(true)}
-            className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
-          >
-            Create Policy
-          </button>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Access administration</h1>
+          <p className="mt-1 max-w-3xl text-muted-foreground">Manage tenant roles, exact API permissions, user assignments, and an append-only change history.</p>
+        </div>
+        {permission.canConfigure && (
+          <Button type="button" disabled={catalogueQuery.isLoading || catalogueQuery.isError} onClick={() => setCreateOpen(true)}>
+            <Plus aria-hidden="true" className="mr-2 h-4 w-4" />Create custom role
+          </Button>
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b">
-        {(['policies', 'test', 'audit'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              activeTab === tab
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {tab === 'policies' ? 'Policies' : tab === 'test' ? 'Test Evaluation' : 'Audit Log'}
-          </button>
-        ))}
+      {!permission.canConfigure && (
+        <Card><CardContent className="flex gap-3 py-4 text-sm text-muted-foreground"><LockKeyhole aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />You have read-only settings access. Role, permission, and assignment changes are hidden.</CardContent></Card>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Metric icon={ShieldCheck} label="Roles matching filters" value={pagination?.total_items ?? 0} />
+        <Metric icon={KeyRound} label="Catalogue permissions" value={catalogue.length} />
+        <Metric icon={Users} label="Assignments on this page" value={roles.reduce((total, role) => total + role.assigned_users, 0)} />
       </div>
 
-      {/* Create/Edit Form */}
-      {showCreateForm && activeTab === 'policies' && (
-        <div className="border rounded-lg p-6 bg-white space-y-5">
-          <h2 className="text-lg font-semibold">{editingId ? 'Edit Policy' : 'Create Policy'}</h2>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Name</label>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Priority</label>
-              <input
-                type="number"
-                value={form.priority}
-                onChange={(e) => setForm({ ...form, priority: parseInt(e.target.value) || 0 })}
-                className="w-full border rounded px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Description</label>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              rows={2}
-              className="w-full border rounded px-3 py-2 text-sm"
-            />
-          </div>
-
-          {/* Effect toggle */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Effect</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setForm({ ...form, effect: 'allow' })}
-                className={`px-4 py-2 text-sm font-medium rounded ${
-                  form.effect === 'allow' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'
-                }`}
-              >
-                Allow
-              </button>
-              <button
-                onClick={() => setForm({ ...form, effect: 'deny' })}
-                className={`px-4 py-2 text-sm font-medium rounded ${
-                  form.effect === 'deny' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'
-                }`}
-              >
-                Deny
-              </button>
-            </div>
-          </div>
-
-          {/* Subject Conditions */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Subject Conditions</label>
-            {form.subject_conditions.map((cond, idx) => (
-              <div key={idx} className="flex gap-2 mb-2">
-                <input
-                  type="text"
-                  placeholder="Attribute (e.g. department)"
-                  value={cond.attribute}
-                  onChange={(e) =>
-                    setForm({ ...form, subject_conditions: updateCondition(form.subject_conditions, idx, 'attribute', e.target.value) })
-                  }
-                  className="flex-1 border rounded px-3 py-2 text-sm"
-                />
-                <select
-                  value={cond.operator}
-                  onChange={(e) =>
-                    setForm({ ...form, subject_conditions: updateCondition(form.subject_conditions, idx, 'operator', e.target.value) })
-                  }
-                  className="border rounded px-3 py-2 text-sm"
-                >
-                  {OPERATORS.map((op) => (
-                    <option key={op} value={op}>{op.replace(/_/g, ' ')}</option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  placeholder="Value"
-                  value={cond.value}
-                  onChange={(e) =>
-                    setForm({ ...form, subject_conditions: updateCondition(form.subject_conditions, idx, 'value', e.target.value) })
-                  }
-                  className="flex-1 border rounded px-3 py-2 text-sm"
-                />
-                <button
-                  onClick={() =>
-                    setForm({ ...form, subject_conditions: form.subject_conditions.filter((_, i) => i !== idx) })
-                  }
-                  className="px-2 text-red-500 hover:text-red-700"
-                >
-                  x
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={() => setForm({ ...form, subject_conditions: [...form.subject_conditions, { ...EMPTY_CONDITION }] })}
-              className="text-sm text-blue-600 hover:text-blue-800"
-            >
-              + Add condition
-            </button>
-          </div>
-
-          {/* Resource Type */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Resource Type</label>
-            <select
-              value={form.resource_type}
-              onChange={(e) => setForm({ ...form, resource_type: e.target.value })}
-              className="w-full border rounded px-3 py-2 text-sm"
-            >
-              <option value="">Select resource type</option>
-              {RESOURCE_TYPES.map((rt) => (
-                <option key={rt} value={rt}>{rt.charAt(0).toUpperCase() + rt.slice(1)}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Resource Conditions */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Resource Conditions</label>
-            {form.resource_conditions.map((cond, idx) => (
-              <div key={idx} className="flex gap-2 mb-2">
-                <input
-                  type="text"
-                  placeholder="Attribute"
-                  value={cond.attribute}
-                  onChange={(e) =>
-                    setForm({ ...form, resource_conditions: updateCondition(form.resource_conditions, idx, 'attribute', e.target.value) })
-                  }
-                  className="flex-1 border rounded px-3 py-2 text-sm"
-                />
-                <select
-                  value={cond.operator}
-                  onChange={(e) =>
-                    setForm({ ...form, resource_conditions: updateCondition(form.resource_conditions, idx, 'operator', e.target.value) })
-                  }
-                  className="border rounded px-3 py-2 text-sm"
-                >
-                  {OPERATORS.map((op) => (
-                    <option key={op} value={op}>{op.replace(/_/g, ' ')}</option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  placeholder="Value"
-                  value={cond.value}
-                  onChange={(e) =>
-                    setForm({ ...form, resource_conditions: updateCondition(form.resource_conditions, idx, 'value', e.target.value) })
-                  }
-                  className="flex-1 border rounded px-3 py-2 text-sm"
-                />
-                <button
-                  onClick={() =>
-                    setForm({ ...form, resource_conditions: form.resource_conditions.filter((_, i) => i !== idx) })
-                  }
-                  className="px-2 text-red-500 hover:text-red-700"
-                >
-                  x
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={() => setForm({ ...form, resource_conditions: [...form.resource_conditions, { ...EMPTY_CONDITION }] })}
-              className="text-sm text-blue-600 hover:text-blue-800"
-            >
-              + Add condition
-            </button>
-          </div>
-
-          {/* Actions */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Actions</label>
-            <div className="flex flex-wrap gap-3">
-              {ACTIONS.map((action) => (
-                <label key={action} className="flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={form.actions.includes(action)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setForm({ ...form, actions: [...form.actions, action] });
-                      } else {
-                        setForm({ ...form, actions: form.actions.filter((a) => a !== action) });
-                      }
-                    }}
-                    className="rounded"
-                  />
-                  {action}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Environment Conditions */}
-          <div className="space-y-3">
-            <label className="block text-sm font-medium">Environment Conditions</label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.require_mfa}
-                onChange={(e) => setForm({ ...form, require_mfa: e.target.checked })}
-                className="rounded"
-              />
-              Require MFA
-            </label>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Allowed IP Range (CIDR)</label>
-              <input
-                type="text"
-                value={form.ip_range}
-                onChange={(e) => setForm({ ...form, ip_range: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
-                placeholder="e.g. 10.0.0.0/8"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Time Window Start</label>
-                <input
-                  type="time"
-                  value={form.time_window_start}
-                  onChange={(e) => setForm({ ...form, time_window_start: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+      <Tabs defaultValue="roles" className="space-y-5">
+        <TabsList className="h-auto max-w-full flex-wrap justify-start">
+          <TabsTrigger value="roles">Roles</TabsTrigger>
+          <TabsTrigger value="catalogue">Permission catalogue</TabsTrigger>
+        </TabsList>
+        <TabsContent value="roles" className="space-y-4">
+          <Card>
+            <CardContent className="flex flex-col gap-4 pt-6 md:flex-row md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search aria-hidden="true" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  aria-label="Search roles"
+                  className="pl-9"
+                  maxLength={200}
+                  placeholder="Search name, slug, or description"
+                  value={search}
+                  onChange={(event) => { setSearch(event.target.value); setPage(1); }}
                 />
               </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Time Window End</label>
-                <input
-                  type="time"
-                  value={form.time_window_end}
-                  onChange={(e) => setForm({ ...form, time_window_end: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-          </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" className="h-4 w-4" checked={includeSystem} onChange={(event) => { setIncludeSystem(event.target.checked); setPage(1); }} />
+                Include platform system roles
+              </label>
+            </CardContent>
+          </Card>
 
-          {/* Validity Period */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Valid From</label>
-              <input
-                type="date"
-                value={form.valid_from}
-                onChange={(e) => setForm({ ...form, valid_from: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Valid Until</label>
-              <input
-                type="date"
-                value={form.valid_until}
-                onChange={(e) => setForm({ ...form, valid_until: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-
-          {/* Form buttons */}
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={handleSubmit}
-              disabled={!form.name || !form.resource_type || form.actions.length === 0 || createPolicy.isPending || updatePolicy.isPending}
-              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {createPolicy.isPending || updatePolicy.isPending ? 'Saving...' : editingId ? 'Update Policy' : 'Create Policy'}
-            </button>
-            <button onClick={resetForm} className="px-4 py-2 text-sm font-medium rounded border border-gray-300 hover:bg-gray-50">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Policy List */}
-      {activeTab === 'policies' && !showCreateForm && (
-        <div className="border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left px-4 py-2 font-medium">Effect</th>
-                <th className="text-left px-4 py-2 font-medium">Name</th>
-                <th className="text-left px-4 py-2 font-medium">Resource</th>
-                <th className="text-left px-4 py-2 font-medium">Actions</th>
-                <th className="text-left px-4 py-2 font-medium">Assigned To</th>
-                <th className="text-left px-4 py-2 font-medium">Priority</th>
-                <th className="text-right px-4 py-2 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {policyList.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-gray-400">No access policies configured yet.</td>
-                </tr>
-              )}
-              {policyList.map((policy) => (
-                <tr key={policy.id} className="border-b last:border-0">
-                  <td className="px-4 py-3">
-                    <span
-                      className={`text-xs font-bold px-2 py-1 rounded ${
-                        policy.effect === 'allow' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}
-                    >
-                      {policy.effect.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-medium">{policy.name}</td>
-                  <td className="px-4 py-3 capitalize">{policy.resource_type}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {policy.actions.map((a) => (
-                        <span key={a} className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{a}</span>
-                      ))}
+          {rolesQuery.isLoading ? <RoleGridSkeleton /> : rolesQuery.isError ? (
+            <PageError title="Roles could not be loaded" message={formatAccessError(rolesQuery.error, 'The role catalogue is temporarily unavailable.')} onRetry={() => void rolesQuery.refetch()} />
+          ) : roles.length === 0 ? (
+            <Card><CardContent className="flex flex-col items-center py-14 text-center"><ShieldCheck aria-hidden="true" className="h-10 w-10 text-muted-foreground" /><h2 className="mt-3 text-lg font-semibold">No matching roles</h2><p className="mt-1 text-sm text-muted-foreground">Adjust the search or system-role filter, or create a custom role.</p></CardContent></Card>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {roles.map((role) => (
+                <Card key={role.id} className="flex flex-col">
+                  <CardHeader className="flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <CardTitle className="truncate text-lg"><Link className="hover:underline" href={`/settings/access-policies/${role.id}`}>{role.name}</Link></CardTitle>
+                        <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{role.slug}</p>
+                      </div>
+                      <Badge variant={role.is_system_role ? 'secondary' : 'outline'}>{role.is_system_role ? 'System' : 'Custom'}</Badge>
                     </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {(policy.assignments ?? []).map((a) => (
-                        <span key={a.id} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded flex items-center gap-1">
-                          {a.name}
-                          <button
-                            onClick={() => removeAssignment.mutate({ policyId: policy.id, assignmentId: a.id })}
-                            className="text-blue-400 hover:text-red-500"
-                          >
-                            x
-                          </button>
-                        </span>
-                      ))}
-                      <button
-                        onClick={() => setAssignDialog({ policyId: policy.id, policyName: policy.name })}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        + Assign
-                      </button>
+                    <CardDescription className="line-clamp-2 pt-2">{role.description || 'No description provided.'}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <dl className="grid grid-cols-3 gap-2 text-center text-sm">
+                      <div className="rounded-md bg-muted p-2"><dt className="text-xs text-muted-foreground">Permissions</dt><dd className="font-semibold">{role.permissions.length}</dd></div>
+                      <div className="rounded-md bg-muted p-2"><dt className="text-xs text-muted-foreground">Users</dt><dd className="font-semibold">{role.assigned_users}</dd></div>
+                      <div className="rounded-md bg-muted p-2"><dt className="text-xs text-muted-foreground">Version</dt><dd className="font-semibold">{role.version}</dd></div>
+                    </dl>
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild size="sm" variant="outline"><Link href={`/settings/access-policies/${role.id}`}>View details</Link></Button>
+                      {permission.canConfigure && <Button type="button" size="sm" variant="ghost" onClick={() => setCloning(role)}><Copy aria-hidden="true" className="mr-2 h-4 w-4" />Clone</Button>}
                     </div>
-                  </td>
-                  <td className="px-4 py-3">{policy.priority}</td>
-                  <td className="px-4 py-3 text-right space-x-2">
-                    <button onClick={() => editPolicy(policy)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm('Delete this policy?')) deletePolicy.mutate(policy.id);
-                      }}
-                      className="text-red-600 hover:text-red-800 text-xs font-medium"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
+                  </CardContent>
+                </Card>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Test Evaluation Tab */}
-      {activeTab === 'test' && (
-        <div className="max-w-xl space-y-4">
-          <p className="text-sm text-gray-500">Simulate an access evaluation to check if a user would be allowed or denied.</p>
-          <div>
-            <label className="block text-sm font-medium mb-1">User (ID or email)</label>
-            <input
-              type="text"
-              value={testUser}
-              onChange={(e) => setTestUser(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Action</label>
-            <select
-              value={testAction}
-              onChange={(e) => setTestAction(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm"
-            >
-              {ACTIONS.map((a) => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Resource Type</label>
-            <select
-              value={testResource}
-              onChange={(e) => setTestResource(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm"
-            >
-              <option value="">Select</option>
-              {RESOURCE_TYPES.map((rt) => (
-                <option key={rt} value={rt}>{rt}</option>
-              ))}
-            </select>
-          </div>
-          <button
-            onClick={() =>
-              testEvaluate.mutate({ user: testUser, action: testAction, resource_type: testResource })
-            }
-            disabled={!testUser || !testResource || testEvaluate.isPending}
-            className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {testEvaluate.isPending ? 'Evaluating...' : 'Evaluate'}
-          </button>
-
-          {testResult && (
-            <div
-              className={`rounded-lg p-4 ${
-                testResult.allowed ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'
-              }`}
-            >
-              <p className="font-bold text-lg">{testResult.allowed ? 'ALLOWED' : 'DENIED'}</p>
-              <p className="text-sm mt-1">{testResult.reason}</p>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Audit Log Tab */}
-      {activeTab === 'audit' && (
-        <div className="border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left px-4 py-2 font-medium">Timestamp</th>
-                <th className="text-left px-4 py-2 font-medium">User</th>
-                <th className="text-left px-4 py-2 font-medium">Action</th>
-                <th className="text-left px-4 py-2 font-medium">Resource</th>
-                <th className="text-left px-4 py-2 font-medium">Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditLogItems.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-gray-400">No audit log entries yet.</td>
-                </tr>
-              )}
-              {auditLogItems.map((entry: any, idx: number) => (
-                <tr key={entry.id ?? idx} className="border-b last:border-0">
-                  <td className="px-4 py-2 text-gray-500">{new Date(entry.timestamp).toLocaleString()}</td>
-                  <td className="px-4 py-2">{entry.user_name ?? entry.user_id}</td>
-                  <td className="px-4 py-2">{entry.action}</td>
-                  <td className="px-4 py-2">{entry.resource_type} {entry.resource_id ? `#${entry.resource_id.slice(0, 8)}` : ''}</td>
-                  <td className="px-4 py-2">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${entry.allowed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {entry.allowed ? 'Allowed' : 'Denied'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Assignment Dialog */}
-      {assignDialog && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="text-lg font-bold">Assign Policy: {assignDialog.policyName}</h2>
-            <div>
-              <label className="block text-sm font-medium mb-1">Assign to</label>
-              <div className="flex gap-2 mb-3">
-                <button
-                  onClick={() => setAssignType('user')}
-                  className={`px-3 py-1 text-sm rounded ${assignType === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}
-                >
-                  User
-                </button>
-                <button
-                  onClick={() => setAssignType('role')}
-                  className={`px-3 py-1 text-sm rounded ${assignType === 'role' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}
-                >
-                  Role
-                </button>
+          {pagination && pagination.total_pages > 1 && (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">Page {pagination.page} of {pagination.total_pages} · {pagination.total_items} roles</p>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" size="sm" disabled={page <= 1 || rolesQuery.isFetching} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft aria-hidden="true" className="mr-1 h-4 w-4" />Previous</Button>
+                <Button type="button" variant="outline" size="sm" disabled={page >= pagination.total_pages || rolesQuery.isFetching} onClick={() => setPage((current) => current + 1)}>Next<ChevronRight aria-hidden="true" className="ml-1 h-4 w-4" /></Button>
               </div>
-              <input
-                type="text"
-                value={assignValue}
-                onChange={(e) => setAssignValue(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm"
-                placeholder={assignType === 'user' ? 'User email or ID' : 'Role name or ID'}
-              />
             </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setAssignDialog(null)} className="px-4 py-2 text-sm rounded border border-gray-300 hover:bg-gray-50">
-                Cancel
-              </button>
-              <button
-                onClick={() =>
-                  assignPolicy.mutate({
-                    id: assignDialog.policyId,
-                    data: { type: assignType, identifier: assignValue },
-                  })
-                }
-                disabled={!assignValue.trim() || assignPolicy.isPending}
-                className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {assignPolicy.isPending ? 'Assigning...' : 'Assign'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          )}
+        </TabsContent>
+        <TabsContent value="catalogue">
+          <PermissionCatalogue catalogue={catalogue} isError={catalogueQuery.isError} isLoading={catalogueQuery.isLoading} onRetry={() => void catalogueQuery.refetch()} />
+        </TabsContent>
+      </Tabs>
+
+      {createOpen && <RoleEditorDialog catalogue={catalogue} open onOpenChange={setCreateOpen} onSaved={(created) => router.push(`/settings/access-policies/${created.id}`)} />}
+      {cloning && <RoleCloneDialog role={cloning} open onOpenChange={(next) => !next && setCloning(null)} onCloned={(cloned) => router.push(`/settings/access-policies/${cloned.id}`)} />}
     </div>
   );
+}
+
+function Metric({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: number }) {
+  return <Card><CardContent className="flex items-center gap-3 pt-6"><div className="rounded-md bg-primary/10 p-2"><Icon aria-hidden="true" className="h-5 w-5 text-primary" /></div><div><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-semibold">{value}</p></div></CardContent></Card>;
+}
+
+function PageError({ message, onRetry, title }: { message: string; onRetry: () => void; title: string }) {
+  return <Card><CardContent className="flex flex-col items-center gap-3 py-12 text-center"><RefreshCw aria-hidden="true" className="h-9 w-9 text-muted-foreground" /><h2 className="text-lg font-semibold">{title}</h2><p role="alert" className="text-sm text-muted-foreground">{message}</p><Button type="button" variant="outline" onClick={onRetry}>Try again</Button></CardContent></Card>;
+}
+
+function PageSkeleton() {
+  return <div role="status" aria-label="Loading access administration" className="space-y-5"><Skeleton className="h-24 w-full" /><div className="grid gap-4 sm:grid-cols-3">{Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-24" />)}</div><RoleGridSkeleton /></div>;
+}
+
+function PermissionCatalogue({ catalogue, isError, isLoading, onRetry }: { catalogue: PermissionGrant[]; isError: boolean; isLoading: boolean; onRetry: () => void }) {
+  if (isLoading) return <RoleGridSkeleton />;
+  if (isError) return <PageError title="Permission catalogue unavailable" message="The canonical permission catalogue could not be loaded." onRetry={onRetry} />;
+  const groups = groupPermissions(catalogue);
+  if (groups.length === 0) return <Card><CardContent className="py-12 text-center"><p className="font-semibold">No permissions published</p><p className="mt-1 text-sm text-muted-foreground">Role creation is disabled until the backend publishes a catalogue.</p></CardContent></Card>;
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      {groups.map((group) => (
+        <Card key={group.resource}>
+          <CardHeader><CardTitle className="text-lg">{humanizeAccessToken(group.resource)}</CardTitle><CardDescription>{group.permissions.length} available actions</CardDescription></CardHeader>
+          <CardContent><ul className="space-y-3">{group.permissions.map((item) => <li key={permissionKey(item)} className="border-t pt-3 first:border-0 first:pt-0"><div className="flex items-start justify-between gap-3"><span className="font-medium">{humanizeAccessToken(item.action)}</span><code className="rounded bg-muted px-1.5 py-0.5 text-xs">{permissionKey(item)}</code></div>{item.description && <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>}</li>)}</ul></CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function RoleGridSkeleton() {
+  return <div role="status" aria-label="Loading roles" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-64" />)}</div>;
 }

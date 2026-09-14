@@ -100,6 +100,9 @@ func (r *riskRepo) Create(ctx context.Context, orgID string, input models.RiskCr
 		return nil, fmt.Errorf("beginning risk creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := EnsureEntitlementCapacity(ctx, tx, orgID, "risks", 1); err != nil {
+		return nil, err
+	}
 
 	// The migration's RSK-NNNN trigger uses MAX()+1. Serialize reference
 	// allocation per tenant so concurrent creates cannot collide.

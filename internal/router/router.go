@@ -83,6 +83,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	assetHandler := dependencies.Assets
 	vendorHandler := dependencies.Vendors
 	accessAdministrationHandler := dependencies.AccessAdministration
+	featureFlagHandler := dependencies.FeatureFlags
 	dashboardHandler := dependencies.Domains.Dashboard
 	reportHandler := dependencies.Domains.Report
 	notificationHandler := dependencies.Notifications
@@ -167,18 +168,22 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	r.Route("/api/v1/automation", func(r chi.Router) {
 		r.Use(middleware.APIKeyAuth(dependencies.APIKeyAuthenticator, dependencies.APIKeyRateLimiter))
 		r.Use(dependencies.TenantMiddleware)
+		r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access"))
 
 		r.Route("/frameworks", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "control_tracking"))
 			r.With(middleware.RequireAPIKeyPermission("read", "frameworks")).Get("/", frameworkHandler.List)
 			r.With(middleware.RequireAPIKeyPermission("read", "frameworks")).Get("/{id}", frameworkHandler.GetByID)
 			r.With(middleware.RequireAPIKeyPermission("read", "controls")).Get("/{id}/controls", frameworkHandler.GetControls)
 		})
 		r.Route("/controls", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "control_tracking"))
 			r.With(middleware.RequireAPIKeyPermission("read", "controls")).Get("/", controlHandler.List)
 			r.With(middleware.RequireAPIKeyPermission("read", "controls")).Get("/{id}", controlHandler.GetByID)
 			r.With(middleware.RequireAPIKeyPermission("read", "controls")).Get("/{id}/evidence", controlHandler.ListEvidence)
 		})
 		r.Route("/risks", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "risk_register"))
 			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/", riskHandler.List)
 			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/matrix", riskHandler.GetMatrix)
 			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/heatmap", riskHandler.GetHeatmap)
@@ -190,6 +195,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/{id}/indicators", riskHandler.ListIndicators)
 		})
 		r.Route("/policies", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "policy_management"))
 			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/", policyHandler.List)
 			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/categories", policyHandler.ListCategories)
 			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/due-for-review", policyHandler.GetDueForReview)
@@ -198,6 +204,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/{id}/reviews", policyHandler.ListReviews)
 		})
 		r.Route("/audits", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "audit_workspace"))
 			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/", auditHandler.List)
 			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/{id}", auditHandler.GetByID)
 			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/{id}/findings", auditHandler.ListFindings)
@@ -205,6 +212,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/{id}/findings/{findingID}", auditHandler.GetFinding)
 		})
 		r.Route("/incidents", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "incident_management"))
 			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/", incidentHandler.List)
 			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/statistics", incidentHandler.Statistics)
 			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/breaches/upcoming", incidentHandler.GetBreachNotifiable)
@@ -213,12 +221,14 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/{id}/assignments", incidentHandler.ListAssignments)
 		})
 		r.Route("/assets", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "asset_inventory"))
 			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/", assetHandler.List)
 			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/stats", assetHandler.Stats)
 			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/{id}", assetHandler.GetByID)
 			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/{id}/events", assetHandler.ListEvents)
 		})
 		r.Route("/vendors", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "vendor_management"))
 			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/", vendorHandler.List)
 			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/statistics", vendorHandler.Statistics)
 			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/due-for-assessment", vendorHandler.ListDueForAssessment)
@@ -250,14 +260,16 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Compliance Frameworks
 		r.Route("/frameworks", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "control_tracking"))
 			r.Get("/", frameworkHandler.List)
 			r.Get("/{id}", frameworkHandler.GetByID)
-			r.Post("/{id}/adopt", frameworkHandler.Adopt)
+			r.With(middleware.RequireEntitlementCapacity(dependencies.EntitlementChecker, "frameworks", 1)).Post("/{id}/adopt", frameworkHandler.Adopt)
 			r.Get("/{id}/controls", frameworkHandler.GetControls)
 		})
 
 		// Controls
 		r.Route("/controls", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "control_tracking"))
 			r.Get("/", controlHandler.List)
 			r.Get("/{id}", controlHandler.GetByID)
 			r.Patch("/{id}/implementation", controlHandler.UpdateImplementation)
@@ -267,7 +279,8 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Risks
 		r.Route("/risks", func(r chi.Router) {
-			r.Post("/", riskHandler.Create)
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "risk_register"))
+			r.With(middleware.RequireEntitlementCapacity(dependencies.EntitlementChecker, "risks", 1)).Post("/", riskHandler.Create)
 			r.Get("/", riskHandler.List)
 			r.Get("/matrix", riskHandler.GetMatrix)
 			r.Get("/heatmap", riskHandler.GetHeatmap)
@@ -294,6 +307,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Policies
 		r.Route("/policies", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "policy_management"))
 			r.Post("/", policyHandler.Create)
 			r.Get("/", policyHandler.List)
 			r.Get("/categories", policyHandler.ListCategories)
@@ -327,6 +341,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Audits
 		r.Route("/audits", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "audit_workspace"))
 			r.Post("/", auditHandler.Create)
 			r.Get("/", auditHandler.List)
 			r.Get("/{id}", auditHandler.GetByID)
@@ -348,6 +363,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Incidents
 		r.Route("/incidents", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "incident_management"))
 			r.Post("/", incidentHandler.Create)
 			r.Get("/", incidentHandler.List)
 			r.Get("/statistics", incidentHandler.Statistics)
@@ -374,6 +390,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Asset inventory
 		r.Route("/assets", func(r chi.Router) {
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "asset_inventory"))
 			r.Post("/", assetHandler.Create)
 			r.Get("/", assetHandler.List)
 			r.Get("/stats", assetHandler.Stats)
@@ -386,7 +403,8 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Vendors
 		r.Route("/vendors", func(r chi.Router) {
-			r.Post("/", vendorHandler.Create)
+			r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "vendor_management"))
+			r.With(middleware.RequireEntitlementCapacity(dependencies.EntitlementChecker, "vendors", 1)).Post("/", vendorHandler.Create)
 			r.Get("/", vendorHandler.List)
 			r.Get("/statistics", vendorHandler.Statistics)
 			// Backward-compatible route for the existing dashboard client.
@@ -582,11 +600,23 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 		})
 
 		// SSO & API Keys (under settings)
-		r.Get("/settings/sso", integrationHandler.GetSSOConfig)
-		r.Put("/settings/sso", integrationHandler.UpdateSSOConfig)
-		r.Get("/settings/api-keys", integrationHandler.ListAPIKeys)
-		r.Post("/settings/api-keys", integrationHandler.CreateAPIKey)
-		r.Delete("/settings/api-keys/{id}", integrationHandler.RevokeAPIKey)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "sso")).Get("/settings/sso", integrationHandler.GetSSOConfig)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "sso")).Put("/settings/sso", integrationHandler.UpdateSSOConfig)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Get("/settings/api-keys", integrationHandler.ListAPIKeys)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Post("/settings/api-keys", integrationHandler.CreateAPIKey)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Delete("/settings/api-keys/{id}", integrationHandler.RevokeAPIKey)
+
+		// Product capability catalogue, entitlements, and tenant feature flags.
+		r.Route("/settings", func(r chi.Router) {
+			r.Get("/capabilities", featureFlagHandler.ListCapabilities)
+			r.Get("/capabilities/{key}/evaluation", featureFlagHandler.Evaluate)
+			r.Get("/entitlements", featureFlagHandler.GetEntitlements)
+			r.Get("/entitlements/limits/{metric}/check", featureFlagHandler.CheckLimit)
+			r.Get("/feature-flags", featureFlagHandler.ListCapabilities)
+			r.Put("/feature-flags/{key}", featureFlagHandler.UpsertOverride)
+			r.Post("/feature-flags/{key}/reset", featureFlagHandler.ResetOverride)
+			r.Get("/feature-flags/{key}/history", featureFlagHandler.ListEvents)
+		})
 
 		// Access Policies (ABAC)
 		r.Route("/access", func(r chi.Router) {
@@ -605,15 +635,18 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Delete("/roles/{id}/assignments/{userID}", accessAdministrationHandler.UnassignRole)
 			r.Get("/roles/{id}/events", accessAdministrationHandler.ListEvents)
 			if accessHandler != nil {
-				r.Get("/policies", accessHandler.ListPolicies)
-				r.Post("/policies", accessHandler.CreatePolicy)
-				r.Put("/policies/{id}", accessHandler.UpdatePolicy)
-				r.Delete("/policies/{id}", accessHandler.DeletePolicy)
-				r.Post("/policies/{id}/assignments", accessHandler.AssignPolicy)
-				r.Delete("/policies/{id}/assignments/{assignmentId}", accessHandler.RemoveAssignment)
-				r.Post("/evaluate", accessHandler.TestEvaluate)
-				r.Get("/audit-log", accessHandler.GetAuditLog)
-				r.Get("/field-permissions", accessHandler.GetFieldPermissions)
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "abac"))
+					r.Get("/policies", accessHandler.ListPolicies)
+					r.Post("/policies", accessHandler.CreatePolicy)
+					r.Put("/policies/{id}", accessHandler.UpdatePolicy)
+					r.Delete("/policies/{id}", accessHandler.DeletePolicy)
+					r.Post("/policies/{id}/assignments", accessHandler.AssignPolicy)
+					r.Delete("/policies/{id}/assignments/{assignmentId}", accessHandler.RemoveAssignment)
+					r.Post("/evaluate", accessHandler.TestEvaluate)
+					r.Get("/audit-log", accessHandler.GetAuditLog)
+					r.Get("/field-permissions", accessHandler.GetFieldPermissions)
+				})
 			}
 		})
 

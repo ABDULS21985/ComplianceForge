@@ -61,7 +61,7 @@ func TestRiskRepositoryWithNonSuperuserTenants(t *testing.T) {
 	if _, err := pool.Exec(ctx, "CREATE ROLE "+quotedRole+" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"); err != nil {
 		t.Fatalf("creating non-superuser role: %v", err)
 	}
-	grant := "GRANT USAGE ON SCHEMA public TO " + quotedRole + "; GRANT SELECT ON users,risk_categories,risk_matrices TO " + quotedRole + "; GRANT SELECT,INSERT,UPDATE,DELETE ON risks,risk_assessments,risk_treatments,risk_appetite_statements,risk_indicators,risk_indicator_values TO " + quotedRole
+	grant := "GRANT USAGE ON SCHEMA public TO " + quotedRole + "; GRANT SELECT ON organizations,users,subscription_plans,organization_subscriptions,organization_subscriptions_v2,risk_categories,risk_matrices TO " + quotedRole + "; GRANT SELECT,INSERT,UPDATE,DELETE ON risks,risk_assessments,risk_treatments,risk_appetite_statements,risk_indicators,risk_indicator_values TO " + quotedRole
 	if _, err := pool.Exec(ctx, grant); err != nil {
 		t.Fatal(err)
 	}

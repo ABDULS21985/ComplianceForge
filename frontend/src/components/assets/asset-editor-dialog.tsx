@@ -1,20 +1,19 @@
 'use client';
 
 import * as React from 'react';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2 } from 'lucide-react';
-import { useForm, useWatch } from 'react-hook-form';
-import { z } from 'zod';
-
-import { Button } from '@/components/ui/button';
+import type { Asset, AssetClassification, AssetCreateInput, AssetCriticality, AssetPatch, AssetType } from '@/types/asset';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { formatAssetError, humanizeAssetToken, normalizeAssetTags } from '@/lib/asset';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useCreateAsset, useUpdateAsset } from '@/lib/api-hooks';
+import { useForm, useWatch } from 'react-hook-form';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Loader2 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
-import { useCreateAsset, useUpdateAsset } from '@/lib/api-hooks';
-import { formatAssetError, humanizeAssetToken, normalizeAssetTags } from '@/lib/asset';
-import type { Asset, AssetClassification, AssetCreateInput, AssetCriticality, AssetPatch, AssetType } from '@/types/asset';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 const optionalUuid = z.union([z.literal(''), z.string().uuid('Enter a valid UUID.')]);
 const optionalIp = z.union([z.literal(''), z.string().ip('Enter a valid IPv4 or IPv6 address.')]);

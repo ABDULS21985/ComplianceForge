@@ -13,6 +13,9 @@ ACTIONLINT_VERSION=1.7.12
 SHELLCHECK_VERSION=0.11.0
 
 tools_dir=${TOOLS_DIR:-${RUNNER_TEMP:-.cache}/complianceforge-security-tools/bin}
+# Release workflows can request only Trivy so four parallel image jobs do not
+# download scanners they never execute. The default remains the complete set.
+security_tools_only=${SECURITY_TOOLS_ONLY:-}
 mkdir -p "$tools_dir"
 tools_dir=$(CDPATH='' cd -- "$tools_dir" && pwd)
 
@@ -124,38 +127,56 @@ install_archive() {
   install -m 0755 "$binary" "$tools_dir/$name"
 }
 
-install_archive trivy \
-  "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${trivy_asset}" \
-  "$trivy_sha"
-install_archive syft \
-  "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${syft_asset}" \
-  "$syft_sha"
-install_archive gitleaks \
-  "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${gitleaks_asset}" \
-  "$gitleaks_sha"
-install_archive gosec \
-  "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/${gosec_asset}" \
-  "$gosec_sha"
-install_archive actionlint \
-  "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${actionlint_asset}" \
-  "$actionlint_sha"
-install_archive shellcheck \
-  "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/${shellcheck_asset}" \
-  "$shellcheck_sha"
+tool_enabled() {
+  [ -z "$security_tools_only" ] || [ "$security_tools_only" = "$1" ]
+}
+
+if tool_enabled trivy; then
+  install_archive trivy \
+    "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${trivy_asset}" \
+    "$trivy_sha"
+fi
+if tool_enabled syft; then
+  install_archive syft \
+    "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${syft_asset}" \
+    "$syft_sha"
+fi
+if tool_enabled gitleaks; then
+  install_archive gitleaks \
+    "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${gitleaks_asset}" \
+    "$gitleaks_sha"
+fi
+if tool_enabled gosec; then
+  install_archive gosec \
+    "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/${gosec_asset}" \
+    "$gosec_sha"
+fi
+if tool_enabled actionlint; then
+  install_archive actionlint \
+    "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${actionlint_asset}" \
+    "$actionlint_sha"
+fi
+if tool_enabled shellcheck; then
+  install_archive shellcheck \
+    "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/${shellcheck_asset}" \
+    "$shellcheck_sha"
+fi
 
 # govulncheck has no binary release archive. A fixed module version is built
 # under Go's checksum-database verification without modifying this module.
-GOBIN="$tools_dir" GOTOOLCHAIN=go1.26.8 go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+if tool_enabled govulncheck; then
+  GOBIN="$tools_dir" GOTOOLCHAIN=go1.26.8 go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+fi
 
 if [ -n "${GITHUB_PATH:-}" ]; then
   printf '%s\n' "$tools_dir" >> "$GITHUB_PATH"
 fi
 
 printf 'Installed pinned security tools in %s\n' "$tools_dir"
-"$tools_dir/trivy" --version
-"$tools_dir/syft" version
-"$tools_dir/gitleaks" version
-"$tools_dir/gosec" -version
-"$tools_dir/govulncheck" -version
-"$tools_dir/actionlint" -version
-"$tools_dir/shellcheck" --version
+if tool_enabled trivy; then "$tools_dir/trivy" --version; fi
+if tool_enabled syft; then "$tools_dir/syft" version; fi
+if tool_enabled gitleaks; then "$tools_dir/gitleaks" version; fi
+if tool_enabled gosec; then "$tools_dir/gosec" -version; fi
+if tool_enabled govulncheck; then "$tools_dir/govulncheck" -version; fi
+if tool_enabled actionlint; then "$tools_dir/actionlint" -version; fi
+if tool_enabled shellcheck; then "$tools_dir/shellcheck" --version; fi

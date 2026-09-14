@@ -1,18 +1,17 @@
 'use client';
 
 import * as React from 'react';
-import { Loader2 } from 'lucide-react';
-import { z } from 'zod';
-
-import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { useAssignIncident, useUnassignIncident } from '@/lib/api-hooks';
 import { formatIncidentError, humanizeIncidentToken } from '@/lib/incident';
 import type { Incident, IncidentAssignment, IncidentAssignmentRole } from '@/types/incident';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAssignIncident, useUnassignIncident } from '@/lib/api-hooks';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Loader2 } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { z } from 'zod';
 
 interface IncidentAssignmentDialogProps {
   incident: Incident;

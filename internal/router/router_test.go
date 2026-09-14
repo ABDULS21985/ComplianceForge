@@ -158,6 +158,70 @@ type routerAccessAdministrationService struct {
 	role *models.ManagedRole
 }
 
+type routerFeatureFlagService struct{}
+
+type routerFeatureEvaluator struct {
+	evaluation *models.FeatureFlagEvaluation
+	err        error
+	keys       []string
+}
+
+type routerEntitlementChecker struct {
+	decision *models.EntitlementLimitDecision
+	err      error
+	metrics  []string
+}
+
+func (c *routerEntitlementChecker) CheckLimit(_ context.Context, _ string, metric string, _ int64) (*models.EntitlementLimitDecision, error) {
+	c.metrics = append(c.metrics, metric)
+	return c.decision, c.err
+}
+
+func (e *routerFeatureEvaluator) Evaluate(_ context.Context, _, key string) (*models.FeatureFlagEvaluation, error) {
+	e.keys = append(e.keys, key)
+	return e.evaluation, e.err
+}
+
+func (routerFeatureFlagService) ListEvaluations(context.Context, string) ([]models.FeatureFlagEvaluation, error) {
+	return []models.FeatureFlagEvaluation{{
+		Capability: models.ProductCapability{Key: "advanced_reporting", DisplayName: "Advanced reporting"},
+		Enabled:    true, Entitled: true, InRollout: true, Variant: map[string]any{},
+	}}, nil
+}
+
+func (routerFeatureFlagService) Evaluate(context.Context, string, string) (*models.FeatureFlagEvaluation, error) {
+	return &models.FeatureFlagEvaluation{
+		Capability: models.ProductCapability{Key: "advanced_reporting", DisplayName: "Advanced reporting"},
+		Enabled:    true, Entitled: true, InRollout: true, Variant: map[string]any{},
+	}, nil
+}
+
+func (routerFeatureFlagService) GetEntitlements(_ context.Context, organizationID string) (*models.EntitlementSnapshot, error) {
+	return &models.EntitlementSnapshot{
+		OrganizationID: organizationID, Source: "organization_tier", Tier: "enterprise",
+		Features: map[string]bool{}, Limits: map[string]int64{"users": 100}, Usage: map[string]int64{"users": 1},
+	}, nil
+}
+
+func (routerFeatureFlagService) CheckLimit(context.Context, string, string, int64) (*models.EntitlementLimitDecision, error) {
+	return &models.EntitlementLimitDecision{Metric: "users", Allowed: true, Limit: 100, Usage: 1, Requested: 1}, nil
+}
+
+func (routerFeatureFlagService) UpsertOverride(_ context.Context, organizationID, capabilityKey, actorID, _ string, input models.FeatureFlagOverrideInput) (*models.TenantFeatureFlagOverride, error) {
+	return &models.TenantFeatureFlagOverride{
+		OrganizationID: organizationID, CapabilityKey: capabilityKey, Enabled: input.Enabled,
+		Reason: input.Reason, Version: 1, CreatedBy: actorID, UpdatedBy: actorID, Variant: map[string]any{},
+	}, nil
+}
+
+func (routerFeatureFlagService) ResetOverride(context.Context, string, string, string, string, models.FeatureFlagResetInput) error {
+	return nil
+}
+
+func (routerFeatureFlagService) ListEvents(context.Context, string, string, models.PaginationRequest) ([]models.FeatureFlagChangeEvent, int, error) {
+	return []models.FeatureFlagChangeEvent{}, 0, nil
+}
+
 func (routerAccessAdministrationService) ListPermissions(context.Context, string) ([]models.PermissionGrant, error) {
 	return []models.PermissionGrant{{Resource: "settings", Action: "read"}}, nil
 }
@@ -452,6 +516,8 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"unconfigured vendor handler", func(d *RouterDependencies) { d.Vendors = handler.NewVendorHandler(nil) }, "vendor handler is required"},
 		{"access administration handler", func(d *RouterDependencies) { d.AccessAdministration = nil }, "access administration handler is required"},
 		{"unconfigured access administration handler", func(d *RouterDependencies) { d.AccessAdministration = handler.NewAccessAdministrationHandler(nil) }, "access administration handler is required"},
+		{"feature flag handler", func(d *RouterDependencies) { d.FeatureFlags = nil }, "feature flag handler is required"},
+		{"unconfigured feature flag handler", func(d *RouterDependencies) { d.FeatureFlags = handler.NewFeatureFlagHandler(nil) }, "feature flag handler is required"},
 		{"permission handler", func(d *RouterDependencies) { d.Permissions = nil }, "permission handler is required"},
 		{"unconfigured permission handler", func(d *RouterDependencies) { d.Permissions = handler.NewPermissionHandler(nil) }, "permission handler is required"},
 		{"notification handler", func(d *RouterDependencies) { d.Notifications = nil }, "notification handler is required"},
@@ -464,6 +530,8 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"token validator", func(d *RouterDependencies) { d.AccessTokenValidator = nil }, "access-token validator is required"},
 		{"authorizer", func(d *RouterDependencies) { d.Authorizer = nil }, "authorizer is required"},
 		{"typed nil authorizer", func(d *RouterDependencies) { var authorizer *routerAuthorizer; d.Authorizer = authorizer }, "authorizer is required"},
+		{"feature evaluator", func(d *RouterDependencies) { d.FeatureEvaluator = nil }, "feature evaluator is required"},
+		{"entitlement checker", func(d *RouterDependencies) { d.EntitlementChecker = nil }, "entitlement checker is required"},
 		{"health check", func(d *RouterDependencies) { d.HealthCheck = nil }, "health check is required"},
 		{"tenant middleware", func(d *RouterDependencies) { d.TenantMiddleware = nil }, "tenant middleware is required"},
 	}
@@ -583,6 +651,14 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 		{name: "unassign managed role", method: http.MethodDelete, path: "/api/v1/access/roles/" + testRoleID + "/assignments/" + testUserID, body: `{"reason":"Role no longer needed"}`, authorized: true, wantStatus: http.StatusNoContent},
 		{name: "managed role history", method: http.MethodGet, path: "/api/v1/access/roles/" + testRoleID + "/events", authorized: true, wantStatus: http.StatusOK},
 		{name: "delete managed role", method: http.MethodDelete, path: "/api/v1/access/roles/" + testRoleID + "?expected_version=1", authorized: true, wantStatus: http.StatusNoContent},
+		{name: "capability catalogue", method: http.MethodGet, path: "/api/v1/settings/capabilities", authorized: true, wantStatus: http.StatusOK},
+		{name: "capability evaluation", method: http.MethodGet, path: "/api/v1/settings/capabilities/advanced_reporting/evaluation", authorized: true, wantStatus: http.StatusOK},
+		{name: "subscription entitlements", method: http.MethodGet, path: "/api/v1/settings/entitlements", authorized: true, wantStatus: http.StatusOK},
+		{name: "subscription limit check", method: http.MethodGet, path: "/api/v1/settings/entitlements/limits/users/check?requested=1", authorized: true, wantStatus: http.StatusOK},
+		{name: "feature flag evaluations", method: http.MethodGet, path: "/api/v1/settings/feature-flags", authorized: true, wantStatus: http.StatusOK},
+		{name: "create feature flag override", method: http.MethodPut, path: "/api/v1/settings/feature-flags/advanced_reporting", body: `{"enabled":true,"reason":"Controlled rollout"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "reset feature flag override", method: http.MethodPost, path: "/api/v1/settings/feature-flags/advanced_reporting/reset", body: `{"expected_version":1,"reason":"Return to plan default"}`, authorized: true, wantStatus: http.StatusNoContent},
+		{name: "feature flag history", method: http.MethodGet, path: "/api/v1/settings/feature-flags/advanced_reporting/history", authorized: true, wantStatus: http.StatusOK},
 		{name: "list incidents", method: http.MethodGet, path: "/api/v1/incidents", authorized: true, wantStatus: http.StatusOK},
 		{name: "create incident", method: http.MethodPost, path: "/api/v1/incidents", body: `{"title":"Database exposure","description":"A production snapshot was exposed","category":"privacy","severity":"high"}`, authorized: true, wantStatus: http.StatusCreated},
 		{name: "incident statistics", method: http.MethodGet, path: "/api/v1/incidents/statistics", authorized: true, wantStatus: http.StatusOK},
@@ -611,6 +687,67 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body = %s", response.Code, tt.wantStatus, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestRouterFeatureGatesFailClosedWithUpgradeSafeResponses(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		evaluation *models.FeatureFlagEvaluation
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "subscription", evaluation: &models.FeatureFlagEvaluation{Reason: "subscription_denied"}, wantStatus: http.StatusPaymentRequired, wantCode: "ENTITLEMENT_REQUIRED"},
+		{name: "tenant disabled", evaluation: &models.FeatureFlagEvaluation{Reason: "tenant_disabled"}, wantStatus: http.StatusForbidden, wantCode: "FEATURE_DISABLED"},
+		{name: "evaluation unavailable", err: errors.New("database password should remain private"), wantStatus: http.StatusServiceUnavailable, wantCode: "FEATURE_EVALUATION_UNAVAILABLE"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dependencies := testRouterDependencies()
+			evaluator := &routerFeatureEvaluator{evaluation: test.evaluation, err: test.err}
+			dependencies.FeatureEvaluator = evaluator
+			router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/vendors", nil)
+			request.Header.Set("Authorization", "Bearer access-token")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != test.wantStatus || !strings.Contains(response.Body.String(), `"error_code":"`+test.wantCode+`"`) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if len(evaluator.keys) != 1 || evaluator.keys[0] != "vendor_management" {
+				t.Fatalf("evaluated keys=%v", evaluator.keys)
+			}
+			if strings.Contains(response.Body.String(), "database password") {
+				t.Fatalf("internal evaluation error leaked: %s", response.Body.String())
+			}
+		})
+	}
+}
+
+func TestRouterQuotaPreflightUsesStableUpgradeResponse(t *testing.T) {
+	dependencies := testRouterDependencies()
+	checker := &routerEntitlementChecker{decision: &models.EntitlementLimitDecision{
+		Metric: "risks", Allowed: false, Limit: 50, Usage: 50, Requested: 1, Reason: "limit_exceeded",
+	}}
+	dependencies.EntitlementChecker = checker
+	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/risks", strings.NewReader(`{
+		"title":"Capacity should block","inherent_likelihood":4,"inherent_impact":5}`))
+	request.Header.Set("Authorization", "Bearer access-token")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusPaymentRequired || !strings.Contains(response.Body.String(), `"error_code":"ENTITLEMENT_LIMIT_EXCEEDED"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(checker.metrics) != 1 || checker.metrics[0] != "risks" {
+		t.Fatalf("checked metrics=%v", checker.metrics)
 	}
 }
 
@@ -841,6 +978,7 @@ func testRouterDependencies() RouterDependencies {
 		Assets:               handler.NewAssetHandler(routerAssetService{asset: asset}),
 		Vendors:              handler.NewVendorHandler(routerVendorService{vendor: vendor}),
 		AccessAdministration: handler.NewAccessAdministrationHandler(routerAccessAdministrationService{role: managedRole}),
+		FeatureFlags:         handler.NewFeatureFlagHandler(routerFeatureFlagService{}),
 		Permissions:          handler.NewPermissionHandler(routerPermissionService{}),
 		Notifications:        handler.NewNotificationHandler(dummyPool, notificationEngine, notificationProtector),
 		Integrations:         handler.NewIntegrationHandler(integrationService),
@@ -857,8 +995,10 @@ func testRouterDependencies() RouterDependencies {
 				Subject: testUserID,
 			},
 		}},
-		Authorizer:  &routerAuthorizer{allowed: true},
-		HealthCheck: func(context.Context) error { return nil },
+		Authorizer:         &routerAuthorizer{allowed: true},
+		FeatureEvaluator:   routerFeatureFlagService{},
+		EntitlementChecker: routerFeatureFlagService{},
+		HealthCheck:        func(context.Context) error { return nil },
 		TenantMiddleware: func(next http.Handler) http.Handler {
 			return next
 		},

@@ -43,6 +43,7 @@ type RouterDependencies struct {
 	Assets               *handler.AssetHandler
 	Vendors              *handler.VendorHandler
 	AccessAdministration *handler.AccessAdministrationHandler
+	FeatureFlags         *handler.FeatureFlagHandler
 	Permissions          *handler.PermissionHandler
 	Notifications        *handler.NotificationHandler
 	Integrations         *handler.IntegrationHandler
@@ -51,6 +52,8 @@ type RouterDependencies struct {
 	RequestRateLimiter   middleware.RequestRateLimiter
 	AccessTokenValidator middleware.AccessTokenValidator
 	Authorizer           authz.Authorizer
+	FeatureEvaluator     middleware.FeatureEvaluator
+	EntitlementChecker   middleware.EntitlementLimitChecker
 	HealthCheck          func(context.Context) error
 	TenantMiddleware     func(http.Handler) http.Handler
 	Domains              DomainHandlers
@@ -114,6 +117,8 @@ var (
 	_ handler.VendorService                   = (*service.VendorService)(nil)
 	_ service.AccessAdministrationStore       = repository.AccessAdministrationRepository(nil)
 	_ handler.AccessAdministrationService     = (*service.AccessAdministrationService)(nil)
+	_ service.FeatureFlagStore                = repository.FeatureFlagRepository(nil)
+	_ handler.FeatureFlagService              = (*service.FeatureFlagService)(nil)
 	_ handler.PermissionService               = (*service.RBACAuthorizer)(nil)
 	_ handler.IntegrationSvc                  = (*service.IntegrationService)(nil)
 )
@@ -182,6 +187,12 @@ func BuildDependencies(
 		return RouterDependencies{}, fmt.Errorf("building access administration repository: %w", err)
 	}
 	accessAdministrationService := service.NewAccessAdministrationService(accessAdministrationRepo, log.Logger)
+	var featureFlagRepo service.FeatureFlagStore
+	featureFlagRepo, err = repository.NewFeatureFlagRepository(pool, domainOutbox, incidentQueue)
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building feature flag repository: %w", err)
+	}
+	featureFlagService := service.NewFeatureFlagService(featureFlagRepo, log.Logger)
 	integrationService, err := service.NewIntegrationService(pool, cfg.Encryption.IntegrationKey)
 	if err != nil {
 		return RouterDependencies{}, fmt.Errorf("building integration service: %w", err)
@@ -232,6 +243,7 @@ func BuildDependencies(
 		Assets:               handler.NewAssetHandler(assetService),
 		Vendors:              handler.NewVendorHandler(vendorService),
 		AccessAdministration: handler.NewAccessAdministrationHandler(accessAdministrationService),
+		FeatureFlags:         handler.NewFeatureFlagHandler(featureFlagService),
 		Permissions:          handler.NewPermissionHandler(authorizer),
 		Notifications:        handler.NewNotificationHandler(pool, notificationEngine, notificationProtector),
 		Integrations:         handler.NewIntegrationHandler(integrationService),
@@ -240,6 +252,8 @@ func BuildDependencies(
 		RequestRateLimiter:   requestLimiter,
 		AccessTokenValidator: authService,
 		Authorizer:           authorizer,
+		FeatureEvaluator:     featureFlagService,
+		EntitlementChecker:   featureFlagService,
 		HealthCheck: func(ctx context.Context) error {
 			return database.HealthCheck(ctx, pool)
 		},
@@ -287,6 +301,9 @@ func (d RouterDependencies) Validate() error {
 	if d.AccessAdministration == nil || !d.AccessAdministration.Ready() {
 		missing = append(missing, errors.New("access administration handler is required"))
 	}
+	if d.FeatureFlags == nil || !d.FeatureFlags.Ready() {
+		missing = append(missing, errors.New("feature flag handler is required"))
+	}
 	if d.Permissions == nil || !d.Permissions.Ready() {
 		missing = append(missing, errors.New("permission handler is required"))
 	}
@@ -310,6 +327,12 @@ func (d RouterDependencies) Validate() error {
 	}
 	if interfaceIsNil(d.Authorizer) {
 		missing = append(missing, errors.New("authorizer is required"))
+	}
+	if interfaceIsNil(d.FeatureEvaluator) {
+		missing = append(missing, errors.New("feature evaluator is required"))
+	}
+	if interfaceIsNil(d.EntitlementChecker) {
+		missing = append(missing, errors.New("entitlement checker is required"))
 	}
 	if d.HealthCheck == nil {
 		missing = append(missing, errors.New("health check is required"))

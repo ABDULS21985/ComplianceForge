@@ -1,9 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Loader2, ShieldAlert } from 'lucide-react';
-
-import { Button } from '@/components/ui/button';
+import type { BreachAssessmentStatus, Incident } from '@/types/incident';
 import {
   Dialog,
   DialogContent,
@@ -12,8 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { formatIncidentError, localDateTimeToIso, toLocalDateTimeInput } from '@/lib/incident';
+import { Loader2, ShieldAlert } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -21,10 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useAssessIncidentBreach } from '@/lib/api-hooks';
-import { formatIncidentError, localDateTimeToIso, toLocalDateTimeInput } from '@/lib/incident';
-import type { BreachAssessmentStatus, Incident } from '@/types/incident';
 
 interface BreachAssessmentDialogProps {
   incident: Incident;

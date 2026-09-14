@@ -68,7 +68,7 @@ func TestVendorRepositoryWithNonSuperuserTenants(t *testing.T) {
 	}
 	defer cleanup()
 	grant := "GRANT USAGE ON SCHEMA public TO " + quotedRole +
-		"; GRANT SELECT ON organizations,users TO " + quotedRole +
+		"; GRANT SELECT ON organizations,users,subscription_plans,organization_subscriptions,organization_subscriptions_v2 TO " + quotedRole +
 		"; GRANT SELECT,INSERT,UPDATE,DELETE ON vendor_reference_sequences,vendors,vendor_contacts,vendor_contracts,vendor_certifications,vendor_subprocessors TO " + quotedRole +
 		"; GRANT SELECT,INSERT,UPDATE,DELETE ON vendor_events TO " + quotedRole +
 		"; GRANT SELECT,INSERT ON queue_outbox TO " + quotedRole

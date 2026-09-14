@@ -52,6 +52,7 @@ func TestStableHTTPErrorCodesCoverEnterpriseFailureClasses(t *testing.T) {
 		http.StatusBadRequest:          "invalid_request",
 		http.StatusUnauthorized:        "authentication_required",
 		http.StatusForbidden:           "permission_denied",
+		http.StatusPaymentRequired:     "entitlement_required",
 		http.StatusNotFound:            "resource_not_found",
 		http.StatusConflict:            "state_conflict",
 		http.StatusUnprocessableEntity: "validation_failed",

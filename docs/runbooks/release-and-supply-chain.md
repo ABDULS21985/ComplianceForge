@@ -53,7 +53,7 @@ the documented decisions; zero CVE results do not override a license failure.
 1. Confirm all required checks passed at the exact commit.
 2. Create a protected, annotated semantic-version tag such as `v1.4.2`, or manually dispatch `Signed Container Release` with that full version.
 3. Approve the `release` environment gate.
-4. The workflow builds all four runtime targets and publishes only the full semantic version and full commit-SHA tags. BuildKit publishes SBOM and maximal provenance attestations. GitHub/Sigstore provenance and a keyless Cosign signature are attached to each immutable digest.
+4. The workflow builds all four runtime targets and publishes only the full semantic version and full commit-SHA tags. BuildKit publishes SBOM and maximal provenance attestations. The pushed immutable digest is then scanned through a blocking high/critical vulnerability gate and scan evidence is retained for 90 days. Only a clean digest receives GitHub/Sigstore provenance and a keyless Cosign signature. The required CI license gate remains a distinct precondition and is not replaced by the digest vulnerability scan.
 5. Record the four image digests in the change ticket. Deploy and roll back by digest where the target platform supports it; the branch deployment workflow uses full commit-SHA tags and never `latest` or `develop`.
 
 Example verification:
