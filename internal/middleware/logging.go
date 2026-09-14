@@ -44,7 +44,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			Str("path", redactedRequestPath(r.URL.Path)).
 			Int("status", ww.Status()).
 			Dur("duration", duration).
-			Str("remote_addr", truncateLogField(r.RemoteAddr, 128)).
+			Str("client_ip", truncateLogField(GetClientIPFromContext(r.Context()), 64)).
 			Str("user_agent", truncateLogField(r.UserAgent(), 256)).
 			Int("bytes_written", ww.BytesWritten()).
 			Msg("request completed")

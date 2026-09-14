@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/complianceforge/platform/internal/config"
 	"github.com/complianceforge/platform/internal/database"
+	"github.com/complianceforge/platform/internal/pkg/ratelimit"
 	"github.com/complianceforge/platform/internal/router"
 )
 
@@ -42,8 +44,32 @@ func main() {
 	}
 	defer pool.Close()
 
-	// Create Chi router.
-	r, err := router.NewRouter(pool, cfg)
+	// Shared Redis is required for API-key quotas and participates in readiness.
+	redisClient, err := database.NewRedisClient(context.Background(), cfg.Redis)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create Redis client")
+	}
+	defer redisClient.Close()
+	apiKeyLimiter, err := ratelimit.NewRedisAPIKeyLimiter(redisClient)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create API-key rate limiter")
+	}
+	requestLimiter, err := ratelimit.NewRedisRequestLimiter(redisClient)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create request rate limiter")
+	}
+
+	dependencies, err := router.BuildDependencies(pool, cfg, apiKeyLimiter, requestLimiter)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to compose API dependencies")
+	}
+	dependencies.HealthCheck = func(ctx context.Context) error {
+		return errors.Join(
+			database.HealthCheck(ctx, pool),
+			database.RedisHealthCheck(ctx, redisClient),
+		)
+	}
+	r, err := router.NewRouterWithDependencies(cfg, dependencies)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to compose API router")
 	}

@@ -29,6 +29,10 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/.playwright/
 *.tsbuildinfo
+.cache/
+artifacts/
+backups/
+security-reports/
 
 # ========================
 # Environment & secrets

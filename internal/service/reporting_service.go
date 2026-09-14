@@ -11,14 +11,14 @@ import (
 
 // ComplianceReport holds data for a compliance report export.
 type ComplianceReport struct {
-	GeneratedAt     time.Time           `json:"generated_at"`
-	OrganizationID  string              `json:"organization_id"`
-	ReportTitle     string              `json:"report_title"`
-	Period          string              `json:"period"`
-	OverallScore    float64             `json:"overall_score"`
-	FrameworkScores []ComplianceScore   `json:"framework_scores"`
-	ControlSummary  ControlSummary      `json:"control_summary"`
-	Recommendations []string            `json:"recommendations"`
+	GeneratedAt     time.Time         `json:"generated_at"`
+	OrganizationID  string            `json:"organization_id"`
+	ReportTitle     string            `json:"report_title"`
+	Period          string            `json:"period"`
+	OverallScore    float64           `json:"overall_score"`
+	FrameworkScores []ComplianceScore `json:"framework_scores"`
+	ControlSummary  ControlSummary    `json:"control_summary"`
+	Recommendations []string          `json:"recommendations"`
 }
 
 // ControlSummary provides aggregate control statistics for reporting.
@@ -32,12 +32,12 @@ type ControlSummary struct {
 
 // RiskReport holds data for a risk report export.
 type RiskReport struct {
-	GeneratedAt    time.Time        `json:"generated_at"`
-	OrganizationID string           `json:"organization_id"`
-	ReportTitle    string           `json:"report_title"`
-	RiskSummary    RiskSummary      `json:"risk_summary"`
-	RisksByLevel   map[string]int   `json:"risks_by_level"`
-	TopRisks       []models.Risk    `json:"top_risks"`
+	GeneratedAt        time.Time          `json:"generated_at"`
+	OrganizationID     string             `json:"organization_id"`
+	ReportTitle        string             `json:"report_title"`
+	RiskSummary        RiskSummary        `json:"risk_summary"`
+	RisksByLevel       map[string]int     `json:"risks_by_level"`
+	TopRisks           []models.Risk      `json:"top_risks"`
 	MitigationProgress MitigationProgress `json:"mitigation_progress"`
 }
 
@@ -78,34 +78,34 @@ type FindingSummary struct {
 
 // ExecutiveSummary provides a high-level overview for executive stakeholders.
 type ExecutiveSummary struct {
-	GeneratedAt      time.Time         `json:"generated_at"`
-	OrganizationID   string            `json:"organization_id"`
-	ReportTitle      string            `json:"report_title"`
-	Period           string            `json:"period"`
-	OverallCompliance float64          `json:"overall_compliance"`
-	FrameworkScores  []ComplianceScore `json:"framework_scores"`
-	RiskSummary      RiskSummary       `json:"risk_summary"`
-	AuditSummary     AuditSummaryStats `json:"audit_summary"`
-	IncidentSummary  IncidentSummaryStats `json:"incident_summary"`
-	KeyMetrics       []KeyMetric       `json:"key_metrics"`
-	Recommendations  []string          `json:"recommendations"`
+	GeneratedAt       time.Time            `json:"generated_at"`
+	OrganizationID    string               `json:"organization_id"`
+	ReportTitle       string               `json:"report_title"`
+	Period            string               `json:"period"`
+	OverallCompliance float64              `json:"overall_compliance"`
+	FrameworkScores   []ComplianceScore    `json:"framework_scores"`
+	RiskSummary       RiskSummary          `json:"risk_summary"`
+	AuditSummary      AuditSummaryStats    `json:"audit_summary"`
+	IncidentSummary   IncidentSummaryStats `json:"incident_summary"`
+	KeyMetrics        []KeyMetric          `json:"key_metrics"`
+	Recommendations   []string             `json:"recommendations"`
 }
 
 // AuditSummaryStats provides aggregate audit statistics for executive reporting.
 type AuditSummaryStats struct {
-	TotalAudits   int `json:"total_audits"`
-	Completed     int `json:"completed"`
-	InProgress    int `json:"in_progress"`
-	Planned       int `json:"planned"`
-	OpenFindings  int `json:"open_findings"`
+	TotalAudits  int `json:"total_audits"`
+	Completed    int `json:"completed"`
+	InProgress   int `json:"in_progress"`
+	Planned      int `json:"planned"`
+	OpenFindings int `json:"open_findings"`
 }
 
 // IncidentSummaryStats provides aggregate incident statistics for executive reporting.
 type IncidentSummaryStats struct {
-	TotalIncidents      int `json:"total_incidents"`
-	Open                int `json:"open"`
-	Resolved            int `json:"resolved"`
-	BreachNotifiable    int `json:"breach_notifiable"`
+	TotalIncidents         int     `json:"total_incidents"`
+	Open                   int     `json:"open"`
+	Resolved               int     `json:"resolved"`
+	BreachNotifiable       int     `json:"breach_notifiable"`
 	AverageResolutionHours float64 `json:"average_resolution_hours"`
 }
 
@@ -244,14 +244,14 @@ func (s *ReportingService) GenerateRiskReport(ctx context.Context, orgID string)
 }
 
 // GenerateAuditReport produces a detailed report for a specific audit engagement.
-func (s *ReportingService) GenerateAuditReport(ctx context.Context, auditID string) (*AuditReport, error) {
-	audit, err := s.auditRepo.GetByID(ctx, auditID)
+func (s *ReportingService) GenerateAuditReport(ctx context.Context, orgID, auditID string) (*AuditReport, error) {
+	audit, err := s.auditRepo.GetByID(ctx, orgID, auditID)
 	if err != nil {
 		s.logger.Error().Err(err).Str("audit_id", auditID).Msg("audit not found for report")
 		return nil, ErrAuditNotFound
 	}
 
-	findings, _, err := s.auditRepo.ListFindings(ctx, auditID, 1, 1000)
+	findings, _, err := s.auditRepo.ListFindings(ctx, orgID, auditID, models.PaginationRequest{Page: 1, PageSize: 1000})
 	if err != nil {
 		s.logger.Error().Err(err).Str("audit_id", auditID).Msg("failed to list findings for report")
 		return nil, err
@@ -320,7 +320,7 @@ func (s *ReportingService) GenerateExecutiveSummary(ctx context.Context, orgID s
 	riskSummary.TotalRisks = riskSummary.CriticalRisk + riskSummary.HighRisk + riskSummary.MediumRisk + riskSummary.LowRisk
 
 	// Audit data.
-	audits, _, err := s.auditRepo.List(ctx, orgID, 1, 1000)
+	audits, _, err := s.auditRepo.List(ctx, orgID, models.AuditListFilter{PaginationRequest: models.PaginationRequest{Page: 1, PageSize: 1000}})
 	if err != nil {
 		s.logger.Warn().Err(err).Msg("failed to get audits for executive summary")
 	}

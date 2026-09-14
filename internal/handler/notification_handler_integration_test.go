@@ -267,10 +267,13 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 	})
 
 	notificationID := uuid.NewString()
+	eventID := uuid.NewString()
 	if _, err := pool.Exec(ctx, `INSERT INTO notifications
-		(id,organization_id,event_type,event_payload,recipient_user_id,channel_type,subject,body,status)
-		VALUES ($1,$2,'system.test','{}',$3,'in_app','Test','Body','delivered')`,
-		notificationID, orgA, userA); err != nil {
+		(id,organization_id,event_id,event_type,event_payload,recipient_user_id,channel_type,
+		 subject,body,body_text,status,delivery_key,scheduled_for)
+		VALUES ($1,$2,$4,'system.test','{}',$3,'in_app','Test','Body','Body','delivered',
+		        encode(digest($1::text,'sha256'),'hex'),NOW())`,
+		notificationID, orgA, userA, eventID); err != nil {
 		t.Fatal(err)
 	}
 	withTenant(orgB, func(tenantCtx context.Context) {
@@ -280,6 +283,12 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("cross-tenant MarkAsRead status=%d body=%s", response.Code, response.Body.String())
 		}
+		req, response = requestWithRouteID(t, tenantCtx, http.MethodPut,
+			"/notifications/"+notificationID+"/acknowledge", notificationID)
+		handler.Acknowledge(response, req)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("cross-tenant Acknowledge status=%d body=%s", response.Code, response.Body.String())
+		}
 	})
 	withTenant(orgA, func(tenantCtx context.Context) {
 		req, response := requestWithRouteID(t, tenantCtx, http.MethodPut,
@@ -287,6 +296,17 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 		handler.MarkAsRead(response, req)
 		if response.Code != http.StatusOK {
 			t.Fatalf("MarkAsRead status=%d body=%s", response.Code, response.Body.String())
+		}
+		req, response = requestWithRouteID(t, tenantCtx, http.MethodPut,
+			"/notifications/"+notificationID+"/acknowledge", notificationID)
+		handler.Acknowledge(response, req)
+		if response.Code != http.StatusOK {
+			t.Fatalf("Acknowledge status=%d body=%s", response.Code, response.Body.String())
+		}
+		var acknowledgedAt *time.Time
+		if err := database.QuerierFromContext(tenantCtx, pool).QueryRow(tenantCtx,
+			`SELECT acknowledged_at FROM notifications WHERE id=$1`, notificationID).Scan(&acknowledgedAt); err != nil || acknowledgedAt == nil {
+			t.Fatalf("acknowledged_at=%v err=%v", acknowledgedAt, err)
 		}
 	})
 }

@@ -47,6 +47,32 @@ func GetAPIKeyIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+// RequireAPIKeyPermission enforces one exact action:resource grant after
+// APIKeyAuth. API keys deliberately have no implicit role permissions or
+// wildcard escalation path.
+func RequireAPIKeyPermission(action, resource string) func(http.Handler) http.Handler {
+	required := strings.TrimSpace(action) + ":" + strings.TrimSpace(resource)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if GetAPIKeyIDFromContext(r.Context()) == "" {
+				writeAPIKeyProblem(w, http.StatusUnauthorized, "API key authentication required")
+				return
+			}
+			for _, permission := range GetAPIPermissionsFromContext(r.Context()) {
+				if permission == required {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			log.Warn().
+				Str("key_id", GetAPIKeyIDFromContext(r.Context())).
+				Str("required_permission", required).
+				Msg("API key permission denied")
+			writeAPIKeyProblem(w, http.StatusForbidden, "API key does not grant the required permission")
+		})
+	}
+}
+
 // APIKeyAuth authenticates X-API-Key credentials, establishes the tenant
 // identity, and enforces the key's own distributed rate limit. Query-string
 // credentials are deliberately rejected because URLs are commonly retained
@@ -66,7 +92,11 @@ func APIKeyAuth(authenticator authdomain.APIKeyAuthenticator, limiter APIKeyRate
 				return
 			}
 
-			principal, err := authenticator.AuthenticateAPIKey(r.Context(), rawKey, directClientIP(r.RemoteAddr))
+			clientIP := GetClientIPFromContext(r.Context())
+			if clientIP == "" {
+				clientIP = directClientIP(r.RemoteAddr)
+			}
+			principal, err := authenticator.AuthenticateAPIKey(r.Context(), rawKey, clientIP)
 			if err != nil || principal == nil {
 				if err != nil && !errors.Is(err, authdomain.ErrInvalidAPIKey) {
 					log.Error().Err(err).Str("path", r.URL.Path).Msg("API key authentication backend failed")

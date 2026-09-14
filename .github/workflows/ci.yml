@@ -7,10 +7,14 @@ on:
     branches: [main, develop]
 
 env:
-  GO_VERSION: "1.24"
-  NODE_VERSION: "20"
+  GO_VERSION: "1.26.8"
+  NODE_VERSION: "24.21.0"
+  KUBECTL_VERSION: "v1.37.0"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -20,25 +24,24 @@ jobs:
   backend-lint:
     name: Backend Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           cache-dependency-path: go.sum
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v1.57
+          version: v2.13.2
           args: --timeout=5m
-
-      - name: Run gosec
-        uses: securego/gosec@master
-        with:
-          args: ./...
+          only-new-issues: true
 
       - name: Run go vet
         run: go vet ./...
@@ -48,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
         env:
           POSTGRES_USER: complianceforge
           POSTGRES_PASSWORD: testpassword
@@ -62,7 +65,7 @@ jobs:
           --health-retries 5
           --tmpfs /var/lib/postgresql/data:rw
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
         ports:
           - 6379:6379
         options: >-
@@ -72,7 +75,7 @@ jobs:
           --health-retries 5
           --tmpfs /data:rw
       rabbitmq:
-        image: rabbitmq:4-alpine
+        image: rabbitmq:4.3.5-alpine@sha256:3486d98205df3d6395ed70e7924baa13b561cbac54116c0ddae5b0b7382bbabd
         env:
           RABBITMQ_DEFAULT_USER: complianceforge
           RABBITMQ_DEFAULT_PASS: testpassword
@@ -84,9 +87,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -96,6 +99,7 @@ jobs:
         env:
           DATABASE_URL: postgres://complianceforge:testpassword@localhost:5432/complianceforge_test?sslmode=disable
         run: |
+          ./scripts/validate-migrations.sh
           go run ./cmd/migrate up
           go run ./cmd/migrate down
           go run ./cmd/migrate up
@@ -130,7 +134,7 @@ jobs:
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: backend-coverage
           path: coverage.out
@@ -142,7 +146,7 @@ jobs:
           awk -v c="$coverage" 'BEGIN { if (c+0 < 60) { printf("Coverage below threshold: %s%% < 60%%\n", c); exit 1 } }'
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
         with:
           files: ./coverage.out
           flags: backend
@@ -153,9 +157,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend-lint, backend-test]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -171,7 +175,7 @@ jobs:
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/migrate cmd/migrate/main.go
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: backend-binaries
           path: bin/
@@ -183,9 +187,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -210,9 +214,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -225,7 +229,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload frontend coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frontend-coverage
           path: frontend/coverage
@@ -238,9 +242,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -251,8 +255,6 @@ jobs:
 
       - name: Build
         run: npm run build
-        env:
-          NEXT_PUBLIC_API_URL: http://localhost:8080
 
       - name: Verify standalone output exists
         run: test -f .next/standalone/server.js
@@ -263,7 +265,7 @@ jobs:
     needs: [backend-build, frontend-build]
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
         env:
           POSTGRES_USER: complianceforge
           POSTGRES_PASSWORD: testpassword
@@ -277,7 +279,7 @@ jobs:
           --health-retries 5
           --tmpfs /var/lib/postgresql/data:rw
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
         ports:
           - 6379:6379
         options: >-
@@ -287,15 +289,15 @@ jobs:
           --health-retries 5
           --tmpfs /data:rw
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           cache-dependency-path: go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -330,18 +332,19 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        env:
-          NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
         run: npm run build
 
       - name: Start frontend server
         working-directory: frontend
+        env:
+          API_INTERNAL_URL: http://127.0.0.1:8080/api/v1
+          APP_ENV: test
         run: |
           npm run start -- --port 3000 > /tmp/frontend.log 2>&1 &
 
       - name: Wait for API and frontend
         run: |
-          timeout 60s bash -c 'until curl -sSf http://localhost:8080/api/v1/health >/dev/null; do sleep 2; done'
+          timeout 60s bash -c 'until curl -sSf http://localhost:8080/health/ready >/dev/null; do sleep 2; done'
           timeout 60s bash -c 'until curl -sSf http://localhost:3000 >/dev/null; do sleep 2; done'
 
       - name: Run Playwright tests
@@ -353,21 +356,21 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
           path: frontend/playwright-report
 
       - name: Upload Playwright test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-test-results
           path: frontend/test-results
 
       - name: Upload service logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-service-logs
           path: |
@@ -375,140 +378,241 @@ jobs:
             /tmp/frontend.log
 
   security-scan:
-    name: Security Scan
+    name: Supply-chain and Container Security
     runs-on: ubuntu-latest
     needs: [backend-build, frontend-build, e2e-tests]
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Build API Docker image
-        run: docker build -f deployments/docker/Dockerfile.api -t complianceforge-api:scan .
-
-      - name: Build Frontend Docker image
-        run: docker build -f deployments/docker/Dockerfile.frontend -t complianceforge-frontend:scan ./frontend
-
-      - name: Run Trivy on API image
-        uses: aquasecurity/trivy-action@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          image-ref: complianceforge-api:scan
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
+          fetch-depth: 0
 
-      - name: Run Trivy on Frontend image
-        uses: aquasecurity/trivy-action@master
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          image-ref: complianceforge-frontend:scan
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
 
-      - name: Run npm audit
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install checksum-pinned scanners
+        env:
+          TOOLS_DIR: ${{ runner.temp }}/security-tools/bin
+        run: ./scripts/ci/install-security-tools.sh
+
+      - name: Create report directory
+        run: mkdir -p security-reports/sbom
+
+      - name: Lint GitHub Actions workflows
+        run: actionlint
+
+      - name: Lint operational shell scripts
+        run: find scripts -type f -name '*.sh' -exec shellcheck --severity=warning {} +
+
+      - name: Scan Git history for secrets
+        id: gitleaks
+        continue-on-error: true
+        run: >-
+          gitleaks git . --redact --no-banner --exit-code 1
+          --report-format sarif --report-path security-reports/gitleaks.sarif
+
+      - name: Run Go static security analysis
+        id: gosec
+        continue-on-error: true
+        run: gosec -exclude=G104 -fmt=sarif -out=security-reports/gosec.sarif ./...
+
+      - name: Scan reachable Go dependencies
+        id: govulncheck
+        continue-on-error: true
+        run: govulncheck -json ./... > security-reports/govulncheck.json
+
+      - name: Audit frontend dependency lockfile
+        id: npm-audit
+        continue-on-error: true
         working-directory: frontend
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=high --json > ../security-reports/npm-audit.json
+
+      - name: Scan source dependencies, licenses, secrets, and IaC
+        id: source-trivy
+        continue-on-error: true
+        run: >-
+          trivy fs . --scanners vuln,misconfig,secret,license --license-full
+          --skip-dirs .git --skip-dirs frontend/node_modules --skip-dirs frontend/.next
+          --severity HIGH,CRITICAL --exit-code 1 --format json
+          --output security-reports/trivy-filesystem.json
+
+      - name: Build production image targets
+        run: |
+          docker build --target api -f deployments/docker/Dockerfile.api -t complianceforge-api:scan .
+          docker build --target worker -f deployments/docker/Dockerfile.api -t complianceforge-worker:scan .
+          docker build --target migrator -f deployments/docker/Dockerfile.api -t complianceforge-migrator:scan .
+          docker build -f deployments/docker/Dockerfile.frontend -t complianceforge-frontend:scan ./frontend
+
+      - name: Generate SPDX SBOMs
+        run: |
+          for component in api worker migrator frontend; do
+            syft "complianceforge-${component}:scan" \
+              --output "spdx-json=security-reports/sbom/${component}.spdx.json"
+          done
+
+      - name: Scan every runtime image
+        id: image-trivy
+        continue-on-error: true
+        run: |
+          status=0
+          for component in api worker migrator frontend; do
+            trivy image "complianceforge-${component}:scan" \
+              --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
+              --exit-code 1 --format json \
+              --output "security-reports/trivy-${component}.json" || status=1
+          done
+          exit "$status"
+
+      - name: Upload security evidence and SBOMs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: supply-chain-evidence-${{ github.sha }}
+          path: security-reports/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce security gates
+        if: always()
+        env:
+          GITLEAKS: ${{ steps.gitleaks.outcome }}
+          GOSEC: ${{ steps.gosec.outcome }}
+          GOVULNCHECK: ${{ steps.govulncheck.outcome }}
+          NPM_AUDIT: ${{ steps.npm-audit.outcome }}
+          SOURCE_TRIVY: ${{ steps.source-trivy.outcome }}
+          IMAGE_TRIVY: ${{ steps.image-trivy.outcome }}
+        run: |
+          status=0
+          for gate in GITLEAKS GOSEC GOVULNCHECK NPM_AUDIT SOURCE_TRIVY IMAGE_TRIVY; do
+            eval "outcome=\${$gate}"
+            if [ "$outcome" != success ]; then
+              echo "Security gate $gate finished with: $outcome" >&2
+              status=1
+            fi
+          done
+          exit "$status"
 
   docker-build:
-    name: Docker Build & Push (Production)
+    name: Build Production Image (${{ matrix.component }})
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [security-scan]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: api
+            context: .
+            file: deployments/docker/Dockerfile.api
+            target: api
+          - component: worker
+            context: .
+            file: deployments/docker/Dockerfile.api
+            target: worker
+          - component: migrator
+            context: .
+            file: deployments/docker/Dockerfile.api
+            target: migrator
+          - component: frontend
+            context: ./frontend
+            file: deployments/docker/Dockerfile.frontend
+            target: runner
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
-      - name: Extract metadata for API
-        id: meta-api
-        uses: docker/metadata-action@v5
+      - name: Build and push immutable image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api
-          tags: |
-            type=sha
-            type=raw,value=latest
-
-      - name: Build and push API image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: deployments/docker/Dockerfile.api
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
           push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract metadata for Frontend
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend
-          tags: |
-            type=sha
-            type=raw,value=latest
-
-      - name: Build and push Frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: deployments/docker/Dockerfile.frontend
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            NEXT_PUBLIC_API_URL=/api/v1
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.component }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
   docker-build-staging:
-    name: Docker Build & Push (Staging)
+    name: Build Staging Image (${{ matrix.component }})
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     needs: [security-scan]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: api
+            context: .
+            file: deployments/docker/Dockerfile.api
+            target: api
+          - component: worker
+            context: .
+            file: deployments/docker/Dockerfile.api
+            target: worker
+          - component: migrator
+            context: .
+            file: deployments/docker/Dockerfile.api
+            target: migrator
+          - component: frontend
+            context: ./frontend
+            file: deployments/docker/Dockerfile.frontend
+            target: runner
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push staging API image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: deployments/docker/Dockerfile.api
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:develop
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:sha-${{ github.sha }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
-      - name: Build and push staging Frontend image
-        uses: docker/build-push-action@v5
+      - name: Build and push immutable staging image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
-          context: ./frontend
-          file: deployments/docker/Dockerfile.frontend
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:develop
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:sha-${{ github.sha }}
-          build-args: |
-            NEXT_PUBLIC_API_URL=/api/v1
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.component }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=staging-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=staging-${{ matrix.component }}
 
   deploy-staging:
     name: Deploy Staging
@@ -520,23 +624,27 @@ jobs:
       contents: read
     steps:
       - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4.0.1
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
 
       - name: Configure kubeconfig
         run: |
-          mkdir -p "$HOME/.kube"
-          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 --decode > "$HOME/.kube/config"
+          install -d -m 0700 "$RUNNER_TEMP/kube"
+          printf '%s' "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 --decode > "$RUNNER_TEMP/kube/config"
+          chmod 0600 "$RUNNER_TEMP/kube/config"
+          echo "KUBECONFIG=$RUNNER_TEMP/kube/config" >> "$GITHUB_ENV"
 
       - name: Deploy API (staging)
         run: |
           kubectl -n "${{ vars.K8S_NAMESPACE_STAGING }}" set image deployment/"${{ vars.K8S_API_DEPLOYMENT_STAGING }}" \
-            api="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:develop"
+            api="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:sha-${{ github.sha }}"
           kubectl -n "${{ vars.K8S_NAMESPACE_STAGING }}" rollout status deployment/"${{ vars.K8S_API_DEPLOYMENT_STAGING }}" --timeout=180s
 
       - name: Deploy Frontend (staging)
         run: |
           kubectl -n "${{ vars.K8S_NAMESPACE_STAGING }}" set image deployment/"${{ vars.K8S_FRONTEND_DEPLOYMENT_STAGING }}" \
-            frontend="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:develop"
+            frontend="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:sha-${{ github.sha }}"
           kubectl -n "${{ vars.K8S_NAMESPACE_STAGING }}" rollout status deployment/"${{ vars.K8S_FRONTEND_DEPLOYMENT_STAGING }}" --timeout=180s
 
       - name: Deploy to staging
@@ -553,23 +661,27 @@ jobs:
       contents: read
     steps:
       - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4.0.1
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
 
       - name: Configure kubeconfig
         run: |
-          mkdir -p "$HOME/.kube"
-          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 --decode > "$HOME/.kube/config"
+          install -d -m 0700 "$RUNNER_TEMP/kube"
+          printf '%s' "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 --decode > "$RUNNER_TEMP/kube/config"
+          chmod 0600 "$RUNNER_TEMP/kube/config"
+          echo "KUBECONFIG=$RUNNER_TEMP/kube/config" >> "$GITHUB_ENV"
 
       - name: Deploy API (production)
         run: |
           kubectl -n "${{ vars.K8S_NAMESPACE_PRODUCTION }}" set image deployment/"${{ vars.K8S_API_DEPLOYMENT_PRODUCTION }}" \
-            api="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:latest"
+            api="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:sha-${{ github.sha }}"
           kubectl -n "${{ vars.K8S_NAMESPACE_PRODUCTION }}" rollout status deployment/"${{ vars.K8S_API_DEPLOYMENT_PRODUCTION }}" --timeout=300s
 
       - name: Deploy Frontend (production)
         run: |
           kubectl -n "${{ vars.K8S_NAMESPACE_PRODUCTION }}" set image deployment/"${{ vars.K8S_FRONTEND_DEPLOYMENT_PRODUCTION }}" \
-            frontend="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:latest"
+            frontend="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:sha-${{ github.sha }}"
           kubectl -n "${{ vars.K8S_NAMESPACE_PRODUCTION }}" rollout status deployment/"${{ vars.K8S_FRONTEND_DEPLOYMENT_PRODUCTION }}" --timeout=300s
 
       - name: Deploy to production

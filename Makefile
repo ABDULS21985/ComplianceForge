@@ -1,8 +1,10 @@
-.PHONY: help build test lint migrate-up migrate-down seed bootstrap-db docker-build docker-up docker-down generate-sqlc generate-proto swagger run clean test-integration test-e2e lint-all docker-build-all docker-push security-scan coverage-report
+.PHONY: help build test lint migrate-up migrate-down seed bootstrap-db validate-migrations docker-build docker-up docker-down generate-sqlc generate-proto swagger run clean test-integration test-e2e lint-all docker-build-all docker-push security-tools security-scan backup-db restore-db restore-drill coverage-report
 
 APP_NAME := complianceforge
 API_BINARY := bin/$(APP_NAME)-api
 CMD_API := cmd/api/main.go
+SECURITY_TOOLS_DIR ?= $(CURDIR)/.cache/security-tools/bin
+SECURITY_REPORT_DIR ?= $(CURDIR)/security-reports
 
 ## help: show this help message (default target)
 help:
@@ -41,6 +43,10 @@ seed:
 
 ## bootstrap-db: apply migrations and the ordered reference-data seed manifest
 bootstrap-db: migrate-up seed
+
+## validate-migrations: verify contiguous reversible migrations and the complete seed manifest
+validate-migrations:
+	./scripts/validate-migrations.sh
 
 ## docker-build: build Docker images
 docker-build:
@@ -101,8 +107,10 @@ lint-all:
 
 ## docker-build-all: build backend and frontend images
 docker-build-all:
-	docker build -f deployments/docker/Dockerfile.api -t complianceforge-api:latest .
-	docker build -f deployments/docker/Dockerfile.frontend -t complianceforge-frontend:latest ./frontend
+	docker build --target api -f deployments/docker/Dockerfile.api -t complianceforge-api:scan .
+	docker build --target worker -f deployments/docker/Dockerfile.api -t complianceforge-worker:scan .
+	docker build --target migrator -f deployments/docker/Dockerfile.api -t complianceforge-migrator:scan .
+	docker build -f deployments/docker/Dockerfile.frontend -t complianceforge-frontend:scan ./frontend
 
 ## docker-push: tag and push images to GHCR
 docker-push:
@@ -110,17 +118,39 @@ docker-push:
 		echo "Usage: make docker-push REGISTRY=ghcr.io IMAGE_PREFIX=<owner/repo> TAG=<tag>"; \
 		exit 1; \
 	fi
-	docker tag complianceforge-api:latest $$REGISTRY/$$IMAGE_PREFIX/api:$$TAG
-	docker tag complianceforge-frontend:latest $$REGISTRY/$$IMAGE_PREFIX/frontend:$$TAG
-	docker push $$REGISTRY/$$IMAGE_PREFIX/api:$$TAG
-	docker push $$REGISTRY/$$IMAGE_PREFIX/frontend:$$TAG
+	@for component in api worker migrator frontend; do \
+		docker tag complianceforge-$$component:scan $$REGISTRY/$$IMAGE_PREFIX/$$component:$$TAG; \
+		docker push $$REGISTRY/$$IMAGE_PREFIX/$$component:$$TAG; \
+	done
 
-## security-scan: run trivy, gosec, and npm audit
-security-scan:
-	trivy image --severity HIGH,CRITICAL --exit-code 1 complianceforge-api:latest
-	trivy image --severity HIGH,CRITICAL --exit-code 1 complianceforge-frontend:latest
-	gosec ./...
-	cd frontend && npm audit --audit-level=high
+## security-tools: install checksum-pinned scanners outside the application module
+security-tools:
+	TOOLS_DIR=$(SECURITY_TOOLS_DIR) ./scripts/ci/install-security-tools.sh
+
+## security-scan: scan source/history/dependencies, generate SBOMs, and gate every runtime image
+security-scan: security-tools docker-build-all
+	mkdir -p $(SECURITY_REPORT_DIR)/sbom
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH gitleaks git . --redact --no-banner --exit-code 1 --report-format sarif --report-path $(SECURITY_REPORT_DIR)/gitleaks.sarif
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH gosec -exclude=G104 -fmt=sarif -out=$(SECURITY_REPORT_DIR)/gosec.sarif ./...
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH govulncheck -json ./... > $(SECURITY_REPORT_DIR)/govulncheck.json
+	cd frontend && npm audit --audit-level=high --json > $(SECURITY_REPORT_DIR)/npm-audit.json
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy fs . --scanners vuln,misconfig,secret,license --license-full --skip-dirs .git --skip-dirs frontend/node_modules --skip-dirs frontend/.next --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-filesystem.json
+	@set -e; for component in api worker migrator frontend; do \
+		PATH=$(SECURITY_TOOLS_DIR):$$PATH syft complianceforge-$$component:scan --output spdx-json=$(SECURITY_REPORT_DIR)/sbom/$$component.spdx.json; \
+		PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy image complianceforge-$$component:scan --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-$$component.json; \
+	done
+
+## backup-db: create an encrypted, verified PostgreSQL logical backup
+backup-db:
+	./scripts/postgres-backup.sh
+
+## restore-db: restore and verify a backup into an explicitly confirmed target database
+restore-db:
+	./scripts/postgres-restore.sh
+
+## restore-drill: create, verify, and remove an isolated PostgreSQL restore target
+restore-drill:
+	./scripts/postgres-restore-drill.sh
 
 ## coverage-report: generate and open Go HTML coverage report
 coverage-report:

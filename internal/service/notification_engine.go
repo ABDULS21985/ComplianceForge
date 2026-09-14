@@ -27,22 +27,25 @@ import (
 	emailpkg "github.com/complianceforge/platform/internal/pkg/email"
 	"github.com/complianceforge/platform/internal/pkg/safehttp"
 	"github.com/complianceforge/platform/internal/pkg/secretbox"
+	"github.com/complianceforge/platform/internal/repository"
 )
 
 // NotificationRule represents a rule from the database.
 type NotificationRule struct {
-	ID              string                 `json:"id"`
-	OrgID           string                 `json:"organization_id"`
-	Name            string                 `json:"name"`
-	EventType       string                 `json:"event_type"`
-	SeverityFilter  []string               `json:"severity_filter"`
-	Conditions      map[string]interface{} `json:"conditions"`
-	ChannelIDs      []string               `json:"channel_ids"`
-	RecipientType   string                 `json:"recipient_type"` // role, owner, user, dpo, ciso
-	RecipientIDs    []string               `json:"recipient_ids"`
-	TemplateID      string                 `json:"template_id"`
-	IsActive        bool                   `json:"is_active"`
-	CooldownMinutes int                    `json:"cooldown_minutes"`
+	ID                     string                 `json:"id"`
+	OrgID                  string                 `json:"organization_id"`
+	Name                   string                 `json:"name"`
+	EventType              string                 `json:"event_type"`
+	SeverityFilter         []string               `json:"severity_filter"`
+	Conditions             map[string]interface{} `json:"conditions"`
+	ChannelIDs             []string               `json:"channel_ids"`
+	RecipientType          string                 `json:"recipient_type"` // role, owner, user, dpo, ciso
+	RecipientIDs           []string               `json:"recipient_ids"`
+	TemplateID             string                 `json:"template_id"`
+	IsActive               bool                   `json:"is_active"`
+	CooldownMinutes        int                    `json:"cooldown_minutes"`
+	EscalationAfterMinutes *int                   `json:"escalation_after_minutes,omitempty"`
+	EscalationChannelIDs   []string               `json:"escalation_channel_ids,omitempty"`
 }
 
 // Notification represents a notification record.
@@ -52,6 +55,7 @@ type Notification struct {
 	EventType       string     `json:"event_type"`
 	RecipientUserID string     `json:"recipient_user_id"`
 	ChannelType     string     `json:"channel_type"`
+	ChannelID       string     `json:"channel_id,omitempty"`
 	Subject         string     `json:"subject"`
 	Body            string     `json:"body"`
 	TextBody        string     `json:"-"`
@@ -59,6 +63,13 @@ type Notification struct {
 	Status          string     `json:"status"`
 	CreatedAt       time.Time  `json:"created_at"`
 	ReadAt          *time.Time `json:"read_at"`
+	AcknowledgedAt  *time.Time `json:"acknowledged_at,omitempty"`
+	DigestFrequency string     `json:"digest_frequency,omitempty"`
+	ScheduledFor    time.Time  `json:"scheduled_for,omitempty"`
+	RetryCount      int        `json:"retry_count,omitempty"`
+	MaxRetries      int        `json:"max_retries,omitempty"`
+	LeaseOwner      string     `json:"-"`
+	LeaseToken      string     `json:"-"`
 }
 
 // NotificationEngine orchestrates the notification pipeline.
@@ -68,6 +79,7 @@ type NotificationEngine struct {
 	email      emailpkg.Sender
 	secrets    *secretbox.Box
 	httpClient notificationHTTPClient
+	state      repository.NotificationStateRepository
 	stopCh     chan struct{}
 	startOnce  sync.Once
 	stopOnce   sync.Once
@@ -88,6 +100,7 @@ func NewNotificationEngine(pool *pgxpool.Pool, bus *EventBus, senders ...emailpk
 		bus:        bus,
 		email:      sender,
 		httpClient: safehttp.NewClient(10*time.Second, safehttp.Policy{}),
+		state:      repository.NewNotificationRepository(pool),
 		stopCh:     make(chan struct{}),
 	}
 }
@@ -108,7 +121,7 @@ func NewNotificationEngineWithProtector(
 // Ready reports whether the engine can persist and deliver every supported
 // production channel without falling back to plaintext secret storage.
 func (ne *NotificationEngine) Ready() bool {
-	return ne != nil && ne.pool != nil && ne.email != nil && ne.secrets != nil && ne.httpClient != nil
+	return ne != nil && ne.pool != nil && ne.email != nil && ne.secrets != nil && ne.httpClient != nil && ne.state != nil
 }
 
 // Start begins listening for events from the EventBus and processes them in a background goroutine.
@@ -160,14 +173,17 @@ func (ne *NotificationEngine) ProcessEvent(ctx context.Context, event Event) err
 	if ne.pool == nil {
 		return fmt.Errorf("notification database is not configured")
 	}
-	if err := validateNotificationEvent(event); err != nil {
-		return err
-	}
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
 	}
 	if event.Data == nil {
 		event.Data = make(map[string]any)
+	}
+	if event.ID == "" {
+		event.ID = notificationEventID(event)
+	}
+	if err := validateNotificationEvent(event); err != nil {
+		return err
 	}
 	return database.WithTenantConnection(ctx, ne.pool, event.OrgID, func(tenantCtx context.Context) error {
 		return ne.processTenantEvent(tenantCtx, event)
@@ -249,13 +265,16 @@ func (ne *NotificationEngine) processTenantEvent(ctx context.Context, event Even
 			continue
 		}
 
-		// Determine if this is a breach/regulatory event that bypasses preferences.
-		bypassPreferences := ne.isBypassEvent(event.Type)
+		// Only critical regulatory/deadline events override opt-outs, digests and
+		// quiet hours. Non-critical events continue to honor user preferences.
+		bypassPreferences := event.Severity == "critical" && ne.isBypassEvent(event.Type)
 
-		// 6-7. For each recipient and channel, check preferences, create record, and dispatch.
+		// 6-7. Resolve preferences and durably enqueue one idempotent delivery.
+		// Delivery is deliberately separated from event processing: the durable
+		// worker owns leases, retries and terminal failure state.
 		for _, recipientID := range recipientIDs {
 			for _, channelID := range rule.ChannelIDs {
-				channelType, channelConfig, err := ne.getChannelConfig(ctx, event.OrgID, channelID)
+				channelType, _, err := ne.getChannelConfig(ctx, event.OrgID, channelID)
 				if err != nil {
 					log.Error().Err(err).
 						Str("channel_id", channelID).
@@ -264,26 +283,30 @@ func (ne *NotificationEngine) processTenantEvent(ctx context.Context, event Even
 					continue
 				}
 
-				// Check notification preferences unless bypass event.
-				if !bypassPreferences {
-					enabled, err := ne.checkUserPreference(ctx, event.OrgID, recipientID, event.Type, channelType)
-					if err != nil {
-						log.Error().Err(err).
-							Str("user_id", recipientID).
-							Msg("failed to check notification preference")
-						processingErrors = append(processingErrors, fmt.Errorf("recipient preference: %w", err))
-						continue
-					}
-					if !enabled {
-						log.Debug().
-							Str("user_id", recipientID).
-							Str("channel_type", channelType).
-							Msg("user has disabled this notification channel, skipping")
-						continue
-					}
+				preference, err := ne.checkUserPreference(ctx, event.OrgID, recipientID, event.Type, channelType)
+				if err != nil {
+					log.Error().Err(err).
+						Str("user_id", recipientID).
+						Msg("failed to check notification preference")
+					processingErrors = append(processingErrors, fmt.Errorf("recipient preference: %w", err))
+					continue
+				}
+				if bypassPreferences {
+					preference.Enabled = true
+					preference.DigestFrequency = "immediate"
+					preference.QuietHoursStart = nil
+					preference.QuietHoursEnd = nil
+				}
+				if !preference.Enabled {
+					log.Debug().
+						Str("user_id", recipientID).
+						Str("channel_type", channelType).
+						Msg("user has disabled this notification channel, skipping")
+					continue
 				}
 
-				// Create notification record with status 'pending'.
+				createdAt := time.Now().UTC()
+				scheduledFor := notificationScheduledFor(createdAt, preference)
 				body := content.Text
 				if channelType == "email" && content.HTML != "" {
 					body = content.HTML
@@ -298,36 +321,17 @@ func (ne *NotificationEngine) processTenantEvent(ctx context.Context, event Even
 					TextBody:        content.Text,
 					HTMLBody:        content.HTML,
 					Status:          "pending",
-					CreatedAt:       time.Now().UTC(),
+					CreatedAt:       createdAt,
+					ChannelID:       channelID,
+					DigestFrequency: preference.DigestFrequency,
+					ScheduledFor:    scheduledFor,
 				}
 
-				notifID, err := ne.createNotificationRecord(ctx, notification, rule.ID, channelID, event)
+				_, err = ne.createNotificationRecord(ctx, notification, rule.ID, channelID, event)
 				if err != nil {
 					log.Error().Err(err).Msg("failed to create notification record")
 					processingErrors = append(processingErrors, fmt.Errorf("create notification: %w", err))
 					continue
-				}
-				notification.ID = notifID
-
-				// Dispatch via appropriate channel.
-				if err := ne.Dispatch(ctx, notification, channelConfig); err != nil {
-					log.Error().Err(err).
-						Str("notification_id", notifID).
-						Str("channel_type", channelType).
-						Msg("failed to dispatch notification")
-					if updateErr := ne.updateNotificationStatus(ctx, notifID, "failed", err); updateErr != nil {
-						processingErrors = append(processingErrors, updateErr)
-					}
-					processingErrors = append(processingErrors, fmt.Errorf("dispatch notification %s: %w", notifID, err))
-					continue
-				}
-
-				status := "sent"
-				if channelType == "in_app" {
-					status = "delivered"
-				}
-				if err := ne.updateNotificationStatus(ctx, notifID, status, nil); err != nil {
-					processingErrors = append(processingErrors, err)
 				}
 			}
 		}
@@ -515,7 +519,8 @@ func (ne *NotificationEngine) Dispatch(ctx context.Context, notification Notific
 	case "slack":
 		return ne.dispatchSlack(ctx, notification, channelConfig)
 	default:
-		return fmt.Errorf("unsupported channel type: %s", notification.ChannelType)
+		return notificationDeliveryError("channel_unsupported", true,
+			fmt.Errorf("unsupported channel type: %s", notification.ChannelType))
 	}
 }
 
@@ -524,7 +529,8 @@ func (ne *NotificationEngine) Dispatch(ctx context.Context, notification Notific
 func (ne *NotificationEngine) fetchMatchingRules(ctx context.Context, event Event) ([]NotificationRule, error) {
 	query := `
 		SELECT id, organization_id, name, event_type, severity_filter, conditions,
-		       channel_ids, recipient_type, recipient_ids, template_id, is_active, cooldown_minutes
+		       channel_ids, recipient_type, recipient_ids, template_id, is_active, cooldown_minutes,
+		       escalation_after_minutes, COALESCE(escalation_channel_ids, '{}'::uuid[])
 		FROM notification_rules
 		WHERE is_active = true
 		  AND organization_id = $1
@@ -548,6 +554,7 @@ func (ne *NotificationEngine) fetchMatchingRules(ctx context.Context, event Even
 			&rule.SeverityFilter, &conditionsJSON,
 			&rule.ChannelIDs, &rule.RecipientType, &rule.RecipientIDs,
 			&templateID, &rule.IsActive, &rule.CooldownMinutes,
+			&rule.EscalationAfterMinutes, &rule.EscalationChannelIDs,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan notification rule: %w", err)
@@ -611,7 +618,7 @@ func (ne *NotificationEngine) checkCooldown(ctx context.Context, ruleID, entityI
 			SELECT 1 FROM notifications
 			WHERE rule_id = $1
 			  AND event_payload->>'entity_id' = $2
-			  AND status = 'sent'
+			  AND (status IN ('pending', 'sent', 'delivered') OR (status = 'failed' AND dead_at IS NULL))
 			  AND created_at > NOW() - make_interval(mins => $3)
 		)`
 
@@ -768,7 +775,7 @@ func notificationChannelSecretPurpose(channelID string) string {
 	return "notification-channel/" + channelID
 }
 
-func (ne *NotificationEngine) checkUserPreference(ctx context.Context, orgID, userID, eventType, channelType string) (bool, error) {
+func (ne *NotificationEngine) checkUserPreference(ctx context.Context, orgID, userID, eventType, channelType string) (notificationPreferenceDecision, error) {
 	var columnName string
 	switch channelType {
 	case "email":
@@ -780,27 +787,31 @@ func (ne *NotificationEngine) checkUserPreference(ctx context.Context, orgID, us
 	case "webhook", "teams":
 		// These are organization-owned delivery channels rather than personal
 		// channels and therefore have no per-user preference column.
-		return true, nil
+		return defaultNotificationPreference(), nil
 	default:
-		return false, fmt.Errorf("preferences are unsupported for channel type %q", channelType)
+		return notificationPreferenceDecision{}, fmt.Errorf("preferences are unsupported for channel type %q", channelType)
 	}
 
 	query := fmt.Sprintf(`
-		SELECT %s FROM notification_preferences
+		SELECT %s, digest_frequency, quiet_hours_start, quiet_hours_end, quiet_hours_timezone
+		FROM notification_preferences
 		WHERE user_id = $1 AND organization_id = $2 AND event_type IN ($3, '*')
 		ORDER BY CASE WHEN event_type = $3 THEN 0 ELSE 1 END
 		LIMIT 1`, columnName) // #nosec G201 -- columnName comes from the closed switch above.
 
-	var enabled bool
-	err := database.QuerierFromContext(ctx, ne.pool).QueryRow(ctx, query, userID, orgID, eventType).Scan(&enabled)
+	preference := defaultNotificationPreference()
+	err := database.QuerierFromContext(ctx, ne.pool).QueryRow(ctx, query, userID, orgID, eventType).Scan(
+		&preference.Enabled, &preference.DigestFrequency, &preference.QuietHoursStart,
+		&preference.QuietHoursEnd, &preference.QuietHoursTimezone,
+	)
 	if err == pgx.ErrNoRows {
 		// No preference means default enabled.
-		return true, nil
+		return preference, nil
 	}
 	if err != nil {
-		return false, err
+		return notificationPreferenceDecision{}, err
 	}
-	return enabled, nil
+	return preference, nil
 }
 
 func (ne *NotificationEngine) findUsersByRoleSlugs(ctx context.Context, orgID string, roles []string) ([]string, error) {
@@ -927,14 +938,20 @@ func (ne *NotificationEngine) createNotificationRecord(
 	query := `
 		INSERT INTO notifications
 			(organization_id, rule_id, event_type, event_payload, recipient_user_id,
-			 channel_type, channel_id, subject, body, status, metadata, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			 channel_type, channel_id, subject, body, body_text, body_html, status,
+			 metadata, event_id, delivery_key, digest_frequency, scheduled_for, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+		        $13, $14, $15, $16, $17::digest_frequency, $18, $19)
+		ON CONFLICT (organization_id, delivery_key) DO UPDATE
+		SET delivery_key = EXCLUDED.delivery_key
 		RETURNING id`
 
+	deliveryKey := notificationDeliveryKey(event.ID, ruleID, n.RecipientUserID, channelID)
 	var id string
 	err = database.QuerierFromContext(ctx, ne.pool).QueryRow(ctx, query,
 		n.OrgID, ruleID, n.EventType, eventPayload, n.RecipientUserID,
-		n.ChannelType, channelID, n.Subject, n.Body, n.Status, metadata, n.CreatedAt,
+		n.ChannelType, channelID, n.Subject, n.Body, n.TextBody, n.HTMLBody, n.Status,
+		metadata, event.ID, deliveryKey, n.DigestFrequency, n.ScheduledFor, n.CreatedAt,
 	).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("insert notification: %w", err)
@@ -974,7 +991,8 @@ func (ne *NotificationEngine) updateNotificationStatus(ctx context.Context, noti
 
 func (ne *NotificationEngine) dispatchEmail(ctx context.Context, n Notification, _ map[string]any) error {
 	if ne.email == nil {
-		return fmt.Errorf("email delivery transport is not configured")
+		return notificationDeliveryError("transport_unavailable", true,
+			fmt.Errorf("email delivery transport is not configured"))
 	}
 	// Look up the recipient's email address.
 	var recipientEmail string
@@ -983,6 +1001,10 @@ func (ne *NotificationEngine) dispatchEmail(ctx context.Context, n Notification,
 		WHERE id = $1 AND organization_id = $2 AND status = 'active' AND deleted_at IS NULL`,
 		n.RecipientUserID, n.OrgID).Scan(&recipientEmail)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return notificationDeliveryError("recipient_unavailable", true,
+				fmt.Errorf("lookup recipient email: %w", err))
+		}
 		return fmt.Errorf("lookup recipient email: %w", err)
 	}
 	textBody, htmlBody := n.TextBody, n.HTMLBody
@@ -1012,21 +1034,22 @@ func (ne *NotificationEngine) dispatchInApp(ctx context.Context, n Notification)
 func (ne *NotificationEngine) dispatchWebhook(ctx context.Context, n Notification, config map[string]any) error {
 	webhookURL, err := channelConfigString(config, "url", true)
 	if err != nil {
-		return err
+		return notificationDeliveryError("configuration_invalid", true, err)
 	}
 	secret, err := channelConfigString(config, "secret", true)
 	if err != nil {
-		return err
+		return notificationDeliveryError("configuration_invalid", true, err)
 	}
 	if len(secret) < 32 {
-		return fmt.Errorf("webhook signing secret must contain at least 32 characters")
+		return notificationDeliveryError("configuration_invalid", true,
+			fmt.Errorf("webhook signing secret must contain at least 32 characters"))
 	}
 	destination, err := url.Parse(webhookURL)
 	if err != nil {
-		return fmt.Errorf("parse webhook URL: %w", err)
+		return notificationDeliveryError("configuration_invalid", true, fmt.Errorf("parse webhook URL: %w", err))
 	}
 	if err := safehttp.ValidateURL(destination, safehttp.Policy{}); err != nil {
-		return fmt.Errorf("validate webhook URL: %w", err)
+		return notificationDeliveryError("configuration_invalid", true, fmt.Errorf("validate webhook URL: %w", err))
 	}
 
 	payload, err := json.Marshal(map[string]interface{}{
@@ -1063,7 +1086,11 @@ func (ne *NotificationEngine) dispatchWebhook(ctx context.Context, n Notificatio
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
+		permanent := resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError &&
+			resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusConflict &&
+			resp.StatusCode != http.StatusTooEarly && resp.StatusCode != http.StatusTooManyRequests
+		return notificationDeliveryError("provider_rejected", permanent,
+			fmt.Errorf("webhook returned status %d", resp.StatusCode))
 	}
 
 	log.Info().
@@ -1077,17 +1104,18 @@ func (ne *NotificationEngine) dispatchWebhook(ctx context.Context, n Notificatio
 func (ne *NotificationEngine) dispatchSlack(ctx context.Context, n Notification, config map[string]any) error {
 	webhookURL, err := channelConfigString(config, "webhook_url", true)
 	if err != nil {
-		return err
+		return notificationDeliveryError("configuration_invalid", true, err)
 	}
 	destination, err := url.Parse(webhookURL)
 	if err != nil {
-		return fmt.Errorf("parse Slack webhook URL: %w", err)
+		return notificationDeliveryError("configuration_invalid", true, fmt.Errorf("parse Slack webhook URL: %w", err))
 	}
 	if err := safehttp.ValidateURL(destination, safehttp.Policy{AllowedHosts: []string{"hooks.slack.com"}}); err != nil {
-		return fmt.Errorf("validate Slack webhook URL: %w", err)
+		return notificationDeliveryError("configuration_invalid", true, fmt.Errorf("validate Slack webhook URL: %w", err))
 	}
 	if len(n.Subject) > 150 || len(n.Body) > 3000 {
-		return fmt.Errorf("Slack notification content exceeds channel limits")
+		return notificationDeliveryError("content_invalid", true,
+			fmt.Errorf("Slack notification content exceeds channel limits"))
 	}
 
 	slackPayload, err := json.Marshal(map[string]interface{}{
@@ -1126,7 +1154,10 @@ func (ne *NotificationEngine) dispatchSlack(ctx context.Context, n Notification,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("slack returned status %d", resp.StatusCode)
+		permanent := resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError &&
+			resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests
+		return notificationDeliveryError("provider_rejected", permanent,
+			fmt.Errorf("slack returned status %d", resp.StatusCode))
 	}
 
 	log.Info().
@@ -1156,6 +1187,11 @@ func channelConfigString(config map[string]any, key string, required bool) (stri
 }
 
 func validateNotificationEvent(event Event) error {
+	if event.ID != "" {
+		if _, err := uuid.Parse(event.ID); err != nil {
+			return fmt.Errorf("notification event ID is invalid")
+		}
+	}
 	if _, err := uuid.Parse(event.OrgID); err != nil {
 		return fmt.Errorf("notification event organization ID is invalid")
 	}

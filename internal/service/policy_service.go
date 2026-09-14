@@ -245,12 +245,16 @@ func (s *PolicyService) SubmitForApproval(ctx context.Context, orgID, policyID, 
 	if err != nil {
 		return nil, err
 	}
-	if policy.Status != models.PolicyStateDraft {
-		return nil, fmt.Errorf("%w: only draft policies may enter approval", ErrPolicyInvalidTransition)
-	}
 	normalizeSubmit(&input)
 	if err := validateSubmit(input); err != nil {
 		return nil, err
+	}
+	if input.WorkflowType == "retirement" {
+		if policy.Status != models.PolicyStatePublished {
+			return nil, fmt.Errorf("%w: only a published policy may enter retirement approval", ErrPolicyInvalidTransition)
+		}
+	} else if policy.Status != models.PolicyStateDraft {
+		return nil, fmt.Errorf("%w: only draft policies may enter authoring approval", ErrPolicyInvalidTransition)
 	}
 	item, err := s.repository.CreateApprovalWorkflow(ctx, orgID, policyID, userID, input)
 	if errors.Is(err, pgx.ErrNoRows) {

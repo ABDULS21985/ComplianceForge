@@ -155,6 +155,40 @@ func TestAPIKeyAuthEnforcesRateLimit(t *testing.T) {
 	}
 }
 
+func TestRequireAPIKeyPermission(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	tests := []struct {
+		name        string
+		keyID       string
+		permissions []string
+		wantStatus  int
+	}{
+		{name: "exact grant", keyID: "key-1", permissions: []string{"read:controls"}, wantStatus: http.StatusNoContent},
+		{name: "wrong action", keyID: "key-1", permissions: []string{"update:controls"}, wantStatus: http.StatusForbidden},
+		{name: "wrong resource", keyID: "key-1", permissions: []string{"read:risks"}, wantStatus: http.StatusForbidden},
+		{name: "wildcards are not implicit", keyID: "key-1", permissions: []string{"*:*"}, wantStatus: http.StatusForbidden},
+		{name: "missing authentication", permissions: []string{"read:controls"}, wantStatus: http.StatusUnauthorized},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			if test.keyID != "" {
+				ctx = context.WithValue(ctx, ContextKeyAPIKeyID, test.keyID)
+			}
+			ctx = context.WithValue(ctx, ContextKeyAPIPermissions, test.permissions)
+			request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+			response := httptest.NewRecorder()
+			RequireAPIKeyPermission("read", "controls")(next).ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+		})
+	}
+}
+
 func validAPIKeyPrincipal() *authdomain.APIKeyPrincipal {
 	return &authdomain.APIKeyPrincipal{
 		KeyID:              "key-1",

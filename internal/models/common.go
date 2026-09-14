@@ -80,10 +80,11 @@ const (
 type AuditStatus string
 
 const (
-	AuditStatusPlanned    AuditStatus = "Planned"
-	AuditStatusInProgress AuditStatus = "InProgress"
-	AuditStatusCompleted  AuditStatus = "Completed"
-	AuditStatusClosed     AuditStatus = "Closed"
+	AuditStatusPlanned    AuditStatus = "planned"
+	AuditStatusInProgress AuditStatus = "in_progress"
+	AuditStatusCompleted  AuditStatus = "completed"
+	AuditStatusClosed     AuditStatus = "closed"
+	AuditStatusCancelled  AuditStatus = "cancelled"
 )
 
 // IncidentSeverity classifies the impact level of a security incident.

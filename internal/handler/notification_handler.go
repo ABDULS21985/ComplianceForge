@@ -49,33 +49,37 @@ type notificationPreference struct {
 }
 
 type notificationRuleInput struct {
-	Name            string                 `json:"name"`
-	EventType       string                 `json:"event_type"`
-	SeverityFilter  []string               `json:"severity_filter"`
-	Conditions      map[string]interface{} `json:"conditions"`
-	ChannelIDs      []string               `json:"channel_ids"`
-	RecipientType   string                 `json:"recipient_type"`
-	RecipientIDs    []string               `json:"recipient_ids"`
-	TemplateID      *string                `json:"template_id"`
-	IsActive        *bool                  `json:"is_active"`
-	CooldownMinutes int                    `json:"cooldown_minutes"`
+	Name                   string                 `json:"name"`
+	EventType              string                 `json:"event_type"`
+	SeverityFilter         []string               `json:"severity_filter"`
+	Conditions             map[string]interface{} `json:"conditions"`
+	ChannelIDs             []string               `json:"channel_ids"`
+	RecipientType          string                 `json:"recipient_type"`
+	RecipientIDs           []string               `json:"recipient_ids"`
+	TemplateID             *string                `json:"template_id"`
+	IsActive               *bool                  `json:"is_active"`
+	CooldownMinutes        int                    `json:"cooldown_minutes"`
+	EscalationAfterMinutes *int                   `json:"escalation_after_minutes"`
+	EscalationChannelIDs   []string               `json:"escalation_channel_ids"`
 }
 
 type notificationRuleResponse struct {
-	ID              string                 `json:"id"`
-	OrgID           string                 `json:"organization_id"`
-	Name            string                 `json:"name"`
-	EventType       string                 `json:"event_type"`
-	SeverityFilter  []string               `json:"severity_filter"`
-	Conditions      map[string]interface{} `json:"conditions"`
-	ChannelIDs      []string               `json:"channel_ids"`
-	RecipientType   string                 `json:"recipient_type"`
-	RecipientIDs    []string               `json:"recipient_ids"`
-	TemplateID      *string                `json:"template_id"`
-	IsActive        bool                   `json:"is_active"`
-	CooldownMinutes int                    `json:"cooldown_minutes"`
-	CreatedAt       time.Time              `json:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at"`
+	ID                     string                 `json:"id"`
+	OrgID                  string                 `json:"organization_id"`
+	Name                   string                 `json:"name"`
+	EventType              string                 `json:"event_type"`
+	SeverityFilter         []string               `json:"severity_filter"`
+	Conditions             map[string]interface{} `json:"conditions"`
+	ChannelIDs             []string               `json:"channel_ids"`
+	RecipientType          string                 `json:"recipient_type"`
+	RecipientIDs           []string               `json:"recipient_ids"`
+	TemplateID             *string                `json:"template_id"`
+	IsActive               bool                   `json:"is_active"`
+	CooldownMinutes        int                    `json:"cooldown_minutes"`
+	EscalationAfterMinutes *int                   `json:"escalation_after_minutes,omitempty"`
+	EscalationChannelIDs   []string               `json:"escalation_channel_ids"`
+	CreatedAt              time.Time              `json:"created_at"`
+	UpdatedAt              time.Time              `json:"updated_at"`
 }
 
 type notificationChannelInput struct {
@@ -160,7 +164,8 @@ func (h *NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.R
 	var total int
 	err := database.QuerierFromContext(r.Context(), h.pool).QueryRow(r.Context(),
 		`SELECT COUNT(*) FROM notifications
-		 WHERE recipient_user_id = $1 AND organization_id = $2 AND channel_type = 'in_app'`,
+		 WHERE recipient_user_id = $1 AND organization_id = $2 AND channel_type = 'in_app'
+		   AND status = 'delivered'`,
 		userID, orgID,
 	).Scan(&total)
 	if err != nil {
@@ -171,9 +176,10 @@ func (h *NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.R
 	// Fetch paginated notifications, newest first.
 	rows, err := database.QuerierFromContext(r.Context(), h.pool).Query(r.Context(),
 		`SELECT id, organization_id, event_type, recipient_user_id, channel_type,
-		        subject, body, status, created_at, read_at
+		        subject, body, status, created_at, read_at, acknowledged_at
 		 FROM notifications
 		 WHERE recipient_user_id = $1 AND organization_id = $2 AND channel_type = 'in_app'
+		   AND status = 'delivered'
 		 ORDER BY created_at DESC
 		 LIMIT $3 OFFSET $4`,
 		userID, orgID, pagination.PageSize, offset,
@@ -189,7 +195,7 @@ func (h *NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.R
 		var n service.Notification
 		if err := rows.Scan(
 			&n.ID, &n.OrgID, &n.EventType, &n.RecipientUserID, &n.ChannelType,
-			&n.Subject, &n.Body, &n.Status, &n.CreatedAt, &n.ReadAt,
+			&n.Subject, &n.Body, &n.Status, &n.CreatedAt, &n.ReadAt, &n.AcknowledgedAt,
 		); err != nil {
 			writeNotificationInternalError(w, r, "scan notification", "Failed to list notifications", err)
 			return
@@ -206,7 +212,7 @@ func (h *NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.R
 	err = database.QuerierFromContext(r.Context(), h.pool).QueryRow(r.Context(),
 		`SELECT COUNT(*) FROM notifications
 		 WHERE recipient_user_id = $1 AND organization_id = $2
-		   AND channel_type = 'in_app' AND read_at IS NULL`,
+		   AND channel_type = 'in_app' AND status = 'delivered' AND read_at IS NULL`,
 		userID, orgID,
 	).Scan(&unreadCount)
 	if err != nil {
@@ -249,7 +255,7 @@ func (h *NotificationHandler) MarkAsRead(w http.ResponseWriter, r *http.Request)
 	result, err := database.QuerierFromContext(r.Context(), h.pool).Exec(r.Context(),
 		`UPDATE notifications SET read_at = COALESCE(read_at, NOW())
 		 WHERE id = $1 AND recipient_user_id = $2 AND organization_id = $3
-		   AND channel_type = 'in_app'`,
+		   AND channel_type = 'in_app' AND status = 'delivered'`,
 		notifID, userID, orgID,
 	)
 	if err != nil {
@@ -265,6 +271,37 @@ func (h *NotificationHandler) MarkAsRead(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Notification marked as read"})
 }
 
+// Acknowledge handles PUT /notifications/{id}/acknowledge. Only the delivered
+// notification's authenticated recipient can acknowledge it; repeated calls
+// return the original acknowledgement timestamp.
+func (h *NotificationHandler) Acknowledge(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserIDFromContext(r.Context())
+	orgID := middleware.GetOrgIDFromContext(r.Context())
+	if userID == "" || orgID == "" {
+		writeError(w, http.StatusUnauthorized, "Authentication required", "")
+		return
+	}
+	notificationID := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(notificationID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid notification ID", "")
+		return
+	}
+	acknowledgedAt, err := h.engine.AcknowledgeNotification(r.Context(), orgID, userID, notificationID)
+	if err == pgx.ErrNoRows {
+		writeError(w, http.StatusNotFound, "Notification not found", "")
+		return
+	}
+	if err != nil {
+		writeNotificationInternalError(w, r, "acknowledge notification", "Failed to acknowledge notification", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":              notificationID,
+		"acknowledged_at": acknowledgedAt,
+		"message":         "Notification acknowledged",
+	})
+}
+
 // MarkAllAsRead handles PUT /notifications/read-all.
 func (h *NotificationHandler) MarkAllAsRead(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserIDFromContext(r.Context())
@@ -277,7 +314,7 @@ func (h *NotificationHandler) MarkAllAsRead(w http.ResponseWriter, r *http.Reque
 	result, err := database.QuerierFromContext(r.Context(), h.pool).Exec(r.Context(),
 		`UPDATE notifications SET read_at = NOW()
 		 WHERE recipient_user_id = $1 AND organization_id = $2
-		   AND channel_type = 'in_app' AND read_at IS NULL`,
+		   AND channel_type = 'in_app' AND status = 'delivered' AND read_at IS NULL`,
 		userID, orgID,
 	)
 	if err != nil {
@@ -305,7 +342,7 @@ func (h *NotificationHandler) GetUnreadCount(w http.ResponseWriter, r *http.Requ
 	err := database.QuerierFromContext(r.Context(), h.pool).QueryRow(r.Context(),
 		`SELECT COUNT(*) FROM notifications
 		 WHERE recipient_user_id = $1 AND organization_id = $2
-		   AND channel_type = 'in_app' AND read_at IS NULL`,
+		   AND channel_type = 'in_app' AND status = 'delivered' AND read_at IS NULL`,
 		userID, orgID,
 	).Scan(&count)
 	if err != nil {
@@ -462,7 +499,7 @@ func (h *NotificationHandler) ListRules(w http.ResponseWriter, r *http.Request) 
 	rows, err := database.QuerierFromContext(r.Context(), h.pool).Query(r.Context(),
 		`SELECT id, organization_id, name, event_type, severity_filter, conditions,
 		        channel_ids, recipient_type, recipient_ids, template_id, is_active, cooldown_minutes,
-		        created_at, updated_at
+		        escalation_after_minutes,COALESCE(escalation_channel_ids,'{}'::uuid[]),created_at,updated_at
 		 FROM notification_rules
 		 WHERE organization_id = $1
 		 ORDER BY created_at DESC
@@ -484,6 +521,7 @@ func (h *NotificationHandler) ListRules(w http.ResponseWriter, r *http.Request) 
 			&rule.SeverityFilter, &conditionsJSON,
 			&rule.ChannelIDs, &rule.RecipientType, &rule.RecipientIDs,
 			&rule.TemplateID, &rule.IsActive, &rule.CooldownMinutes,
+			&rule.EscalationAfterMinutes, &rule.EscalationChannelIDs,
 			&rule.CreatedAt, &rule.UpdatedAt,
 		); err != nil {
 			writeNotificationInternalError(w, r, "scan notification rule", "Failed to list rules", err)
@@ -547,12 +585,13 @@ func (h *NotificationHandler) CreateRule(w http.ResponseWriter, r *http.Request)
 		`INSERT INTO notification_rules
 			(organization_id, name, event_type, severity_filter, conditions,
 			 channel_ids, recipient_type, recipient_ids, template_id, is_active, cooldown_minutes,
-			 created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+			 escalation_after_minutes,escalation_channel_ids,created_at,updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW(),NOW())
 		 RETURNING id`,
 		orgID, input.Name, input.EventType, input.SeverityFilter, conditionsJSON,
 		input.ChannelIDs, input.RecipientType, input.RecipientIDs,
 		nullableString(input.TemplateID), isActive, input.CooldownMinutes,
+		input.EscalationAfterMinutes, input.EscalationChannelIDs,
 	).Scan(&ruleID)
 	if err != nil {
 		writeNotificationInternalError(w, r, "create notification rule", "Failed to create rule", err)
@@ -599,12 +638,13 @@ func (h *NotificationHandler) UpdateRule(w http.ResponseWriter, r *http.Request)
 		`UPDATE notification_rules
 		 SET name = $1, event_type = $2, severity_filter = $3, conditions = $4,
 		     channel_ids = $5, recipient_type = $6, recipient_ids = $7,
-		     template_id = $8, is_active = COALESCE($9, is_active), cooldown_minutes = $10, updated_at = NOW()
-		 WHERE id = $11 AND organization_id = $12`,
+		     template_id = $8, is_active = COALESCE($9, is_active), cooldown_minutes = $10,
+		     escalation_after_minutes=$11,escalation_channel_ids=$12,updated_at=NOW()
+		 WHERE id = $13 AND organization_id = $14`,
 		input.Name, input.EventType, input.SeverityFilter, conditionsJSON,
 		input.ChannelIDs, input.RecipientType, input.RecipientIDs,
 		nullableString(input.TemplateID), input.IsActive, input.CooldownMinutes,
-		ruleID, orgID,
+		input.EscalationAfterMinutes, input.EscalationChannelIDs, ruleID, orgID,
 	)
 	if err != nil {
 		writeNotificationInternalError(w, r, "update notification rule", "Failed to update rule", err)
@@ -1216,6 +1256,32 @@ func validateNotificationRuleInput(ctx context.Context, querier database.Querier
 	}
 	if channelCount != len(input.ChannelIDs) {
 		return fmt.Errorf("one or more channels are unavailable to this organization")
+	}
+	input.EscalationChannelIDs, err = uniqueNotificationUUIDs(input.EscalationChannelIDs, 20, "escalation_channel_ids")
+	if err != nil {
+		return err
+	}
+	if input.EscalationAfterMinutes == nil {
+		if len(input.EscalationChannelIDs) != 0 {
+			return fmt.Errorf("escalation_after_minutes is required when escalation channels are configured")
+		}
+	} else {
+		if *input.EscalationAfterMinutes < 1 || *input.EscalationAfterMinutes > 525600 {
+			return fmt.Errorf("escalation_after_minutes must be between 1 and 525600")
+		}
+		if len(input.EscalationChannelIDs) == 0 {
+			return fmt.Errorf("at least one escalation_channel_id is required when escalation is enabled")
+		}
+		var escalationChannelCount int
+		if err := querier.QueryRow(ctx, `
+			SELECT COUNT(*) FROM notification_channels
+			WHERE organization_id=$1 AND id=ANY($2::uuid[]) AND is_active=true AND deleted_at IS NULL`,
+			orgID, input.EscalationChannelIDs).Scan(&escalationChannelCount); err != nil {
+			return fmt.Errorf("validate escalation channels: %w", err)
+		}
+		if escalationChannelCount != len(input.EscalationChannelIDs) {
+			return fmt.Errorf("one or more escalation channels are unavailable to this organization")
+		}
 	}
 
 	switch input.RecipientType {

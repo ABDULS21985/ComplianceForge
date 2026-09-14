@@ -55,6 +55,7 @@ func TestRegisterJobHandlersRegistersCompleteContract(t *testing.T) {
 		"scheduler.dsr",
 		"scheduler.evidence",
 		"scheduler.exceptions",
+		"scheduler.notifications.delivery",
 		"scheduler.regulatory",
 		"scheduler.reports",
 		"scheduler.search.health",

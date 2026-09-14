@@ -44,7 +44,9 @@ services:
       context: ../../
       dockerfile: deployments/docker/Dockerfile.api
       target: api
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      API_TRUST_PROXY_HEADERS: "false"
     ports:
       - "8080:8080"
     volumes:
@@ -57,6 +59,8 @@ services:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
     networks:
       - complianceforge
 
@@ -76,6 +80,8 @@ services:
       rabbitmq:
         condition: service_healthy
     restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
     networks:
       - complianceforge
 
@@ -86,17 +92,21 @@ services:
     environment:
       NODE_ENV: production
       API_INTERNAL_URL: http://api:8080/api/v1
+      APP_ENV: development
+      TRUST_PROXY_HEADERS: "false"
     ports:
       - "3000:3000"
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     networks:
       - complianceforge
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     ports:
       - "5432:5432"
     environment:
@@ -115,7 +125,7 @@ services:
       - complianceforge
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
@@ -131,7 +141,7 @@ services:
       - complianceforge
 
   rabbitmq:
-    image: rabbitmq:4-management-alpine
+    image: rabbitmq:4.3.5-management-alpine@sha256:b3b8b7f95f5382a19f9ea33540e604f30aad081d37ad9aba72255135765373a1
     environment:
       RABBITMQ_DEFAULT_USER: complianceforge
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-complianceforge}
@@ -150,7 +160,7 @@ services:
       - complianceforge
 
   mailpit:
-    image: axllent/mailpit:v1.27
+    image: axllent/mailpit:v1.31.1@sha256:98b916bd3c8d61f7633a52d3ea2f58d00620cb01ca57ab59edde68c347a95365
     ports:
       - "1025:1025"
       - "8025:8025"

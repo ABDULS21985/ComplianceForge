@@ -95,16 +95,15 @@ if [ "$rpo_seconds" -ge 0 ] && [ "$rpo_seconds" -gt "$rpo_target_seconds" ]; the
   log "WARNING: RPO objective exceeded: backup age ${rpo_seconds}s > ${rpo_target_seconds}s"
 fi
 
-export PGDATABASE="$target_database_url"
 export PGAPPNAME=complianceforge-restore
 export PGCONNECT_TIMEOUT=${PGCONNECT_TIMEOUT:-15}
-target_database=$(psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command 'SELECT current_database()')
+target_database=$(psql "$target_database_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command 'SELECT current_database()')
 [ -n "$target_database" ] || fail 'could not resolve the target database name'
 expected_confirmation="RESTORE:$target_database"
 [ "${POSTGRES_RESTORE_CONFIRM:-}" = "$expected_confirmation" ] || \
   fail "set POSTGRES_RESTORE_CONFIRM=$expected_confirmation to authorize this target"
 
-existing_tables=$(psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+existing_tables=$(psql "$target_database_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
   --command "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema')")
 if [ "$existing_tables" -gt 0 ] && [ "$allow_nonempty" != true ]; then
   fail "target contains $existing_tables application tables; restore into a new database or explicitly set POSTGRES_RESTORE_ALLOW_NONEMPTY=true"
@@ -157,7 +156,7 @@ pg_restore \
   --dbname "$target_database_url" \
   "$archive"
 
-schema_state=$(psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+schema_state=$(psql "$target_database_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
   --command "SELECT version::text || ':' || dirty::text FROM schema_migrations LIMIT 1")
 case "$schema_state" in
   *:false) ;;
@@ -168,7 +167,7 @@ if [ -n "$expected_schema_version" ] && [ "$actual_schema_version" != "$expected
   fail "restored schema version $actual_schema_version does not match backup version $expected_schema_version"
 fi
 
-required_relations=$(psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command \
+required_relations=$(psql "$target_database_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command \
   "SELECT count(*) FROM unnest(ARRAY['organizations','users','audit_logs','bootstrap_seed_history']) AS name WHERE to_regclass('public.' || name) IS NOT NULL")
 [ "$required_relations" -eq 4 ] || fail "only $required_relations of 4 critical relations were restored"
 

@@ -1,0 +1,96 @@
+name: PostgreSQL Restore Drill
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+  pull_request:
+    paths:
+      - ".github/workflows/postgres-restore-drill.yml"
+      - "cmd/migrate/**"
+      - "cmd/seed/**"
+      - "scripts/postgres-*.sh"
+      - "scripts/validate-migrations.sh"
+      - "sql/migrations/**"
+      - "sql/seeds/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postgres-restore-drill-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.26.8"
+  POSTGRES_IMAGE: postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+
+jobs:
+  restore-drill:
+    name: Backup, restore, and verify RPO/RTO
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16.15-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_USER: complianceforge
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: complianceforge_dr_source
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U complianceforge -d complianceforge_dr_source"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+          --tmpfs /var/lib/postgresql/data:rw
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Validate migration and seed manifests
+        run: ./scripts/validate-migrations.sh
+
+      - name: Bootstrap source database twice
+        env:
+          DATABASE_URL: postgres://complianceforge:testpassword@127.0.0.1:5432/complianceforge_dr_source?sslmode=disable
+        run: |
+          go run ./cmd/migrate up
+          go run ./cmd/seed
+          go run ./cmd/migrate up
+          go run ./cmd/seed
+
+      - name: Run isolated logical restore drill
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          docker run --rm --network host \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --volume "$GITHUB_WORKSPACE/artifacts:/evidence" \
+            --workdir /workspace \
+            --env DRILL_SOURCE_DATABASE_URL='postgres://complianceforge:testpassword@127.0.0.1:5432/complianceforge_dr_source?sslmode=disable' \
+            --env DRILL_ADMIN_DATABASE_URL='postgres://complianceforge:testpassword@127.0.0.1:5432/complianceforge_dr_source?sslmode=disable' \
+            --env DRILL_TARGET_DATABASE_NAME=cf_restore_drill_ci \
+            --env DRILL_TARGET_DATABASE_URL='postgres://complianceforge:testpassword@127.0.0.1:5432/cf_restore_drill_ci?sslmode=disable' \
+            --env POSTGRES_RESTORE_DRILL_CONFIRM=CREATE_AND_DROP:cf_restore_drill_ci \
+            --env DR_RPO_TARGET_SECONDS=86400 \
+            --env DR_RTO_TARGET_SECONDS=14400 \
+            --env DRILL_REPORT_PATH=/evidence/postgres-restore-drill.json \
+            "$POSTGRES_IMAGE" sh ./scripts/postgres-restore-drill.sh \
+            2>&1 | tee artifacts/postgres-restore-drill.log
+
+      - name: Upload restore-drill evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: postgres-restore-drill-${{ github.sha }}
+          path: artifacts/postgres-restore-drill.*
+          if-no-files-found: error
+          retention-days: 90

@@ -2,8 +2,8 @@
 
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 
 database_url=${DATABASE_URL:-}
 backup_dir=${POSTGRES_BACKUP_DIR:-$repo_root/backups/postgresql}
@@ -50,12 +50,11 @@ for command_name in pg_dump pg_restore psql; do
   command -v "$command_name" >/dev/null 2>&1 || fail "$command_name is required"
 done
 
-export PGDATABASE="$database_url"
 export PGCONNECT_TIMEOUT=${PGCONNECT_TIMEOUT:-15}
 
 umask 077
 mkdir -p "$backup_dir"
-backup_dir=$(CDPATH= cd -- "$backup_dir" && pwd)
+backup_dir=$(CDPATH='' cd -- "$backup_dir" && pwd)
 case "$backup_dir" in
   /|"${HOME:-__unset__}") fail "unsafe backup directory: $backup_dir" ;;
 esac
@@ -96,7 +95,7 @@ timestamp=$(date -u '+%Y%m%dT%H%M%SZ')
 base_name="${prefix}-${timestamp}-$$"
 raw_archive="$backup_dir/.${base_name}.dump.tmp"
 
-schema_state=$(psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+schema_state=$(psql "$database_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
   --command "SELECT version::text || ':' || dirty::text FROM schema_migrations LIMIT 1")
 case "$schema_state" in
   *:false) ;;
@@ -106,6 +105,7 @@ schema_version=${schema_state%:*}
 
 log "creating PostgreSQL custom-format archive at schema version $schema_version"
 PGAPPNAME=complianceforge-backup pg_dump \
+  --dbname "$database_url" \
   --format custom \
   --compress 9 \
   --no-owner \

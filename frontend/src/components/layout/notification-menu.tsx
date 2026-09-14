@@ -11,23 +11,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { formatApiError, notificationPollInterval } from '@/lib/enterprise-settings';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
 import { useState } from 'react';
+import { toast } from 'sonner';
+import type { NotificationRecord } from '@/types/enterprise-settings';
 
-interface NotificationRecord {
-  body: string;
-  created_at: string;
-  event_type: string;
-  id: string;
-  read_at: string | null;
-  subject: string;
-}
-
-export function normalizeNotifications(value: unknown): NotificationRecord[] {
+export function normalizeNotifications(value: unknown): Array<Pick<NotificationRecord, 'body' | 'created_at' | 'event_type' | 'id' | 'read_at' | 'subject'>> {
   const response =
     value && typeof value === 'object'
       ? (value as Record<string, unknown>)
@@ -69,9 +63,15 @@ export function NotificationMenu() {
   const unreadQuery = useQuery({
     queryKey: ['notifications', 'unread-count'],
     queryFn: () => api.notifications.unreadCount(),
-    refetchInterval: 60_000,
+    refetchInterval: (query) =>
+      notificationPollInterval(
+        query.state.fetchFailureCount,
+        typeof document !== 'undefined' && document.visibilityState === 'hidden',
+        typeof navigator === 'undefined' || navigator.onLine
+      ),
+    refetchIntervalInBackground: false,
     staleTime: 30_000,
-    retry: 1,
+    retry: 2,
   });
   const notificationsQuery = useQuery({
     queryKey: ['notifications', 'list', 'topbar'],
@@ -88,10 +88,12 @@ export function NotificationMenu() {
   const markReadMutation = useMutation({
     mutationFn: (id: string) => api.notifications.markAsRead(id),
     onSuccess: refreshNotifications,
+    onError: (error) => toast.error(formatApiError(error, 'The notification could not be marked as read.')),
   });
   const markAllMutation = useMutation({
     mutationFn: () => api.notifications.markAllAsRead(),
     onSuccess: refreshNotifications,
+    onError: (error) => toast.error(formatApiError(error, 'Notifications could not be marked as read.')),
   });
 
   const triggerLabel = unreadQuery.isSuccess
@@ -211,9 +213,14 @@ export function NotificationMenu() {
         )}
 
         <DropdownMenuSeparator className="m-0" />
-        <DropdownMenuItem asChild className="m-1 justify-center">
-          <Link href="/settings/notifications">Notification settings</Link>
-        </DropdownMenuItem>
+        <div className="grid grid-cols-2 p-1">
+          <DropdownMenuItem asChild className="justify-center">
+            <Link href="/notifications">View all</Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild className="justify-center">
+            <Link href="/settings/notifications">Preferences</Link>
+          </DropdownMenuItem>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

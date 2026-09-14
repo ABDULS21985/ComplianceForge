@@ -13,10 +13,11 @@ import (
 
 // AppConfig holds application-level settings.
 type AppConfig struct {
-	Name     string `mapstructure:"name"`
-	Env      string `mapstructure:"env"`
-	Port     int    `mapstructure:"port"`
-	GRPCPort int    `mapstructure:"grpc_port"`
+	Name              string `mapstructure:"name"`
+	Env               string `mapstructure:"env"`
+	Port              int    `mapstructure:"port"`
+	GRPCPort          int    `mapstructure:"grpc_port"`
+	TrustProxyHeaders bool   `mapstructure:"trust_proxy_headers"`
 }
 
 // DatabaseConfig holds PostgreSQL connection settings.
@@ -164,6 +165,7 @@ func Load() (*Config, error) {
 	v.SetDefault("app.env", "development")
 	v.SetDefault("app.port", 8080)
 	v.SetDefault("app.grpc_port", 9090)
+	v.SetDefault("app.trust_proxy_headers", false)
 
 	v.SetDefault("database.host", "localhost")
 	v.SetDefault("database.url", "")
@@ -242,6 +244,7 @@ func bindEnvironment(v *viper.Viper) error {
 		"app.env":                     {"APP_ENV", "CF_APP_ENV"},
 		"app.port":                    {"APP_PORT", "PORT", "CF_APP_PORT"},
 		"app.grpc_port":               {"APP_GRPC_PORT", "CF_APP_GRPC_PORT"},
+		"app.trust_proxy_headers":     {"API_TRUST_PROXY_HEADERS", "CF_API_TRUST_PROXY_HEADERS"},
 		"database.url":                {"DATABASE_URL", "CF_DATABASE_URL"},
 		"database.host":               {"DB_HOST", "CF_DATABASE_HOST"},
 		"database.port":               {"DB_PORT", "CF_DATABASE_PORT"},

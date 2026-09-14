@@ -2,8 +2,8 @@
 
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 
 source_url=${DRILL_SOURCE_DATABASE_URL:-}
 admin_url=${DRILL_ADMIN_DATABASE_URL:-}
@@ -34,7 +34,7 @@ for command_name in pg_dump pg_restore psql; do
   command -v "$command_name" >/dev/null 2>&1 || fail "$command_name is required"
 done
 
-source_name=$(PGDATABASE="$source_url" psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command 'SELECT current_database()')
+source_name=$(psql "$source_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command 'SELECT current_database()')
 [ "$source_name" != "$target_name" ] || fail 'drill target must not be the source database'
 
 drill_started_epoch=$(date +%s)
@@ -43,7 +43,7 @@ work_dir=$(mktemp -d "${TMPDIR:-/tmp}/complianceforge-drill.XXXXXX")
 target_created=false
 cleanup() {
   if [ "$target_created" = true ]; then
-    PGDATABASE="$admin_url" psql --no-psqlrc --set ON_ERROR_STOP=1 \
+    psql "$admin_url" --no-psqlrc --set ON_ERROR_STOP=1 \
       --command "DROP DATABASE IF EXISTS \"$target_name\" WITH (FORCE)" >/dev/null || true
   fi
   if [ -d "$work_dir" ]; then
@@ -54,23 +54,23 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 log "creating isolated restore-drill database $target_name"
-PGDATABASE="$admin_url" psql --no-psqlrc --set ON_ERROR_STOP=1 \
+psql "$admin_url" --no-psqlrc --set ON_ERROR_STOP=1 \
   --command "DROP DATABASE IF EXISTS \"$target_name\" WITH (FORCE)" >/dev/null
-PGDATABASE="$admin_url" psql --no-psqlrc --set ON_ERROR_STOP=1 \
+psql "$admin_url" --no-psqlrc --set ON_ERROR_STOP=1 \
   --command "CREATE DATABASE \"$target_name\" TEMPLATE template0" >/dev/null
 target_created=true
 
-resolved_target_name=$(PGDATABASE="$target_url" psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command 'SELECT current_database()')
+resolved_target_name=$(psql "$target_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command 'SELECT current_database()')
 [ "$resolved_target_name" = "$target_name" ] || fail "DRILL_TARGET_DATABASE_URL connects to $resolved_target_name, expected $target_name"
 
-source_schema_state=$(PGDATABASE="$source_url" psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+source_schema_state=$(psql "$source_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
   --command "SELECT version::text || ':' || dirty::text FROM schema_migrations LIMIT 1")
 case "$source_schema_state" in *:false) ;; *) fail "source migration state is not clean: ${source_schema_state:-empty}" ;; esac
 source_schema_version=${source_schema_state%:*}
 case "$source_schema_version" in ''|*[!0-9]*) fail "invalid source schema version: $source_schema_version" ;; esac
 
 count_query="SELECT (SELECT count(*) FROM organizations)::text || ':' || (SELECT count(*) FROM users)::text || ':' || (SELECT count(*) FROM audit_logs)::text || ':' || (SELECT count(*) FROM bootstrap_seed_history)::text"
-source_counts=$(PGDATABASE="$source_url" psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command "$count_query")
+source_counts=$(psql "$source_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command "$count_query")
 
 backup_file=$(
   DATABASE_URL="$source_url" \
@@ -94,10 +94,10 @@ DR_RTO_TARGET_SECONDS="$rto_target" \
 DR_INCIDENT_STARTED_AT_EPOCH="$drill_started_epoch" \
 "$script_dir/postgres-restore.sh" > "$restore_output"
 
-target_schema_state=$(PGDATABASE="$target_url" psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
+target_schema_state=$(psql "$target_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
   --command "SELECT version::text || ':' || dirty::text FROM schema_migrations LIMIT 1")
 [ "$target_schema_state" = "$source_schema_state" ] || fail "migration state differs: source=$source_schema_state target=$target_schema_state"
-target_counts=$(PGDATABASE="$target_url" psql --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command "$count_query")
+target_counts=$(psql "$target_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command "$count_query")
 [ "$target_counts" = "$source_counts" ] || fail "critical row counts differ: source=$source_counts target=$target_counts"
 
 rpo_seconds=$(sed -n 's/^RESTORE_RPO_SECONDS=//p' "$restore_output")

@@ -28,6 +28,7 @@ const (
 	testFrameworkID = "30000000-0000-0000-0000-000000000010"
 	testControlID   = "40000000-0000-0000-0000-000000000010"
 	testPolicyID    = "90000000-0000-0000-0000-000000000010"
+	testAuditID     = "a0000000-0000-0000-0000-000000000010"
 )
 
 type routerAuthService struct {
@@ -37,6 +38,23 @@ type routerAuthService struct {
 type routerEmailSender struct{}
 
 func (routerEmailSender) Send(context.Context, emailpkg.Message) error { return nil }
+
+type routerAPIKeyLimiter struct{}
+
+func (routerAPIKeyLimiter) Allow(context.Context, string, int) (bool, time.Duration, error) {
+	return true, time.Minute, nil
+}
+
+type routerAPIKeyAuthenticator struct {
+	permissions []string
+}
+
+func (a routerAPIKeyAuthenticator) AuthenticateAPIKey(context.Context, string, string) (*authdomain.APIKeyPrincipal, error) {
+	return &authdomain.APIKeyPrincipal{
+		KeyID: "api-key-1", OrganizationID: testOrgID,
+		Permissions: a.permissions, RateLimitPerMinute: 60,
+	}, nil
+}
 
 func (s *routerAuthService) Login(context.Context, authdomain.LoginRequest) (*authdomain.TokenPair, error) {
 	return routerTokenPair(s.user), nil
@@ -104,6 +122,23 @@ func (s routerPolicyService) List(context.Context, string, models.PolicyListFilt
 
 func (routerPolicyService) ListCategories(context.Context, string) ([]models.PolicyCategory, error) {
 	return []models.PolicyCategory{}, nil
+}
+
+type routerAuditService struct {
+	handler.AuditService
+	audit *models.Audit
+}
+
+func (s routerAuditService) Create(context.Context, string, string, models.AuditCreateInput) (*models.Audit, error) {
+	return s.audit, nil
+}
+
+func (s routerAuditService) GetByID(context.Context, string, string) (*models.Audit, error) {
+	return s.audit, nil
+}
+
+func (s routerAuditService) List(context.Context, string, models.AuditListFilter) ([]models.Audit, int, error) {
+	return []models.Audit{*s.audit}, 1, nil
 }
 
 func (s routerRiskService) Create(context.Context, string, models.RiskCreateInput) (*models.Risk, error) {
@@ -238,10 +273,15 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"unconfigured risk handler", func(d *RouterDependencies) { d.Risks = handler.NewRiskHandler(nil) }, "risk handler is required"},
 		{"policy handler", func(d *RouterDependencies) { d.Policies = nil }, "policy handler is required"},
 		{"unconfigured policy handler", func(d *RouterDependencies) { d.Policies = handler.NewPolicyHandler(nil) }, "policy handler is required"},
+		{"audit handler", func(d *RouterDependencies) { d.Audits = nil }, "audit handler is required"},
+		{"unconfigured audit handler", func(d *RouterDependencies) { d.Audits = handler.NewAuditHandler(nil) }, "audit handler is required"},
 		{"notification handler", func(d *RouterDependencies) { d.Notifications = nil }, "notification handler is required"},
 		{"unconfigured notification handler", func(d *RouterDependencies) { d.Notifications = handler.NewNotificationHandler(nil, nil) }, "notification handler is required"},
 		{"integration handler", func(d *RouterDependencies) { d.Integrations = nil }, "integration handler is required"},
 		{"unconfigured integration handler", func(d *RouterDependencies) { d.Integrations = handler.NewIntegrationHandler(nil) }, "integration handler is required"},
+		{"API-key authenticator", func(d *RouterDependencies) { d.APIKeyAuthenticator = nil }, "API-key authenticator is required"},
+		{"API-key rate limiter", func(d *RouterDependencies) { d.APIKeyRateLimiter = nil }, "API-key rate limiter is required"},
+		{"request rate limiter", func(d *RouterDependencies) { d.RequestRateLimiter = nil }, "request rate limiter is required"},
 		{"token validator", func(d *RouterDependencies) { d.AccessTokenValidator = nil }, "access-token validator is required"},
 		{"authorizer", func(d *RouterDependencies) { d.Authorizer = nil }, "authorizer is required"},
 		{"typed nil authorizer", func(d *RouterDependencies) { var authorizer *routerAuthorizer; d.Authorizer = authorizer }, "authorizer is required"},
@@ -370,6 +410,39 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 	}
 }
 
+func TestAutomationRoutesEnforceAPIKeyScopes(t *testing.T) {
+	dependencies := testRouterDependencies()
+	dependencies.APIKeyAuthenticator = routerAPIKeyAuthenticator{permissions: []string{"read:controls"}}
+	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name       string
+		path       string
+		withKey    bool
+		wantStatus int
+	}{
+		{name: "granted resource", path: "/api/v1/automation/controls", withKey: true, wantStatus: http.StatusOK},
+		{name: "missing resource scope", path: "/api/v1/automation/risks", withKey: true, wantStatus: http.StatusForbidden},
+		{name: "missing credential", path: "/api/v1/automation/controls", wantStatus: http.StatusUnauthorized},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			if test.withKey {
+				request.Header.Set("X-API-Key", "cf_live_test")
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status=%d body=%s, want %d", response.Code, response.Body.String(), test.wantStatus)
+			}
+		})
+	}
+}
+
 func TestRouterHealthEndpoints(t *testing.T) {
 	dependencies := testRouterDependencies()
 	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
@@ -437,15 +510,23 @@ func testRouterDependencies() RouterDependencies {
 		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testPolicyID}, OrganizationID: testOrgID},
 		PolicyRef:   "POL-0001", Title: "Security policy", Status: models.PolicyStateDraft,
 	}
+	audit := &models.Audit{
+		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testAuditID}, OrganizationID: testOrgID},
+		AuditRef:    "AUD-0001", Title: "Annual audit", Type: models.AuditTypeInternal, Status: models.AuditStatusPlanned,
+	}
 	return RouterDependencies{
-		Auth:          handler.NewAuthHandler(&routerAuthService{user: user}),
-		Organizations: handler.NewOrganizationHandler(&routerOrganizationService{organization: organization}),
-		Frameworks:    handler.NewFrameworkHandler(routerComplianceService{}),
-		Controls:      handler.NewControlHandler(routerComplianceService{}),
-		Risks:         handler.NewRiskHandler(routerRiskService{risk: risk}),
-		Policies:      handler.NewPolicyHandler(routerPolicyService{policy: policy}),
-		Notifications: handler.NewNotificationHandler(dummyPool, notificationEngine, notificationProtector),
-		Integrations:  handler.NewIntegrationHandler(integrationService),
+		Auth:                handler.NewAuthHandler(&routerAuthService{user: user}),
+		Organizations:       handler.NewOrganizationHandler(&routerOrganizationService{organization: organization}),
+		Frameworks:          handler.NewFrameworkHandler(routerComplianceService{}),
+		Controls:            handler.NewControlHandler(routerComplianceService{}),
+		Risks:               handler.NewRiskHandler(routerRiskService{risk: risk}),
+		Policies:            handler.NewPolicyHandler(routerPolicyService{policy: policy}),
+		Audits:              handler.NewAuditHandler(routerAuditService{audit: audit}),
+		Notifications:       handler.NewNotificationHandler(dummyPool, notificationEngine, notificationProtector),
+		Integrations:        handler.NewIntegrationHandler(integrationService),
+		APIKeyAuthenticator: routerAPIKeyAuthenticator{permissions: []string{"read:controls"}},
+		APIKeyRateLimiter:   routerAPIKeyLimiter{},
+		RequestRateLimiter:  routerAPIKeyLimiter{},
 		AccessTokenValidator: routerTokenValidator{claims: &authdomain.Claims{
 			UserID:         testUserID,
 			OrganizationID: testOrgID,

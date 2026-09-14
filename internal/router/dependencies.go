@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
+	authdomain "github.com/complianceforge/platform/internal/auth"
 	"github.com/complianceforge/platform/internal/authz"
 	"github.com/complianceforge/platform/internal/config"
 	"github.com/complianceforge/platform/internal/database"
@@ -33,8 +34,12 @@ type RouterDependencies struct {
 	Controls             *handler.ControlHandler
 	Risks                *handler.RiskHandler
 	Policies             *handler.PolicyHandler
+	Audits               *handler.AuditHandler
 	Notifications        *handler.NotificationHandler
 	Integrations         *handler.IntegrationHandler
+	APIKeyAuthenticator  authdomain.APIKeyAuthenticator
+	APIKeyRateLimiter    middleware.APIKeyRateLimiter
+	RequestRateLimiter   middleware.RequestRateLimiter
 	AccessTokenValidator middleware.AccessTokenValidator
 	Authorizer           authz.Authorizer
 	HealthCheck          func(context.Context) error
@@ -46,7 +51,6 @@ type RouterDependencies struct {
 // composition slice. Keeping them in the dependency object makes their
 // disabled state explicit instead of creating hidden nil handlers in NewRouter.
 type DomainHandlers struct {
-	Audit            *handler.AuditHandler
 	Incident         *handler.IncidentHandler
 	Vendor           *handler.VendorHandler
 	Dashboard        *handler.DashboardHandler
@@ -93,12 +97,18 @@ var (
 	_ handler.RiskService                     = (*service.RiskService)(nil)
 	_ service.PolicyManagementRepository      = repository.PolicyRepository(nil)
 	_ handler.PolicyService                   = (*service.PolicyService)(nil)
+	_ service.AuditManagementRepository       = repository.AuditRepository(nil)
+	_ handler.AuditService                    = (*service.AuditService)(nil)
 	_ handler.IntegrationSvc                  = (*service.IntegrationService)(nil)
 )
 
 // BuildDependencies composes repositories -> services -> handlers for the
 // release-critical API slice.
-func BuildDependencies(pool *pgxpool.Pool, cfg *config.Config) (RouterDependencies, error) {
+func BuildDependencies(
+	pool *pgxpool.Pool,
+	cfg *config.Config,
+	apiKeyLimiters ...middleware.APIKeyRateLimiter,
+) (RouterDependencies, error) {
 	if pool == nil {
 		return RouterDependencies{}, errors.New("database pool is required")
 	}
@@ -118,6 +128,8 @@ func BuildDependencies(pool *pgxpool.Pool, cfg *config.Config) (RouterDependenci
 	riskService := service.NewRiskService(riskRepo, log.Logger)
 	var policyRepo service.PolicyManagementRepository = repository.NewPolicyRepository(pool)
 	policyService := service.NewPolicyService(policyRepo, log.Logger)
+	var auditRepo service.AuditManagementRepository = repository.NewAuditRepository(pool)
+	auditService := service.NewAuditService(auditRepo, log.Logger)
 	integrationService, err := service.NewIntegrationService(pool, cfg.Encryption.IntegrationKey)
 	if err != nil {
 		return RouterDependencies{}, fmt.Errorf("building integration service: %w", err)
@@ -143,6 +155,14 @@ func BuildDependencies(pool *pgxpool.Pool, cfg *config.Config) (RouterDependenci
 	notificationEngine := service.NewNotificationEngineWithProtector(
 		pool, service.NewEventBus(), emailSender, notificationProtector,
 	)
+	var apiKeyLimiter middleware.APIKeyRateLimiter = unavailableAPIKeyLimiter{}
+	if len(apiKeyLimiters) > 0 && !interfaceIsNil(apiKeyLimiters[0]) {
+		apiKeyLimiter = apiKeyLimiters[0]
+	}
+	var requestLimiter middleware.RequestRateLimiter = unavailableAPIKeyLimiter{}
+	if len(apiKeyLimiters) > 1 && !interfaceIsNil(apiKeyLimiters[1]) {
+		requestLimiter = apiKeyLimiters[1]
+	}
 	authorizer, err := service.NewRBACAuthorizer(pool)
 	if err != nil {
 		return RouterDependencies{}, fmt.Errorf("building authorization service: %w", err)
@@ -155,8 +175,12 @@ func BuildDependencies(pool *pgxpool.Pool, cfg *config.Config) (RouterDependenci
 		Controls:             handler.NewControlHandler(complianceService),
 		Risks:                handler.NewRiskHandler(riskService),
 		Policies:             handler.NewPolicyHandler(policyService),
+		Audits:               handler.NewAuditHandler(auditService),
 		Notifications:        handler.NewNotificationHandler(pool, notificationEngine, notificationProtector),
 		Integrations:         handler.NewIntegrationHandler(integrationService),
+		APIKeyAuthenticator:  integrationService,
+		APIKeyRateLimiter:    apiKeyLimiter,
+		RequestRateLimiter:   requestLimiter,
 		AccessTokenValidator: authService,
 		Authorizer:           authorizer,
 		HealthCheck: func(ctx context.Context) error {
@@ -191,11 +215,23 @@ func (d RouterDependencies) Validate() error {
 	if d.Policies == nil || !d.Policies.Ready() {
 		missing = append(missing, errors.New("policy handler is required"))
 	}
+	if d.Audits == nil || !d.Audits.Ready() {
+		missing = append(missing, errors.New("audit handler is required"))
+	}
 	if d.Notifications == nil || !d.Notifications.Ready() {
 		missing = append(missing, errors.New("notification handler is required"))
 	}
 	if d.Integrations == nil || !d.Integrations.Ready() {
 		missing = append(missing, errors.New("integration handler is required"))
+	}
+	if interfaceIsNil(d.APIKeyAuthenticator) {
+		missing = append(missing, errors.New("API-key authenticator is required"))
+	}
+	if interfaceIsNil(d.APIKeyRateLimiter) {
+		missing = append(missing, errors.New("API-key rate limiter is required"))
+	}
+	if interfaceIsNil(d.RequestRateLimiter) {
+		missing = append(missing, errors.New("request rate limiter is required"))
 	}
 	if d.AccessTokenValidator == nil {
 		missing = append(missing, errors.New("access-token validator is required"))
@@ -210,6 +246,15 @@ func (d RouterDependencies) Validate() error {
 		missing = append(missing, errors.New("tenant middleware is required"))
 	}
 	return errors.Join(missing...)
+}
+
+// unavailableAPIKeyLimiter keeps the legacy NewRouter constructor fail-closed
+// for automation requests. Production composition injects the shared Redis
+// implementation from cmd/api so the connection can be closed gracefully.
+type unavailableAPIKeyLimiter struct{}
+
+func (unavailableAPIKeyLimiter) Allow(context.Context, string, int) (bool, time.Duration, error) {
+	return false, 0, errors.New("API-key rate limiter is unavailable")
 }
 
 func interfaceIsNil(value any) bool {

@@ -25,7 +25,9 @@ export type NavigationIconName =
   | 'BarChart3'
   | 'BookOpen'
   | 'Store'
+  | 'Inbox'
   | 'Bell'
+  | 'PlugZap'
   | 'Settings';
 
 export type PermissionMap = Record<string, readonly string[]>;
@@ -66,6 +68,7 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
       { id: 'workflows', label: 'My Workflows', href: '/workflows', icon: 'GitPullRequest', keywords: ['approvals', 'tasks'] },
       { id: 'calendar', label: 'Compliance Calendar', href: '/calendar', icon: 'CalendarDays', keywords: ['deadlines', 'schedule'] },
       { id: 'activity', label: 'Activity', href: '/activity', icon: 'History', keywords: ['audit trail', 'recent'] },
+      { id: 'notification-center', label: 'Notifications', href: '/notifications', icon: 'Inbox', keywords: ['alerts', 'inbox', 'unread'], permission: { resource: 'user', action: 'read' } },
     ],
   },
   {
@@ -119,7 +122,8 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
     id: 'administration',
     label: 'Administration',
     items: [
-      { id: 'notifications', label: 'Notification Settings', href: '/settings/notifications', icon: 'Bell', keywords: ['alerts', 'preferences'] },
+      { id: 'notifications', label: 'Notification Administration', href: '/settings/notifications', icon: 'Bell', keywords: ['alerts', 'rules', 'channels', 'templates'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
+      { id: 'integrations', label: 'Integration Hub', href: '/settings/integrations', icon: 'PlugZap', keywords: ['connectors', 'sso', 'api keys'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
       { id: 'settings', label: 'Organization Settings', href: '/settings', icon: 'Settings', keywords: ['users', 'roles', 'configuration'], permission: { resource: 'organization', action: 'update' }, fallbackRoles: ['org_admin'] },
     ],
   },
@@ -135,8 +139,11 @@ export function canViewNavigationItem(
   if (context.isSuperAdmin) return true;
 
   if (item.permission && context.permissions !== undefined) {
-    const actions = context.permissions[item.permission.resource] ?? [];
-    return actions.includes(item.permission.action ?? 'read');
+    const actions = context.permissions[item.permission.resource];
+    if (actions !== undefined) {
+      return actions.includes(item.permission.action ?? 'read');
+    }
+    if (!item.fallbackRoles) return false;
   }
 
   if (item.fallbackRoles) {

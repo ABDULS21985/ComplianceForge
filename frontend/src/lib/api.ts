@@ -2,6 +2,33 @@
 // Singleton same-origin BFF client with retry logic and typed endpoint methods
 
 import type { User } from "@/types";
+import type {
+  APIKeyRecord,
+  CreateAPIKeyInput,
+  CreateAPIKeyResponse,
+  DataEnvelope,
+  Integration,
+  IntegrationInput,
+  IntegrationSyncInput,
+  IntegrationSyncLog,
+  IntegrationTestResponse,
+  MarkAllNotificationsReadResponse,
+  MessageResponse,
+  NotificationChannel,
+  NotificationChannelInput,
+  NotificationChannelTestResponse,
+  NotificationPreference,
+  NotificationRecord,
+  NotificationRule,
+  NotificationRuleInput,
+  NotificationTemplate,
+  NotificationTemplateInput,
+  PaginatedDataEnvelope,
+  ResourceCreatedResponse,
+  SSOConfiguration,
+  UpdateNotificationPreferenceInput,
+  UpdateSSOConfigurationInput,
+} from "@/types/enterprise-settings";
 import { SESSION_EXPIRED_EVENT } from "./auth-constants";
 import { fetchWithCsrf, resetCsrfToken } from "./csrf-client";
 import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from "./routes";
@@ -481,22 +508,62 @@ class ApiClient {
 
   notifications = {
     list: (params?: { page?: number; page_size?: number }) =>
-      this.get<unknown>("/notifications", params as Record<string, unknown>),
+      this.get<PaginatedDataEnvelope<NotificationRecord>>(
+        "/notifications/",
+        params as Record<string, unknown>
+      ),
 
     markAsRead: (id: string) =>
-      this.put<void>(`/notifications/${id}/read`),
+      this.put<MessageResponse>(`/notifications/${id}/read`),
 
     markAllAsRead: () =>
-      this.put<void>("/notifications/read-all"),
+      this.put<MarkAllNotificationsReadResponse>("/notifications/read-all"),
 
     unreadCount: () =>
       this.get<{ count: number }>("/notifications/unread-count"),
 
     getPreferences: () =>
-      this.get<unknown>("/notifications/preferences"),
+      this.get<DataEnvelope<NotificationPreference>>("/notifications/preferences"),
 
-    updatePreferences: (prefs: unknown) =>
-      this.put<unknown>("/notifications/preferences", prefs),
+    updatePreferences: (prefs: UpdateNotificationPreferenceInput) =>
+      this.put<DataEnvelope<NotificationPreference>>("/notifications/preferences", prefs),
+  };
+
+  notificationAdmin = {
+    listRules: (params?: { page?: number; page_size?: number }) =>
+      this.get<PaginatedDataEnvelope<NotificationRule>>(
+        "/settings/notification-rules/",
+        params as Record<string, unknown>
+      ),
+    createRule: (data: NotificationRuleInput) =>
+      this.post<ResourceCreatedResponse>("/settings/notification-rules/", data),
+    updateRule: (id: string, data: NotificationRuleInput) =>
+      this.put<MessageResponse>(`/settings/notification-rules/${id}`, data),
+    deleteRule: (id: string) =>
+      this.delete<void>(`/settings/notification-rules/${id}`),
+
+    listTemplates: (params?: { page?: number; page_size?: number }) =>
+      this.get<PaginatedDataEnvelope<NotificationTemplate>>(
+        "/settings/notification-templates/",
+        params as Record<string, unknown>
+      ),
+    createTemplate: (data: NotificationTemplateInput) =>
+      this.post<ResourceCreatedResponse>("/settings/notification-templates/", data),
+    updateTemplate: (id: string, data: NotificationTemplateInput) =>
+      this.put<ResourceCreatedResponse>(`/settings/notification-templates/${id}`, data),
+    deleteTemplate: (id: string) =>
+      this.delete<void>(`/settings/notification-templates/${id}`),
+
+    listChannels: () =>
+      this.get<DataEnvelope<NotificationChannel[]>>("/settings/notification-channels/"),
+    createChannel: (data: NotificationChannelInput) =>
+      this.post<ResourceCreatedResponse>("/settings/notification-channels/", data),
+    updateChannel: (id: string, data: NotificationChannelInput) =>
+      this.put<ResourceCreatedResponse>(`/settings/notification-channels/${id}`, data),
+    deleteChannel: (id: string) =>
+      this.delete<void>(`/settings/notification-channels/${id}`),
+    testChannel: (id: string) =>
+      this.post<NotificationChannelTestResponse>(`/settings/notification-channels/${id}/test`),
   };
 
   // ========================================================================
@@ -693,19 +760,28 @@ class ApiClient {
   // ========================================================================
 
   integrations = {
-    list: () => this.get<any>('/integrations'),
-    create: (data: any) => this.post<any>('/integrations', data),
-    getById: (id: string) => this.get<any>(`/integrations/${id}`),
-    update: (id: string, data: any) => this.put<any>(`/integrations/${id}`, data),
-    remove: (id: string) => this.delete<any>(`/integrations/${id}`),
-    test: (id: string) => this.post<any>(`/integrations/${id}/test`),
-    sync: (id: string, data?: any) => this.post<any>(`/integrations/${id}/sync`, data),
-    logs: (id: string, params?: any) => this.get<any>(`/integrations/${id}/logs`, params),
-    getSSOConfig: () => this.get<any>('/settings/sso'),
-    updateSSOConfig: (data: any) => this.put<any>('/settings/sso', data),
-    listAPIKeys: () => this.get<any>('/settings/api-keys'),
-    createAPIKey: (data: any) => this.post<any>('/settings/api-keys', data),
-    revokeAPIKey: (id: string) => this.delete<any>(`/settings/api-keys/${id}`),
+    list: () => this.get<DataEnvelope<Integration[]>>('/integrations/'),
+    create: (data: IntegrationInput & { integration_type: Integration['integration_type']; name: string; configuration: Record<string, unknown> }) =>
+      this.post<DataEnvelope<Integration>>('/integrations/', data),
+    getById: (id: string) => this.get<DataEnvelope<Integration>>(`/integrations/${id}`),
+    update: (id: string, data: IntegrationInput) =>
+      this.put<MessageResponse>(`/integrations/${id}`, data),
+    remove: (id: string) => this.delete<void>(`/integrations/${id}`),
+    test: (id: string) => this.post<IntegrationTestResponse>(`/integrations/${id}/test`),
+    sync: (id: string, data?: IntegrationSyncInput) =>
+      this.post<DataEnvelope<IntegrationSyncLog>>(`/integrations/${id}/sync`, data),
+    logs: (id: string, params?: { page?: number; page_size?: number }) =>
+      this.get<PaginatedDataEnvelope<IntegrationSyncLog>>(
+        `/integrations/${id}/logs`,
+        params as Record<string, unknown>
+      ),
+    getSSOConfig: () => this.get<DataEnvelope<SSOConfiguration>>('/settings/sso'),
+    updateSSOConfig: (data: UpdateSSOConfigurationInput) =>
+      this.put<MessageResponse>('/settings/sso', data),
+    listAPIKeys: () => this.get<DataEnvelope<APIKeyRecord[]>>('/settings/api-keys'),
+    createAPIKey: (data: CreateAPIKeyInput) =>
+      this.post<CreateAPIKeyResponse>('/settings/api-keys', data),
+    revokeAPIKey: (id: string) => this.delete<void>(`/settings/api-keys/${id}`),
   };
 
   // ========================================================================

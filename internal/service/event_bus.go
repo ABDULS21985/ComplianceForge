@@ -9,8 +9,9 @@ import (
 
 // Event represents a domain event published on the EventBus.
 type Event struct {
-	Type       string                 `json:"type"`        // e.g., "incident.created"
-	Severity   string                 `json:"severity"`    // critical, high, medium, low
+	ID         string                 `json:"id,omitempty"` // stable queue/outbox idempotency identity
+	Type       string                 `json:"type"`         // e.g., "incident.created"
+	Severity   string                 `json:"severity"`     // critical, high, medium, low
 	OrgID      string                 `json:"org_id"`
 	EntityType string                 `json:"entity_type"` // incident, control, policy, etc.
 	EntityID   string                 `json:"entity_id"`

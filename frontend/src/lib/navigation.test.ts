@@ -13,9 +13,9 @@ import {
 describe('enterprise navigation model', () => {
   it('groups every canonical destination and assigns a unique icon', () => {
     expect(NAVIGATION_GROUPS).toHaveLength(6);
-    expect(NAVIGATION_ITEMS).toHaveLength(28);
-    expect(new Set(NAVIGATION_ITEMS.map((item) => item.id)).size).toBe(28);
-    expect(new Set(NAVIGATION_ITEMS.map((item) => item.icon)).size).toBe(28);
+    expect(NAVIGATION_ITEMS).toHaveLength(30);
+    expect(new Set(NAVIGATION_ITEMS.map((item) => item.id)).size).toBe(30);
+    expect(new Set(NAVIGATION_ITEMS.map((item) => item.icon)).size).toBe(30);
   });
 
   it('uses resolved permissions to hide inaccessible domains', () => {
@@ -43,13 +43,29 @@ describe('enterprise navigation model', () => {
       permissions: {},
     });
 
-    expect(groups.flatMap((group) => group.items)).toHaveLength(28);
+    expect(groups.flatMap((group) => group.items)).toHaveLength(30);
   });
 
   it('selects the most specific navigation item for nested settings paths', () => {
     expect(
       getNavigationItemForPath('/settings/notifications/email')?.id
     ).toBe('notifications');
+  });
+
+  it('uses an admin-role fallback only when settings permissions are unavailable', () => {
+    const fallbackIds = getVisibleNavigationGroups({
+      roleSlugs: ['org_admin'],
+      permissions: { organization: ['update'] },
+    }).flatMap((group) => group.items.map((item) => item.id));
+    expect(fallbackIds).toContain('integrations');
+    expect(fallbackIds).toContain('notifications');
+
+    const deniedIds = getVisibleNavigationGroups({
+      roleSlugs: ['org_admin'],
+      permissions: { settings: [] },
+    }).flatMap((group) => group.items.map((item) => item.id));
+    expect(deniedIds).not.toContain('integrations');
+    expect(deniedIds).not.toContain('notifications');
   });
 });
 

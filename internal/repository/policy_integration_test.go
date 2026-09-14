@@ -200,6 +200,18 @@ func TestPolicyRepositoryWithNonSuperuserTenants(t *testing.T) {
 	if err != nil || versionTotal != 2 || len(versions) != 2 || versions[0].Status != "published" || versions[1].Status != "archived" {
 		t.Fatalf("versions=%#v total=%d err=%v", versions, versionTotal, err)
 	}
+	if _, err := repo.CreateApprovalWorkflow(tenantA, orgA, policy.ID, userA, models.PolicySubmitInput{
+		WorkflowType: "retirement", Approvers: []models.PolicyApprovalStepInput{{ApproverUserID: &userA}},
+	}); err != nil {
+		t.Fatalf("creating retirement workflow: %v", err)
+	}
+	if _, err := repo.DecideApproval(tenantA, orgA, policy.ID, userA, "compliance_manager", models.PolicyApprovalDecisionInput{Decision: "approved"}); err != nil {
+		t.Fatalf("approving retirement: %v", err)
+	}
+	policy, err = repo.GetByID(tenantA, orgA, policy.ID)
+	if err != nil || policy.Status != models.PolicyStateRetired || policy.CurrentVersionRecord.Status != "archived" {
+		t.Fatalf("retired policy=%#v err=%v", policy, err)
+	}
 
 	tenantB := setTenant(orgB)
 	if _, err := repo.GetByID(tenantB, orgB, policy.ID); !errors.Is(err, pgx.ErrNoRows) {

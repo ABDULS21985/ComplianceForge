@@ -422,7 +422,8 @@ func (r *policyRepo) CreateApprovalWorkflow(ctx context.Context, orgID, policyID
 		due_date,current_step,total_steps,comments)
 		SELECT p.id,p.current_version_id,$1::uuid,$4,'in_progress',$3::uuid,$5::date,1,$6,$7
 		FROM policies p WHERE p.id=$2::uuid AND p.organization_id=$1::uuid
-		AND p.deleted_at IS NULL AND p.status='draft' AND p.current_version_id IS NOT NULL
+		AND p.deleted_at IS NULL AND p.current_version_id IS NOT NULL
+		AND ((p.status='draft' AND $4::varchar<>'retirement') OR (p.status='published' AND $4::varchar='retirement'))
 		AND NOT EXISTS (SELECT 1 FROM policy_approval_workflows active WHERE active.policy_id=p.id AND active.status IN ('pending','in_progress'))
 		RETURNING `+workflowColumns, orgID, policyID, userID, input.WorkflowType,
 		input.DueDate, len(input.Approvers), input.Comments))
@@ -442,13 +443,15 @@ func (r *policyRepo) CreateApprovalWorkflow(ctx context.Context, orgID, policyID
 			return nil, pgx.ErrNoRows
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE policies SET status='under_review'
-		WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, policyID); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE policy_versions SET status='under_review'
-		WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, w.PolicyVersionID); err != nil {
-		return nil, err
+	if input.WorkflowType != "retirement" {
+		if _, err := tx.Exec(ctx, `UPDATE policies SET status='under_review'
+			WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, policyID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE policy_versions SET status='under_review'
+			WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, w.PolicyVersionID); err != nil {
+			return nil, err
+		}
 	}
 	if err := loadWorkflowSteps(ctx, tx, w); err != nil {
 		return nil, err
@@ -484,17 +487,17 @@ func (r *policyRepo) DecideApproval(ctx context.Context, orgID, policyID, userID
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var workflowID, stepID string
+	var workflowID, stepID, workflowType string
 	var current, total int
 	var versionID *string
-	err = tx.QueryRow(ctx, `SELECT w.id,s.id,w.current_step,w.total_steps,w.policy_version_id
+	err = tx.QueryRow(ctx, `SELECT w.id,s.id,w.current_step,w.total_steps,w.policy_version_id,w.workflow_type
 		FROM policy_approval_workflows w JOIN policy_approval_steps s
 		ON s.workflow_id=w.id AND s.step_number=w.current_step
 		JOIN policies p ON p.id=w.policy_id
 		WHERE w.organization_id=$1::uuid AND w.policy_id=$2::uuid AND w.status='in_progress'
 		AND p.deleted_at IS NULL AND s.status='pending'
 		AND (s.approver_user_id=$3::uuid OR s.delegation_user_id=$3::uuid OR (s.approver_user_id IS NULL AND s.approver_role=$4))
-		FOR UPDATE OF w,s`, orgID, policyID, userID, role).Scan(&workflowID, &stepID, &current, &total, &versionID)
+		FOR UPDATE OF w,s`, orgID, policyID, userID, role).Scan(&workflowID, &stepID, &current, &total, &versionID, &workflowType)
 	if err != nil {
 		return nil, fmt.Errorf("locking approval step: %w", err)
 	}
@@ -508,26 +511,39 @@ func (r *policyRepo) DecideApproval(ctx context.Context, orgID, policyID, userID
 			WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, workflowID); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE policies SET status='draft'
-			WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, policyID); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE policy_versions SET status='draft'
-			WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, versionID); err != nil {
-			return nil, err
+		if workflowType != "retirement" {
+			if _, err := tx.Exec(ctx, `UPDATE policies SET status='draft'
+				WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, policyID); err != nil {
+				return nil, err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE policy_versions SET status='draft'
+				WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, versionID); err != nil {
+				return nil, err
+			}
 		}
 	} else if current == total {
 		if _, err := tx.Exec(ctx, `UPDATE policy_approval_workflows SET status='approved',completed_at=NOW(),current_step=total_steps+1
 			WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, workflowID); err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE policies SET status='approved',approver_user_id=$3::uuid
-			WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, policyID, userID); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE policy_versions SET status='approved'
-			WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, versionID); err != nil {
-			return nil, err
+		if workflowType == "retirement" {
+			if _, err := tx.Exec(ctx, `UPDATE policies SET status='retired',approver_user_id=$3::uuid
+				WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, policyID, userID); err != nil {
+				return nil, err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE policy_versions SET status='archived'
+				WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, versionID); err != nil {
+				return nil, err
+			}
+		} else {
+			if _, err := tx.Exec(ctx, `UPDATE policies SET status='approved',approver_user_id=$3::uuid
+				WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, policyID, userID); err != nil {
+				return nil, err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE policy_versions SET status='approved'
+				WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, versionID); err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		if _, err := tx.Exec(ctx, `UPDATE policy_approval_workflows SET current_step=current_step+1 WHERE id=$2::uuid AND organization_id=$1::uuid`, orgID, workflowID); err != nil {

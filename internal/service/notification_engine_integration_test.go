@@ -71,6 +71,7 @@ func TestNotificationEngineAgainstMigratedPostgres(t *testing.T) {
 	sender := &recordingEmailSender{}
 	engine := NewNotificationEngine(pool, NewEventBus(), sender)
 	event := Event{
+		ID:         uuid.NewString(),
 		Type:       "risk.escalated",
 		Severity:   "critical",
 		OrgID:      orgA,
@@ -85,6 +86,17 @@ func TestNotificationEngineAgainstMigratedPostgres(t *testing.T) {
 	}
 	if err := engine.ProcessEvent(ctx, event); err != nil {
 		t.Fatalf("ProcessEvent() error = %v", err)
+	}
+	if len(sender.messages) != 0 {
+		t.Fatalf("ProcessEvent synchronously delivered %d messages, want durable enqueue only", len(sender.messages))
+	}
+	deliveryConfig := NotificationDeliveryConfig{
+		OwnerID: uuid.NewString(), TenantBatch: 10, ClaimBatch: 10,
+		LeaseDuration: time.Minute, RetryBaseDelay: time.Second,
+		RetryMaxDelay: time.Minute, PollInterval: time.Second,
+	}
+	if err := engine.RunDeliveryCycle(ctx, deliveryConfig); err != nil {
+		t.Fatalf("RunDeliveryCycle() error = %v", err)
 	}
 	if len(sender.messages) != 1 {
 		t.Fatalf("delivered messages = %d, want 1", len(sender.messages))

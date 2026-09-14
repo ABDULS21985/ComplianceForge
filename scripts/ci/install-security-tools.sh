@@ -8,11 +8,13 @@ TRIVY_VERSION=0.74.0
 SYFT_VERSION=1.51.1
 GITLEAKS_VERSION=8.30.1
 GOSEC_VERSION=2.28.0
-GOVULNCHECK_VERSION=v1.1.4
+GOVULNCHECK_VERSION=v1.8.0
+ACTIONLINT_VERSION=1.7.12
+SHELLCHECK_VERSION=0.11.0
 
 tools_dir=${TOOLS_DIR:-${RUNNER_TEMP:-.cache}/complianceforge-security-tools/bin}
 mkdir -p "$tools_dir"
-tools_dir=$(CDPATH= cd -- "$tools_dir" && pwd)
+tools_dir=$(CDPATH='' cd -- "$tools_dir" && pwd)
 
 os=$(uname -s)
 arch=$(uname -m)
@@ -27,6 +29,10 @@ case "$os/$arch" in
     gitleaks_sha=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
     gosec_asset="gosec_${GOSEC_VERSION}_linux_amd64.tar.gz"
     gosec_sha=d7882e505b1ff345d458bf0e893eec8019bc849f861ad73a212869540dd505ff
+    actionlint_asset="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+    actionlint_sha=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    shellcheck_asset="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
+    shellcheck_sha=b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
     ;;
   Linux/aarch64|Linux/arm64)
     trivy_asset="trivy_${TRIVY_VERSION}_Linux-ARM64.tar.gz"
@@ -37,6 +43,10 @@ case "$os/$arch" in
     gitleaks_sha=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080
     gosec_asset="gosec_${GOSEC_VERSION}_linux_arm64.tar.gz"
     gosec_sha=63259681b6e4b9e7a24d4e187b485e75d3844d28d512b0c97dc831e51d374720
+    actionlint_asset="actionlint_${ACTIONLINT_VERSION}_linux_arm64.tar.gz"
+    actionlint_sha=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6
+    shellcheck_asset="shellcheck-v${SHELLCHECK_VERSION}.linux.aarch64.tar.gz"
+    shellcheck_sha=68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc
     ;;
   Darwin/x86_64|Darwin/amd64)
     trivy_asset="trivy_${TRIVY_VERSION}_macOS-64bit.tar.gz"
@@ -47,6 +57,10 @@ case "$os/$arch" in
     gitleaks_sha=dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709
     gosec_asset="gosec_${GOSEC_VERSION}_darwin_amd64.tar.gz"
     gosec_sha=ad23af3a6bfef8112a2da386acd61ede1374c8d022c06d8ef130ccf9748311d4
+    actionlint_asset="actionlint_${ACTIONLINT_VERSION}_darwin_amd64.tar.gz"
+    actionlint_sha=5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644
+    shellcheck_asset="shellcheck-v${SHELLCHECK_VERSION}.darwin.x86_64.tar.gz"
+    shellcheck_sha=c2c15e08df0e8fbc374c335b230a7ee958c313fa5714817a59aa59f1aa594f51
     ;;
   Darwin/arm64|Darwin/aarch64)
     trivy_asset="trivy_${TRIVY_VERSION}_macOS-ARM64.tar.gz"
@@ -57,6 +71,10 @@ case "$os/$arch" in
     gitleaks_sha=b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5
     gosec_asset="gosec_${GOSEC_VERSION}_darwin_arm64.tar.gz"
     gosec_sha=6c4993a0ab5e3007d66c87cbcb4e3948f8000971f8eeaf3ac269cbc87a603ba4
+    actionlint_asset="actionlint_${ACTIONLINT_VERSION}_darwin_arm64.tar.gz"
+    actionlint_sha=aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f
+    shellcheck_asset="shellcheck-v${SHELLCHECK_VERSION}.darwin.aarch64.tar.gz"
+    shellcheck_sha=339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f
     ;;
   *)
     printf 'unsupported security-tool platform: %s/%s\n' "$os" "$arch" >&2
@@ -118,10 +136,16 @@ install_archive gitleaks \
 install_archive gosec \
   "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/${gosec_asset}" \
   "$gosec_sha"
+install_archive actionlint \
+  "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${actionlint_asset}" \
+  "$actionlint_sha"
+install_archive shellcheck \
+  "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/${shellcheck_asset}" \
+  "$shellcheck_sha"
 
 # govulncheck has no binary release archive. A fixed module version is built
 # under Go's checksum-database verification without modifying this module.
-GOBIN="$tools_dir" GOTOOLCHAIN=local go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+GOBIN="$tools_dir" GOTOOLCHAIN=go1.26.8 go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
 
 if [ -n "${GITHUB_PATH:-}" ]; then
   printf '%s\n' "$tools_dir" >> "$GITHUB_PATH"
@@ -133,3 +157,5 @@ printf 'Installed pinned security tools in %s\n' "$tools_dir"
 "$tools_dir/gitleaks" version
 "$tools_dir/gosec" -version
 "$tools_dir/govulncheck" -version
+"$tools_dir/actionlint" -version
+"$tools_dir/shellcheck" --version

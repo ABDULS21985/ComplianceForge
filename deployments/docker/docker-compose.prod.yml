@@ -34,11 +34,13 @@ services:
       dockerfile: deployments/docker/Dockerfile.api
       target: api
     image: ${API_IMAGE:-complianceforge-api}:${IMAGE_TAG:?IMAGE_TAG is required}
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      API_TRUST_PROXY_HEADERS: "true"
     expose:
       - "8080"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health/ready"]
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "3", "--output", "/dev/null", "http://127.0.0.1:8080/health/ready"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -51,6 +53,9 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    pids_limit: 256
     networks:
       - complianceforge
 
@@ -69,6 +74,9 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    pids_limit: 256
     networks:
       - complianceforge
 
@@ -80,6 +88,8 @@ services:
     environment:
       NODE_ENV: production
       API_INTERNAL_URL: http://api:8080/api/v1
+      APP_ENV: production
+      TRUST_PROXY_HEADERS: "true"
     expose:
       - "3000"
     read_only: true
@@ -90,11 +100,14 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    pids_limit: 256
     networks:
       - complianceforge
 
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.30.4-alpine@sha256:dc5069ad14f19660b141b21236140b91656bf89bbc3e2417c70ae650cd66104c
     ports:
       - "80:80"
       - "443:443"
@@ -106,7 +119,12 @@ services:
       api:
         condition: service_healthy
       frontend:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     read_only: true
     tmpfs:
       - /var/cache/nginx:size=64m
@@ -119,6 +137,9 @@ services:
     cap_add:
       - NET_BIND_SERVICE
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    pids_limit: 256
     networks:
       - complianceforge
 

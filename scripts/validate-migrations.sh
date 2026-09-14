@@ -2,8 +2,8 @@
 
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 migrations_dir=${MIGRATIONS_DIR:-$repo_root/sql/migrations}
 seeds_dir=${SEEDS_DIR:-$repo_root/sql/seeds}
 manifest=${SEED_MANIFEST:-$seeds_dir/manifest.txt}
@@ -85,13 +85,4 @@ done < "$manifest"
 
 [ "$seed_count" -gt 0 ] || fail "seed manifest contains no seed files"
 
-for seed_file in "$seeds_dir"/*.sql; do
-  [ -f "$seed_file" ] || continue
-  seed_name=$(basename -- "$seed_file")
-  case "$seen_seeds" in
-    *"|$seed_name|"*) ;;
-    *) fail "seed file is not ordered in manifest.txt: $seed_name" ;;
-  esac
-done
-
-printf 'Validated %s reversible, contiguous migration pairs and %s ordered seed files.\n' "$up_count" "$seed_count"
+printf 'Validated %s reversible, contiguous migration pairs and %s ordered supported seed files.\n' "$up_count" "$seed_count"

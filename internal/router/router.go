@@ -41,10 +41,10 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 	// --- Global middleware chain ---
 	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
+	r.Use(middleware.TrustedProxyHeaders(cfg.App.TrustProxyHeaders))
 	r.Use(middleware.LoggingMiddleware)
 	r.Use(middleware.CORSMiddleware(cfg.CORS.AllowedOrigins))
-	r.Use(middleware.RateLimitMiddleware(cfg.RateLimit.RPS))
+	r.Use(middleware.DistributedRateLimitMiddleware(dependencies.RequestRateLimiter, cfg.RateLimit.RPS))
 	r.Use(chimw.Recoverer)
 
 	// --- Health checks (no auth required) ---
@@ -77,7 +77,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	controlHandler := dependencies.Controls
 	riskHandler := dependencies.Risks
 	policyHandler := dependencies.Policies
-	auditHandler := dependencies.Domains.Audit
+	auditHandler := dependencies.Audits
 	incidentHandler := dependencies.Domains.Incident
 	vendorHandler := dependencies.Domains.Vendor
 	dashboardHandler := dependencies.Domains.Dashboard
@@ -157,6 +157,43 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Get("/{token}/meetings/{id}/pack", boardPortalHandler.GetMeetingPack)
 			r.Get("/{token}/decisions", boardPortalHandler.GetDecisions)
 		}
+	})
+
+	// Programmatic read API. API keys use their own credential, tenant, rate
+	// limit, and exact-scope middleware rather than inheriting browser roles.
+	r.Route("/api/v1/automation", func(r chi.Router) {
+		r.Use(middleware.APIKeyAuth(dependencies.APIKeyAuthenticator, dependencies.APIKeyRateLimiter))
+		r.Use(dependencies.TenantMiddleware)
+
+		r.Route("/frameworks", func(r chi.Router) {
+			r.With(middleware.RequireAPIKeyPermission("read", "frameworks")).Get("/", frameworkHandler.List)
+			r.With(middleware.RequireAPIKeyPermission("read", "frameworks")).Get("/{id}", frameworkHandler.GetByID)
+			r.With(middleware.RequireAPIKeyPermission("read", "controls")).Get("/{id}/controls", frameworkHandler.GetControls)
+		})
+		r.Route("/controls", func(r chi.Router) {
+			r.With(middleware.RequireAPIKeyPermission("read", "controls")).Get("/", controlHandler.List)
+			r.With(middleware.RequireAPIKeyPermission("read", "controls")).Get("/{id}", controlHandler.GetByID)
+			r.With(middleware.RequireAPIKeyPermission("read", "controls")).Get("/{id}/evidence", controlHandler.ListEvidence)
+		})
+		r.Route("/risks", func(r chi.Router) {
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/", riskHandler.List)
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/matrix", riskHandler.GetMatrix)
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/heatmap", riskHandler.GetHeatmap)
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/categories", riskHandler.ListCategories)
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/appetite", riskHandler.ListAppetite)
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/{id}", riskHandler.GetByID)
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/{id}/assessments", riskHandler.ListAssessments)
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/{id}/treatments", riskHandler.ListTreatments)
+			r.With(middleware.RequireAPIKeyPermission("read", "risks")).Get("/{id}/indicators", riskHandler.ListIndicators)
+		})
+		r.Route("/policies", func(r chi.Router) {
+			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/", policyHandler.List)
+			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/categories", policyHandler.ListCategories)
+			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/due-for-review", policyHandler.GetDueForReview)
+			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/{id}", policyHandler.GetByID)
+			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/{id}/versions", policyHandler.ListVersions)
+			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/{id}/reviews", policyHandler.ListReviews)
+		})
 	})
 
 	// --- Protected routes (authentication + tenant middleware) ---
@@ -253,17 +290,23 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Audits
 		r.Route("/audits", func(r chi.Router) {
-			if auditHandler != nil {
-				r.Post("/", auditHandler.Create)
-				r.Get("/", auditHandler.List)
-				r.Get("/{id}", auditHandler.GetByID)
-				r.Put("/{id}", auditHandler.Update)
-				r.Delete("/{id}", auditHandler.Delete)
-				r.Post("/{id}/findings", auditHandler.CreateFinding)
-				r.Get("/{id}/findings", auditHandler.GetFindings)
-				r.Put("/{id}/start", auditHandler.Start)
-				r.Put("/{id}/complete", auditHandler.Complete)
-			}
+			r.Post("/", auditHandler.Create)
+			r.Get("/", auditHandler.List)
+			r.Get("/{id}", auditHandler.GetByID)
+			r.Patch("/{id}", auditHandler.Update)
+			r.Put("/{id}", auditHandler.Update)
+			r.Delete("/{id}", auditHandler.Delete)
+			r.Put("/{id}/start", auditHandler.Start)
+			r.Put("/{id}/complete", auditHandler.Complete)
+			r.Put("/{id}/close", auditHandler.Close)
+			r.Put("/{id}/cancel", auditHandler.Cancel)
+			r.Post("/{id}/findings", auditHandler.CreateFinding)
+			r.Get("/{id}/findings", auditHandler.ListFindings)
+			r.Get("/{id}/findings/stats", auditHandler.FindingStats)
+			r.Get("/{id}/findings/{findingID}", auditHandler.GetFinding)
+			r.Patch("/{id}/findings/{findingID}", auditHandler.UpdateFinding)
+			r.Put("/{id}/findings/{findingID}", auditHandler.UpdateFinding)
+			r.Delete("/{id}/findings/{findingID}", auditHandler.DeleteFinding)
 		})
 
 		// Incidents

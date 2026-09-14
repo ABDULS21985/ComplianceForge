@@ -36,16 +36,17 @@ const (
 )
 
 type workerComponents struct {
-	notifications *service.NotificationEngine
-	analytics     *workerpkg.AnalyticsScheduler
-	calendar      *workerpkg.CalendarWorker
-	dsr           *workerpkg.DSRScheduler
-	evidence      *workerpkg.EvidenceScheduler
-	exceptions    *workerpkg.ExceptionScheduler
-	regulatory    *workerpkg.RegulatoryScheduler
-	reports       *workerpkg.ReportScheduler
-	search        *workerpkg.SearchIndexer
-	workflows     *workerpkg.WorkflowScheduler
+	notifications        *service.NotificationEngine
+	notificationDelivery service.NotificationDeliveryConfig
+	analytics            *workerpkg.AnalyticsScheduler
+	calendar             *workerpkg.CalendarWorker
+	dsr                  *workerpkg.DSRScheduler
+	evidence             *workerpkg.EvidenceScheduler
+	exceptions           *workerpkg.ExceptionScheduler
+	regulatory           *workerpkg.RegulatoryScheduler
+	reports              *workerpkg.ReportScheduler
+	search               *workerpkg.SearchIndexer
+	workflows            *workerpkg.WorkflowScheduler
 }
 
 type scheduledTask struct {
@@ -109,6 +110,10 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 	instanceID, err := workerInstanceID()
 	if err != nil {
 		return err
+	}
+	notificationDelivery, err := service.NotificationDeliveryConfigFromEnvironment(instanceID)
+	if err != nil {
+		return fmt.Errorf("load notification delivery configuration: %w", err)
 	}
 	queueConfig, err := queuepkg.ConfigFromEnvironment(cfg.RabbitMQ.URL)
 	if err != nil {
@@ -174,16 +179,17 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 	defer eventBus.Close()
 	eventStream := eventBus.Subscribe("*")
 	components := workerComponents{
-		notifications: service.NewNotificationEngineWithProtector(pool, eventBus, emailSender, notificationProtector),
-		analytics:     workerpkg.NewAnalyticsScheduler(pool),
-		calendar:      workerpkg.NewCalendarWorker(pool),
-		dsr:           workerpkg.NewDSRScheduler(pool),
-		evidence:      workerpkg.NewEvidenceScheduler(pool, eventBus),
-		exceptions:    workerpkg.NewExceptionScheduler(pool, eventBus),
-		regulatory:    workerpkg.NewRegulatoryScheduler(pool, eventBus),
-		reports:       workerpkg.NewReportScheduler(pool),
-		search:        workerpkg.NewSearchIndexer(pool),
-		workflows:     workerpkg.NewWorkflowScheduler(pool),
+		notifications:        service.NewNotificationEngineWithProtector(pool, eventBus, emailSender, notificationProtector),
+		notificationDelivery: notificationDelivery,
+		analytics:            workerpkg.NewAnalyticsScheduler(pool),
+		calendar:             workerpkg.NewCalendarWorker(pool),
+		dsr:                  workerpkg.NewDSRScheduler(pool),
+		evidence:             workerpkg.NewEvidenceScheduler(pool, eventBus),
+		exceptions:           workerpkg.NewExceptionScheduler(pool, eventBus),
+		regulatory:           workerpkg.NewRegulatoryScheduler(pool, eventBus),
+		reports:              workerpkg.NewReportScheduler(pool),
+		search:               workerpkg.NewSearchIndexer(pool),
+		workflows:            workerpkg.NewWorkflowScheduler(pool),
 	}
 	dispatcher := queuepkg.NewDispatcher()
 	if err := registerJobHandlers(dispatcher, components, coordinator); err != nil {
@@ -297,8 +303,15 @@ func registerJobHandlers(dispatcher *queuepkg.Dispatcher, components workerCompo
 			if strings.TrimSpace(event.Type) == "" {
 				return queuepkg.Permanent(fmt.Errorf("notification event type is required"))
 			}
+			if event.ID != "" && event.ID != envelope.ID {
+				return queuepkg.Permanent(fmt.Errorf("notification event ID does not match envelope"))
+			}
+			event.ID = envelope.ID
 			return components.notifications.ProcessEvent(ctx, event)
 		},
+		"scheduler.notifications.delivery": systemJob("scheduler.notifications.delivery", runner, func(ctx context.Context) error {
+			return components.notifications.RunDeliveryCycle(ctx, components.notificationDelivery)
+		}),
 		"search.index": func(ctx context.Context, envelope queuepkg.Envelope) error {
 			var job searchIndexJob
 			if err := decodePayload(envelope.Payload, &job); err != nil {
@@ -373,6 +386,9 @@ func validateSearchIndexJob(envelope queuepkg.Envelope, job searchIndexJob) (str
 
 func scheduledTasks(components workerComponents) []scheduledTask {
 	return []scheduledTask{
+		{key: "scheduler.notifications.delivery", name: "notification delivery", interval: components.notificationDelivery.PollInterval, runOnBoot: true, run: func(ctx context.Context) error {
+			return components.notifications.RunDeliveryCycle(ctx, components.notificationDelivery)
+		}},
 		{key: "scheduler.reports", name: "report schedules", interval: time.Minute, runOnBoot: true, run: components.reports.Run},
 		{key: "scheduler.workflows", name: "workflow SLAs", interval: 5 * time.Minute, runOnBoot: true, run: components.workflows.Run},
 		{key: "scheduler.regulatory", name: "regulatory deadlines", interval: 15 * time.Minute, runOnBoot: true, run: components.regulatory.Run},

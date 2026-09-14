@@ -34,6 +34,7 @@ type policyRepositoryStub struct {
 	decisionInput     models.PolicyApprovalDecisionInput
 	exceptionDecision models.PolicyExceptionDecisionInput
 	attestationInput  models.PolicyAttestationInput
+	submitInput       models.PolicySubmitInput
 	updateCalls       int
 }
 
@@ -63,6 +64,14 @@ func (s *policyRepositoryStub) Update(_ context.Context, _ string, policy *model
 func (s *policyRepositoryStub) GetActiveApprovalWorkflow(context.Context, string, string) (*models.PolicyApprovalWorkflow, error) {
 	if s.workflow == nil {
 		return nil, pgx.ErrNoRows
+	}
+	return s.workflow, nil
+}
+
+func (s *policyRepositoryStub) CreateApprovalWorkflow(_ context.Context, _, _, _ string, input models.PolicySubmitInput) (*models.PolicyApprovalWorkflow, error) {
+	s.submitInput = input
+	if s.workflow == nil {
+		s.workflow = &models.PolicyApprovalWorkflow{WorkflowType: input.WorkflowType, Status: "in_progress"}
 	}
 	return s.workflow, nil
 }
@@ -199,6 +208,17 @@ func TestPolicyApprovalDecisionRequiresCurrentAssignee(t *testing.T) {
 	}
 }
 
+func TestPolicyRetirementUsesApprovalWorkflow(t *testing.T) {
+	repo := &policyRepositoryStub{policy: testPolicy(models.PolicyStatePublished)}
+	service := newPolicyServiceForTest(repo)
+	workflow, err := service.SubmitForApproval(context.Background(), policyTestOrgID, policyTestID, policyTestUserID, models.PolicySubmitInput{
+		WorkflowType: "retirement", Approvers: []models.PolicyApprovalStepInput{{ApproverUserID: stringPointerForPolicyTest(policyTestApproverID)}},
+	})
+	if err != nil || workflow.WorkflowType != "retirement" || repo.submitInput.WorkflowType != "retirement" {
+		t.Fatalf("workflow=%#v input=%#v err=%v", workflow, repo.submitInput, err)
+	}
+}
+
 func TestPolicyAcknowledgementDefaultsAndValidatesDecline(t *testing.T) {
 	repo := &policyRepositoryStub{policy: testPolicy(models.PolicyStatePublished)}
 	service := newPolicyServiceForTest(repo)
@@ -236,3 +256,5 @@ func TestPolicyReviewAndExceptionTransitions(t *testing.T) {
 		t.Fatalf("exception=%#v input=%#v err=%v", exception, repo.exceptionDecision, err)
 	}
 }
+
+func stringPointerForPolicyTest(value string) *string { return &value }
