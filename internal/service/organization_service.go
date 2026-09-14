@@ -11,17 +11,17 @@ import (
 
 var (
 	ErrOrganizationNotFound = errors.New("organization not found")
-	ErrOrganizationExists   = errors.New("organization with this domain already exists")
+	ErrOrganizationExists   = errors.New("organization with this slug already exists")
 )
 
 // OrganizationRepository defines the data access interface for organizations.
 type OrganizationRepository interface {
 	Create(ctx context.Context, org *models.Organization) error
 	GetByID(ctx context.Context, id string) (*models.Organization, error)
-	GetByDomain(ctx context.Context, domain string) (*models.Organization, error)
+	GetBySlug(ctx context.Context, slug string) (*models.Organization, error)
 	Update(ctx context.Context, org *models.Organization) error
 	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, page, pageSize int) ([]models.Organization, int, error)
+	List(ctx context.Context, pagination models.PaginationRequest) ([]models.Organization, int, error)
 }
 
 // OrganizationService handles business logic for organization management.
@@ -40,22 +40,24 @@ func NewOrganizationService(orgRepo OrganizationRepository, logger zerolog.Logge
 
 // Create validates and persists a new organization.
 func (s *OrganizationService) Create(ctx context.Context, org *models.Organization) error {
-	existing, err := s.orgRepo.GetByDomain(ctx, org.Domain)
+	existing, err := s.orgRepo.GetBySlug(ctx, org.Slug)
 	if err == nil && existing != nil {
 		return ErrOrganizationExists
 	}
 
-	if org.SubscriptionTier == "" {
-		org.SubscriptionTier = "free"
+	if org.Tier == "" {
+		org.Tier = "starter"
 	}
-	org.IsActive = true
+	if org.Status == "" {
+		org.Status = "trial"
+	}
 
 	if err := s.orgRepo.Create(ctx, org); err != nil {
-		s.logger.Error().Err(err).Str("domain", org.Domain).Msg("failed to create organization")
+		s.logger.Error().Err(err).Str("slug", org.Slug).Msg("failed to create organization")
 		return err
 	}
 
-	s.logger.Info().Str("org_id", org.ID).Str("domain", org.Domain).Msg("organization created")
+	s.logger.Info().Str("org_id", org.ID).Str("slug", org.Slug).Msg("organization created")
 	return nil
 }
 
@@ -76,9 +78,9 @@ func (s *OrganizationService) Update(ctx context.Context, org *models.Organizati
 		return ErrOrganizationNotFound
 	}
 
-	// Prevent domain collision with another org.
-	if org.Domain != existing.Domain {
-		dup, err := s.orgRepo.GetByDomain(ctx, org.Domain)
+	// Prevent slug collision with another organization.
+	if org.Slug != existing.Slug {
+		dup, err := s.orgRepo.GetBySlug(ctx, org.Slug)
 		if err == nil && dup != nil && dup.ID != org.ID {
 			return ErrOrganizationExists
 		}
@@ -109,15 +111,15 @@ func (s *OrganizationService) Delete(ctx context.Context, id string) error {
 }
 
 // List returns a paginated list of organizations.
-func (s *OrganizationService) List(ctx context.Context, page, pageSize int) ([]models.Organization, int, error) {
-	if page < 1 {
-		page = 1
+func (s *OrganizationService) List(ctx context.Context, pagination models.PaginationRequest) ([]models.Organization, int, error) {
+	if pagination.Page < 1 {
+		pagination.Page = 1
 	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
+	if pagination.PageSize < 1 || pagination.PageSize > 100 {
+		pagination.PageSize = 20
 	}
 
-	orgs, total, err := s.orgRepo.List(ctx, page, pageSize)
+	orgs, total, err := s.orgRepo.List(ctx, pagination)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("failed to list organizations")
 		return nil, 0, err

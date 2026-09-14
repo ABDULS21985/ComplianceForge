@@ -1,6 +1,8 @@
 -- Rollback Migration 001: Drop all enum types and extensions.
 -- Order matters: enums first (they may be referenced by columns), then extensions.
 
+DROP TABLE IF EXISTS bootstrap_seed_history;
+
 DROP TYPE IF EXISTS subscription_status CASCADE;
 DROP TYPE IF EXISTS mfa_method CASCADE;
 DROP TYPE IF EXISTS permission_action CASCADE;

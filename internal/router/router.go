@@ -1,22 +1,42 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/complianceforge/platform/internal/config"
-	"github.com/complianceforge/platform/internal/handler"
 	"github.com/complianceforge/platform/internal/middleware"
 )
 
 // NewRouter creates the Chi router with all middleware, route groups, and handler
-// bindings. It accepts the database pool and application config, wires up
-// repositories -> services -> handlers, and returns the fully configured router.
-func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
+// bindings. Required dependencies are composed and validated before a handler
+// is returned, so a process cannot start with missing authentication routes.
+func NewRouter(pool *pgxpool.Pool, cfg *config.Config) (http.Handler, error) {
+	dependencies, err := BuildDependencies(pool, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("building API dependencies: %w", err)
+	}
+	return NewRouterWithDependencies(cfg, dependencies)
+}
+
+// NewRouterWithDependencies builds the HTTP surface from explicit
+// dependencies. It is exported to support focused composition tests.
+func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependencies) (http.Handler, error) {
+	if cfg == nil {
+		return nil, errors.New("router configuration is required")
+	}
+	if err := dependencies.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid router dependencies: %w", err)
+	}
+
 	r := chi.NewRouter()
 
 	// --- Global middleware chain ---
@@ -27,79 +47,77 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r.Use(middleware.RateLimitMiddleware(cfg.RateLimit.RPS))
 	r.Use(chimw.Recoverer)
 
-	// --- Health check (no auth required) ---
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+	// --- Health checks (no auth required) ---
+	live := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	}
+	r.Get("/health", live)
+	r.Get("/health/live", live)
+	r.Get("/health/ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := dependencies.HealthCheck(ctx); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "unready"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	})
 
-	// --- Create handlers ---
-	// In a production codebase the repositories and services would be
-	// instantiated here and injected into each handler constructor.
-	// For now we accept the service interfaces defined in the handler package.
-	// The concrete wiring will be added once service implementations exist.
-
-	var (
-		authHandler             *handler.AuthHandler
-		organizationHandler     *handler.OrganizationHandler
-		frameworkHandler        *handler.FrameworkHandler
-		controlHandler          *handler.ControlHandler
-		riskHandler             *handler.RiskHandler
-		policyHandler           *handler.PolicyHandler
-		auditHandler            *handler.AuditHandler
-		incidentHandler         *handler.IncidentHandler
-		vendorHandler           *handler.VendorHandler
-		dashboardHandler        *handler.DashboardHandler
-		reportHandler           *handler.ReportHandler
-		notificationHandler     *handler.NotificationHandler
-		dsrHandler              *handler.DSRHandler
-		nis2Handler             *handler.NIS2Handler
-		monitoringHandler       *handler.MonitoringHandler
-		workflowHandler         *handler.WorkflowHandler
-		integrationHandler      *handler.IntegrationHandler
-		onboardingHandler       *handler.OnboardingHandler
-		accessHandler           *handler.AccessHandler
-		remediationHandler      *handler.RemediationHandler
-		marketplaceHandler      *handler.MarketplaceHandler
-		regulatoryHandler       *handler.RegulatoryHandler
-		biaHandler              *handler.BIAHandler
-		analyticsHandler        *handler.AnalyticsHandler
-		exceptionHandler        *handler.ExceptionHandler
-		evidenceTemplateHandler *handler.EvidenceTemplateHandler
-		questionnaireHandler    *handler.QuestionnaireHandler
-		vendorPortalHandler     *handler.VendorPortalHandler
-		ropaHandler             *handler.ROPAHandler
-		boardHandler            *handler.BoardHandler
-		boardPortalHandler      *handler.BoardPortalHandler
-		calendarHandler         *handler.CalendarHandler
-		searchHandler           *handler.SearchHandler
-		collaborationHandler    *handler.CollaborationHandler
-		mobileHandler           *handler.MobileHandler
-		brandingHandler         *handler.BrandingHandler
-	)
-
-	// Wire repositories, services, and handlers when implementations are available.
-	// Example (uncomment when service layer is implemented):
-	//
-	// orgRepo := repository.NewOrganizationRepository(pool)
-	// orgService := service.NewOrganizationService(orgRepo)
-	// organizationHandler = handler.NewOrganizationHandler(orgService)
-	//
-	// authService := service.NewAuthService(pool, cfg)
-	// authHandler = handler.NewAuthHandler(authService)
-	//
-	// ... etc for each domain
-
-	_ = pool // used by repositories once wired
+	// Required handlers are validated above. Remaining domain modules are
+	// explicitly optional in this vertical slice.
+	authHandler := dependencies.Auth
+	organizationHandler := dependencies.Organizations
+	frameworkHandler := dependencies.Domains.Framework
+	controlHandler := dependencies.Domains.Control
+	riskHandler := dependencies.Domains.Risk
+	policyHandler := dependencies.Domains.Policy
+	auditHandler := dependencies.Domains.Audit
+	incidentHandler := dependencies.Domains.Incident
+	vendorHandler := dependencies.Domains.Vendor
+	dashboardHandler := dependencies.Domains.Dashboard
+	reportHandler := dependencies.Domains.Report
+	notificationHandler := dependencies.Domains.Notification
+	dsrHandler := dependencies.Domains.DSR
+	nis2Handler := dependencies.Domains.NIS2
+	monitoringHandler := dependencies.Domains.Monitoring
+	workflowHandler := dependencies.Domains.Workflow
+	integrationHandler := dependencies.Domains.Integration
+	onboardingHandler := dependencies.Domains.Onboarding
+	accessHandler := dependencies.Domains.Access
+	remediationHandler := dependencies.Domains.Remediation
+	marketplaceHandler := dependencies.Domains.Marketplace
+	regulatoryHandler := dependencies.Domains.Regulatory
+	biaHandler := dependencies.Domains.BIA
+	analyticsHandler := dependencies.Domains.Analytics
+	exceptionHandler := dependencies.Domains.Exception
+	evidenceTemplateHandler := dependencies.Domains.EvidenceTemplate
+	questionnaireHandler := dependencies.Domains.Questionnaire
+	vendorPortalHandler := dependencies.Domains.VendorPortal
+	ropaHandler := dependencies.Domains.ROPA
+	boardHandler := dependencies.Domains.Board
+	boardPortalHandler := dependencies.Domains.BoardPortal
+	calendarHandler := dependencies.Domains.Calendar
+	searchHandler := dependencies.Domains.Search
+	collaborationHandler := dependencies.Domains.Collaboration
+	mobileHandler := dependencies.Domains.Mobile
+	brandingHandler := dependencies.Domains.Branding
 
 	// --- Public routes (no authentication required) ---
 	r.Route("/api/v1/auth", func(r chi.Router) {
-		if authHandler != nil {
-			r.Post("/login", authHandler.Login)
-			r.Post("/register", authHandler.Register)
-			r.Post("/refresh", authHandler.Refresh)
-		}
+		r.Post("/login", authHandler.Login)
+		r.Post("/register", authHandler.Register)
+		r.Post("/refresh", authHandler.Refresh)
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.AuthMiddleware(dependencies.AccessTokenValidator))
+			r.Get("/me", authHandler.Me)
+			r.Post("/logout", authHandler.Logout)
+		})
 	})
 
 	// --- Public portal routes (token-authenticated, no JWT) ---
@@ -139,18 +157,16 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	// --- Protected routes (authentication + tenant middleware) ---
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(middleware.AuthMiddleware(cfg.JWT.Secret))
-		r.Use(middleware.TenantMiddleware(pool))
+		r.Use(middleware.AuthMiddleware(dependencies.AccessTokenValidator))
+		r.Use(dependencies.TenantMiddleware)
 
 		// Organizations
 		r.Route("/organizations", func(r chi.Router) {
-			if organizationHandler != nil {
-				r.Post("/", organizationHandler.Create)
-				r.Get("/", organizationHandler.List)
-				r.Get("/{id}", organizationHandler.GetByID)
-				r.Put("/{id}", organizationHandler.Update)
-				r.Delete("/{id}", organizationHandler.Delete)
-			}
+			r.Post("/", organizationHandler.Create)
+			r.Get("/", organizationHandler.List)
+			r.Get("/{id}", organizationHandler.GetByID)
+			r.Put("/{id}", organizationHandler.Update)
+			r.Delete("/{id}", organizationHandler.Delete)
 		})
 
 		// Compliance Frameworks
@@ -859,5 +875,5 @@ func NewRouter(pool *pgxpool.Pool, cfg *config.Config) http.Handler {
 		})
 	})
 
-	return r
+	return r, nil
 }

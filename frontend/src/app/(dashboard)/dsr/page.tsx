@@ -13,11 +13,9 @@ import {
   ChevronRight,
   Loader2,
   Clock,
-  AlertTriangle,
   FileText,
   PieChart,
   CheckCircle2,
-  XCircle,
   Timer,
 } from 'lucide-react';
 
@@ -94,19 +92,6 @@ const DSR_SOURCES = [
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function maskName(name: string): string {
-  if (!name) return '---';
-  const parts = name.split(' ');
-  return parts
-    .map((part) => {
-      if (part.length <= 1) return part[0] + '***';
-      return part[0] + '***' + ' ' + (parts.length > 1 ? '' : '');
-    })
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 function maskNameParts(name: string): string {
   if (!name) return '---';

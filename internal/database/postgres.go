@@ -3,9 +3,9 @@ package database
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
@@ -24,7 +24,15 @@ func NewPostgresPool(cfg *config.Config) (*pgxpool.Pool, error) {
 
 	poolCfg.MaxConns = cfg.Database.MaxConns
 	poolCfg.MinConns = cfg.Database.MinConns
+	poolCfg.MaxConnLifetime = time.Hour
+	poolCfg.MaxConnLifetimeJitter = 5 * time.Minute
+	poolCfg.MaxConnIdleTime = 30 * time.Minute
 	poolCfg.HealthCheckPeriod = 30 * time.Second
+	poolCfg.ConnConfig.ConnectTimeout = 5 * time.Second
+	poolCfg.ConnConfig.RuntimeParams["application_name"] = cfg.App.Name
+	poolCfg.ConnConfig.RuntimeParams["statement_timeout"] = "30s"
+	poolCfg.ConnConfig.RuntimeParams["lock_timeout"] = "5s"
+	poolCfg.AfterRelease = clearTenantContext
 
 	const maxRetries = 3
 	var pool *pgxpool.Pool
@@ -41,15 +49,19 @@ func NewPostgresPool(cfg *config.Config) (*pgxpool.Pool, error) {
 
 		if err == nil {
 			log.Info().
-				Str("host", cfg.Database.Host).
-				Int("port", cfg.Database.Port).
-				Str("database", cfg.Database.DBName).
+				Str("host", poolCfg.ConnConfig.Host).
+				Uint16("port", poolCfg.ConnConfig.Port).
+				Str("database", poolCfg.ConnConfig.Database).
 				Msg("connected to PostgreSQL")
 			return pool, nil
 		}
+		if pool != nil {
+			pool.Close()
+			pool = nil
+		}
 
 		if attempt < maxRetries {
-			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
+			backoff := time.Duration(1<<(attempt-1)) * time.Second
 			log.Warn().
 				Err(err).
 				Int("attempt", attempt).
@@ -60,6 +72,20 @@ func NewPostgresPool(cfg *config.Config) (*pgxpool.Pool, error) {
 	}
 
 	return nil, fmt.Errorf("connecting to PostgreSQL after %d attempts: %w", maxRetries, err)
+}
+
+// clearTenantContext is a defense-in-depth guard against tenant state leaking
+// between callers if a code path accidentally uses session-scoped set_config.
+// Request queries must still use SET LOCAL inside their transaction.
+func clearTenantContext(conn *pgx.Conn) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if _, err := conn.Exec(ctx, "SELECT set_config('app.current_tenant', '', false)"); err != nil {
+		log.Error().Err(err).Msg("discarding PostgreSQL connection that could not clear tenant context")
+		return false
+	}
+	return true
 }
 
 // HealthCheck pings the database pool and returns an error if it is unreachable.

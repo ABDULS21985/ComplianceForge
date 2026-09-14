@@ -9,7 +9,6 @@ import {
   Upload,
   Plus,
   FileText,
-  TestTube,
   CheckCircle2,
   Clock,
   XCircle,
@@ -23,12 +22,7 @@ import { Input } from '@/components/ui/input';
 import { cn, getStatusColor, formatDate, formatDateTime } from '@/lib/utils';
 import { MATURITY_LABELS } from '@/lib/constants';
 import api from '@/lib/api';
-import type {
-  ControlImplementation,
-  ControlEvidence,
-  ControlTestResult,
-} from '@/types';
-import Link from 'next/link';
+import type { ControlImplementation } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Hooks

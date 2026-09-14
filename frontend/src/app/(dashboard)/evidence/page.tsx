@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import api from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -82,21 +82,6 @@ function PriorityBadge({ priority }: { priority: string }) {
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[priority] ?? 'bg-gray-100 text-gray-700'}`}>
       {priority.charAt(0).toUpperCase() + priority.slice(1)}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    not_started: 'bg-gray-100 text-gray-700',
-    in_progress: 'bg-blue-100 text-blue-700',
-    collected: 'bg-amber-100 text-amber-700',
-    validated: 'bg-green-100 text-green-700',
-    expired: 'bg-red-100 text-red-700',
-  };
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${map[status] ?? 'bg-gray-100 text-gray-700'}`}>
-      {status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
     </span>
   );
 }
@@ -184,7 +169,6 @@ function KanbanColumn({
 // ---------------------------------------------------------------------------
 
 export default function EvidenceTemplateTestingPage() {
-  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'templates' | 'requirements' | 'testing'>('templates');
   const [templateSearch, setTemplateSearch] = useState('');
   const [frameworkFilter, setFrameworkFilter] = useState('');

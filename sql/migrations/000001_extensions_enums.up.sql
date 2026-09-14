@@ -17,6 +17,33 @@ CREATE EXTENSION IF NOT EXISTS "btree_gist";      -- GiST index operator classes
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";         -- trigram similarity / fuzzy search
 
 -- ============================================================================
+-- BOOTSTRAP METADATA
+-- ============================================================================
+-- This table belongs to the database bootstrap lifecycle rather than a feature
+-- migration. Migration 040 also creates it IF NOT EXISTS so existing databases
+-- upgrading from the original migration set receive it.
+
+CREATE TABLE bootstrap_seed_history (
+    seed_name   TEXT PRIMARY KEY,
+    checksum    CHAR(64) NOT NULL,
+    position    INT NOT NULL UNIQUE,
+    applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT chk_bootstrap_seed_name CHECK (
+        seed_name <> '' AND seed_name = BTRIM(seed_name)
+    ),
+    CONSTRAINT chk_bootstrap_seed_checksum CHECK (
+        checksum ~ '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT chk_bootstrap_seed_position CHECK (
+        position > 0
+    )
+);
+
+COMMENT ON TABLE bootstrap_seed_history IS
+    'Checksums of ordered reference-data seeds applied by cmd/seed. Seed files are immutable after application.';
+
+-- ============================================================================
 -- ENUM TYPES
 -- ============================================================================
 

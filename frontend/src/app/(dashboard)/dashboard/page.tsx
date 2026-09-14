@@ -14,7 +14,6 @@ import {
   ArrowRight,
   AlertCircle,
   Activity,
-  TrendingUp,
 } from 'lucide-react';
 import {
   BarChart,
@@ -33,15 +32,13 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import { formatRelativeTime, formatPercentage } from '@/lib/utils';
 import api from '@/lib/api';
+import { QUICK_CREATE_ROUTES, ROUTES } from '@/lib/routes';
 import type {
   DashboardSummary,
   ComplianceScore,
   Incident,
-  AuditLogEntry,
-  RiskLevel,
 } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -101,7 +98,6 @@ function StatCard({
   value,
   subtitle,
   icon: Icon,
-  trend,
   className,
 }: {
   title: string;
@@ -486,7 +482,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 gap-3">
-                <Link href="/risks/new">
+                <Link href={QUICK_CREATE_ROUTES.risk}>
                   <Button
                     variant="outline"
                     className="w-full justify-start gap-2"
@@ -495,7 +491,7 @@ export default function DashboardPage() {
                     Register Risk
                   </Button>
                 </Link>
-                <Link href="/incidents/new">
+                <Link href={QUICK_CREATE_ROUTES.incident}>
                   <Button
                     variant="outline"
                     className="w-full justify-start gap-2"
@@ -504,7 +500,7 @@ export default function DashboardPage() {
                     Report Incident
                   </Button>
                 </Link>
-                <Link href="/policies/new">
+                <Link href={QUICK_CREATE_ROUTES.policy}>
                   <Button
                     variant="outline"
                     className="w-full justify-start gap-2"
@@ -513,7 +509,7 @@ export default function DashboardPage() {
                     Draft Policy
                   </Button>
                 </Link>
-                <Link href="/audits/new">
+                <Link href={QUICK_CREATE_ROUTES.audit}>
                   <Button
                     variant="outline"
                     className="w-full justify-start gap-2"
@@ -522,7 +518,7 @@ export default function DashboardPage() {
                     Plan Audit
                   </Button>
                 </Link>
-                <Link href="/frameworks">
+                <Link href={ROUTES.frameworks}>
                   <Button
                     variant="outline"
                     className="w-full justify-start gap-2"

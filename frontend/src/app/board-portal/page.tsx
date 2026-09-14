@@ -4,6 +4,11 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
+import {
+  buildPortalApiUrl,
+  PORTAL_API_ROUTES,
+} from '@/lib/portal-routes';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -126,11 +131,12 @@ function BoardPortalInner() {
       setLoading(false);
       return;
     }
+    const inviteToken = token;
 
     async function fetchPortalData() {
       try {
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080/api/v1'}/board-portal?token=${token}`
+          buildPortalApiUrl(PORTAL_API_ROUTES.boardData, inviteToken)
         );
         if (!res.ok) {
           throw new Error(res.status === 401 ? 'Token expired or invalid' : 'Failed to load portal');

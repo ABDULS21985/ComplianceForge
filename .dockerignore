@@ -1,0 +1,16 @@
+.git
+.github
+.DS_Store
+.env
+.env.*
+!.env.example
+**/node_modules
+frontend/.next
+frontend/playwright-report
+frontend/test-results
+frontend/coverage
+coverage
+*.log
+storage
+uploads
+tmp

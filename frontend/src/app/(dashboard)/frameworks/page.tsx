@@ -4,9 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { Shield, AlertCircle, Inbox } from 'lucide-react';
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
 import api from '@/lib/api';
 import type { ComplianceFramework } from '@/types';
 import type { PaginatedResponse } from '@/lib/api';

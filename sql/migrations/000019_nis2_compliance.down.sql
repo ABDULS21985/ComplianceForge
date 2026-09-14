@@ -50,6 +50,7 @@ DROP FUNCTION IF EXISTS nis2_incident_report_generate_ref();
 
 DROP TABLE IF EXISTS nis2_management_accountability CASCADE;
 DROP TABLE IF EXISTS nis2_security_measures CASCADE;
+DROP TABLE IF EXISTS nis2_measure_definitions CASCADE;
 DROP TABLE IF EXISTS nis2_incident_reports CASCADE;
 DROP TABLE IF EXISTS nis2_entity_assessment CASCADE;
 

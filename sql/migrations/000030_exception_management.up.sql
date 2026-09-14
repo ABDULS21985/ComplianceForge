@@ -202,7 +202,7 @@ COMMENT ON COLUMN exception_audit_trail.action IS 'Action performed: created, su
 -- ============================================================================
 
 -- Auto-generate exception reference: EXC-YYYY-NNNN
-CREATE OR REPLACE FUNCTION generate_exception_ref()
+CREATE OR REPLACE FUNCTION generate_compliance_exception_ref()
 RETURNS TRIGGER AS $$
 DECLARE
     current_year TEXT;
@@ -230,7 +230,7 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_comp_exceptions_generate_ref
     BEFORE INSERT ON compliance_exceptions
-    FOR EACH ROW EXECUTE FUNCTION generate_exception_ref();
+    FOR EACH ROW EXECUTE FUNCTION generate_compliance_exception_ref();
 
 -- ============================================================================
 -- RLS POLICIES

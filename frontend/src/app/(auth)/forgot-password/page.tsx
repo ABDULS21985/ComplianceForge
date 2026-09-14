@@ -12,6 +12,7 @@ import {
   forgotPasswordSchema,
   type ForgotPasswordFormValues,
 } from "@/lib/validations";
+import { ROUTES } from "@/lib/routes";
 
 export default function ForgotPasswordPage() {
   const [submitted, setSubmitted] = useState(false);
@@ -44,7 +45,7 @@ export default function ForgotPasswordPage() {
             instructions.
           </p>
         </div>
-        <Link href="/login">
+        <Link href={ROUTES.auth.login}>
           <Button variant="outline" className="w-full">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to login
@@ -89,7 +90,7 @@ export default function ForgotPasswordPage() {
 
       <div className="text-center">
         <Link
-          href="/login"
+          href={ROUTES.auth.login}
           className="inline-flex items-center text-sm text-primary hover:underline"
         >
           <ArrowLeft className="mr-1 h-3 w-3" />

@@ -24,16 +24,9 @@ i) HR security, access control, asset management → A.5.15 (Access control), A.
 j) MFA, secured communications, emergency communications → A.8.5 (Secure authentication), A.8.20 (Network security), A.8.22 (Network segregation)
 */
 
--- Insert the 10 measures as a documentation/reference table
--- (Application will copy these to nis2_security_measures per-org during onboarding)
-
-CREATE TABLE IF NOT EXISTS nis2_measure_definitions (
-    measure_code VARCHAR(20) PRIMARY KEY,
-    measure_title VARCHAR(500) NOT NULL,
-    measure_description TEXT NOT NULL,
-    article_reference VARCHAR(50) NOT NULL,
-    iso27001_control_codes TEXT[] NOT NULL
-);
+-- Insert the 10 measures into the global reference table created by migration
+-- 019. The application copies these to organization-scoped records at NIS2
+-- onboarding time.
 
 INSERT INTO nis2_measure_definitions (measure_code, measure_title, measure_description, article_reference, iso27001_control_codes) VALUES
 ('NIS2-Art21-a', 'Policies on risk analysis and information system security',

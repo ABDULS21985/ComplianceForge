@@ -45,6 +45,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useQuickCreate } from '@/lib/use-quick-create';
 
 
 // ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ export default function AuditsPage() {
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [search, setSearch] = React.useState('');
-  const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [sheetOpen, setSheetOpen] = useQuickCreate('audit');
 
   const { data, isLoading, isError, error } = useAudits({
     page,

@@ -54,6 +54,7 @@ import {
   formatPercentage,
   getStatusColor,
 } from '@/lib/utils';
+import { useQuickCreate } from '@/lib/use-quick-create';
 
 // ---------------------------------------------------------------------------
 // Zod schema
@@ -350,7 +351,7 @@ export default function PoliciesPage() {
   const pageSize = Number(searchParams.get('page_size') ?? '20');
 
   const [search, setSearch] = useState('');
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useQuickCreate('policy');
 
   const apiParams = useMemo(() => {
     const params: Record<string, unknown> = { page, page_size: pageSize };

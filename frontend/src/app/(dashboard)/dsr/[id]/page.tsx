@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -11,9 +11,6 @@ import {
   ShieldCheck,
   XCircle,
   CalendarPlus,
-  Send,
-  UserCheck,
-  AlertTriangle,
   FileText,
 } from 'lucide-react';
 
@@ -43,7 +40,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 
 // ---------------------------------------------------------------------------
@@ -108,7 +104,6 @@ function getTaskStatusColor(status: string): string {
 
 export default function DSRDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
   const qc = useQueryClient();
 

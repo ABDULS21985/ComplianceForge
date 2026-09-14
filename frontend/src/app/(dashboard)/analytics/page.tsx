@@ -174,8 +174,6 @@ export default function AnalyticsDashboardPage() {
               <div className="flex items-end gap-1 min-w-[600px] h-48">
                 {complianceTrends.map((point, idx) => {
                   const frameworks = point.frameworks ?? {};
-                  const values = Object.values(frameworks);
-                  const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
                   return (
                     <div key={idx} className="flex-1 flex flex-col items-center gap-1">
                       <div className="w-full flex flex-col items-center justify-end h-40">

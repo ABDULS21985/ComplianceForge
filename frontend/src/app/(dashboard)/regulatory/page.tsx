@@ -70,7 +70,7 @@ export default function RegulatoryChangePage() {
   const [severityFilter, setSeverityFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
-  const [frameworkFilter, setFrameworkFilter] = useState('');
+  const [frameworkFilter] = useState('');
   const [regionFilter, setRegionFilter] = useState('');
   const [showSources, setShowSources] = useState(false);
 

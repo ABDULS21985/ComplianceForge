@@ -121,8 +121,11 @@ CREATE INDEX idx_treatment_risk ON risk_treatments(risk_id);
 CREATE INDEX idx_treatment_status ON risk_treatments(organization_id, status);
 CREATE INDEX idx_treatment_owner ON risk_treatments(owner_user_id) WHERE owner_user_id IS NOT NULL;
 CREATE INDEX idx_treatment_target ON risk_treatments(target_date) WHERE target_date IS NOT NULL AND status NOT IN ('completed', 'cancelled');
-CREATE INDEX idx_treatment_overdue ON risk_treatments(organization_id)
-    WHERE status = 'overdue' OR (status IN ('planned', 'in_progress') AND target_date < CURRENT_DATE);
+-- CURRENT_DATE cannot appear in a PostgreSQL partial-index predicate. This
+-- index narrows overdue candidates by tenant/status and orders them by target;
+-- the query remains responsible for applying target_date < CURRENT_DATE.
+CREATE INDEX idx_treatment_overdue ON risk_treatments(organization_id, target_date)
+    WHERE status IN ('planned', 'in_progress');
 
 CREATE TRIGGER trg_risk_treatments_updated_at
     BEFORE UPDATE ON risk_treatments

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ const FRAMEWORK_COLORS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 function renderMarkdown(md: string): string {
-  let html = md
+  const html = md
     .replace(/^### (.+)$/gm, '<h3 class="text-lg font-semibold text-gray-900 mt-6 mb-2" id="$1">$1</h3>')
     .replace(/^## (.+)$/gm, '<h2 class="text-xl font-bold text-gray-900 mt-8 mb-3" id="$1">$1</h2>')
     .replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold text-gray-900 mt-8 mb-4" id="$1">$1</h1>')

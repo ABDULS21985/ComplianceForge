@@ -10,6 +10,10 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { loginSchema, type LoginFormValues } from "@/lib/validations";
+import {
+  AUTH_REDIRECT_QUERY_PARAM,
+  getSafePostAuthRedirect,
+} from "@/lib/routes";
 import { useAuthStore } from "@/store/auth-store";
 import api, { type ApiError } from "@/lib/api";
 import type { User } from "@/types";
@@ -33,7 +37,10 @@ export default function LoginPage() {
     try {
       const res = await api.auth.login(values);
       setAuth(res.access_token, res.refresh_token, res.user as User);
-      router.push("/dashboard");
+      const params = new URLSearchParams(window.location.search);
+      router.replace(
+        getSafePostAuthRedirect(params.get(AUTH_REDIRECT_QUERY_PARAM))
+      );
     } catch (err) {
       const error = err as ApiError;
       setApiError(error.message || "Login failed. Please try again.");

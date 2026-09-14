@@ -45,7 +45,7 @@ import {
 } from '@/components/ui/sheet';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { getRiskLevelColor, getStatusColor } from '@/lib/utils';
+import { getRiskLevelColor } from '@/lib/utils';
 import {
   useAssets,
   useAssetStats,

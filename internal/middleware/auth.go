@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog/log"
+
+	authdomain "github.com/complianceforge/platform/internal/auth"
 )
 
 type contextKey string
@@ -18,27 +19,34 @@ const (
 	ContextKeyEmail  contextKey = "email"
 )
 
-// Claims represents the JWT claims extracted from the token.
-type Claims struct {
-	UserID         string `json:"user_id"`
-	OrganizationID string `json:"organization_id"`
-	Role           string `json:"role"`
-	Email          string `json:"email"`
-	jwt.RegisteredClaims
+// AccessTokenValidator validates a signed access token and its persisted
+// session before the request is allowed to proceed.
+type AccessTokenValidator interface {
+	ValidateAccessToken(ctx context.Context, token string) (*authdomain.Claims, error)
 }
+
+// Claims is retained as an alias for callers that previously referenced the
+// middleware-local claim type.
+type Claims = authdomain.Claims
 
 // AuthMiddleware returns a Chi-compatible middleware that validates JWT tokens
 // from the Authorization header and injects claims into the request context.
-func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
+func AuthMiddleware(validator AccessTokenValidator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if validator == nil {
+				log.Error().Msg("authentication middleware has no token validator")
+				writeAuthError(w, "authentication unavailable")
+				return
+			}
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				log.Warn().
 					Str("path", r.URL.Path).
 					Str("method", r.Method).
 					Msg("missing authorization header")
-				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+				writeAuthError(w, "missing authorization header")
 				return
 			}
 
@@ -47,25 +55,18 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 				log.Warn().
 					Str("path", r.URL.Path).
 					Msg("invalid authorization header format")
-				http.Error(w, `{"error":"invalid authorization header format"}`, http.StatusUnauthorized)
+				writeAuthError(w, "invalid authorization header format")
 				return
 			}
 
 			tokenString := parts[1]
-
-			claims := &Claims{}
-			token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, jwt.ErrSignatureInvalid
-				}
-				return []byte(jwtSecret), nil
-			})
-			if err != nil || !token.Valid {
+			claims, err := validator.ValidateAccessToken(r.Context(), tokenString)
+			if err != nil || claims == nil {
 				log.Warn().
 					Err(err).
 					Str("path", r.URL.Path).
 					Msg("invalid or expired token")
-				http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+				writeAuthError(w, "invalid or expired token")
 				return
 			}
 
@@ -84,6 +85,12 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func writeAuthError(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"error":"` + message + `"}`))
 }
 
 // GetUserIDFromContext extracts the user_id from the request context.

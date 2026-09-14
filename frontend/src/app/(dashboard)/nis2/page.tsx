@@ -42,7 +42,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Separator } from '@/components/ui/separator';
 
 // ---------------------------------------------------------------------------
 // Helpers

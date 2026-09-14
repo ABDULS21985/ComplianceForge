@@ -1,32 +1,45 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Paths that do not require authentication
-const PUBLIC_PATHS = ["/login", "/forgot-password"];
+import {
+  AUTH_REDIRECT_QUERY_PARAM,
+  isPublicRoute,
+  ROUTES,
+} from "@/lib/routes";
+import { ACCESS_TOKEN_KEY } from "@/lib/auth-constants";
 
-// Static asset prefixes to skip
-const STATIC_PREFIXES = ["/_next", "/favicon", "/api"];
+function isMiddlewareBypassPath(pathname: string): boolean {
+  return (
+    pathname === "/api" ||
+    pathname.startsWith("/api/") ||
+    pathname === "/favicon.ico" ||
+    pathname.startsWith("/_next/")
+  );
+}
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Skip middleware for static assets and API routes
-  if (STATIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  if (isMiddlewareBypassPath(pathname)) {
     return NextResponse.next();
   }
 
-  // Skip middleware for public auth pages
-  if (PUBLIC_PATHS.some((path) => pathname.startsWith(path))) {
+  // Public authentication and invitation-based portal entry points.
+  if (isPublicRoute(pathname)) {
     return NextResponse.next();
   }
 
   // Check for auth token in cookies
-  const token = request.cookies.get("cf_access_token")?.value;
+  const token = request.cookies.get(ACCESS_TOKEN_KEY)?.value;
 
   // If no token and trying to access a protected page, redirect to login
   if (!token) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("redirect", pathname);
+    const loginUrl = new URL(ROUTES.auth.login, request.url);
+    loginUrl.searchParams.set(
+      AUTH_REDIRECT_QUERY_PARAM,
+      `${pathname}${request.nextUrl.search}`
+    );
     return NextResponse.redirect(loginUrl);
   }
 

@@ -7,7 +7,7 @@ on:
     branches: [main, develop]
 
 env:
-  GO_VERSION: "1.22"
+  GO_VERSION: "1.24"
   NODE_VERSION: "20"
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -80,22 +80,20 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      - name: Run migrations
+      - name: Verify clean migration round trip
         env:
           DATABASE_URL: postgres://complianceforge:testpassword@localhost:5432/complianceforge_test?sslmode=disable
-        run: go run cmd/migrate/main.go up
-
-      - name: Seed test data
-        env:
-          PGPASSWORD: testpassword
         run: |
-          if ls sql/seeds/*.sql >/dev/null 2>&1; then
-            for seed_file in sql/seeds/*.sql; do
-              psql "postgres://complianceforge:testpassword@localhost:5432/complianceforge_test?sslmode=disable" -f "$seed_file"
-            done
-          else
-            echo "No SQL seed files found under sql/seeds/."
-          fi
+          go run ./cmd/migrate up
+          go run ./cmd/migrate down
+          go run ./cmd/migrate up
+
+      - name: Verify deterministic reference-data seeds
+        env:
+          DATABASE_URL: postgres://complianceforge:testpassword@localhost:5432/complianceforge_test?sslmode=disable
+        run: |
+          go run ./cmd/seed
+          go run ./cmd/seed
 
       - name: Run tests
         env:
@@ -287,19 +285,12 @@ jobs:
       - name: Run DB migrations
         env:
           DATABASE_URL: postgres://complianceforge:testpassword@localhost:5432/complianceforge_test?sslmode=disable
-        run: go run cmd/migrate/main.go up
+        run: go run ./cmd/migrate up
 
       - name: Seed test data
         env:
-          PGPASSWORD: testpassword
-        run: |
-          if ls sql/seeds/*.sql >/dev/null 2>&1; then
-            for seed_file in sql/seeds/*.sql; do
-              psql "postgres://complianceforge:testpassword@localhost:5432/complianceforge_test?sslmode=disable" -f "$seed_file"
-            done
-          else
-            echo "No SQL seed files found under sql/seeds/."
-          fi
+          DATABASE_URL: postgres://complianceforge:testpassword@localhost:5432/complianceforge_test?sslmode=disable
+        run: go run ./cmd/seed
 
       - name: Start API server
         env:

@@ -251,6 +251,23 @@ COMMENT ON COLUMN nis2_incident_reports.incident_id IS 'Links to the platform in
 COMMENT ON COLUMN nis2_incident_reports.early_warning_content IS 'JSON payload submitted to CSIRT: {"type_of_incident": "...", "suspected_cause": "...", "cross_border_impact": false, ...}';
 
 -- ============================================================================
+-- TABLE: nis2_measure_definitions
+-- ============================================================================
+-- Global reference catalog populated by the ordered seed runner. Keeping its
+-- DDL in migrations makes full rollback/rebuilds deterministic.
+
+CREATE TABLE nis2_measure_definitions (
+    measure_code              VARCHAR(20) PRIMARY KEY,
+    measure_title             VARCHAR(500) NOT NULL,
+    measure_description       TEXT NOT NULL,
+    article_reference         VARCHAR(50) NOT NULL,
+    iso27001_control_codes    TEXT[] NOT NULL
+);
+
+COMMENT ON TABLE nis2_measure_definitions IS
+    'Global catalog of the ten NIS2 Article 21 cybersecurity risk-management measures.';
+
+-- ============================================================================
 -- TABLE: nis2_security_measures
 -- ============================================================================
 -- Tracks implementation of the Article 21 minimum cybersecurity risk-management

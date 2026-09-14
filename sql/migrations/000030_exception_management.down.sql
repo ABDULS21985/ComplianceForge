@@ -44,5 +44,5 @@ DROP TABLE IF EXISTS compliance_exceptions;
 -- DROP FUNCTIONS
 -- ============================================================================
 
-DROP FUNCTION IF EXISTS generate_exception_ref();
+DROP FUNCTION IF EXISTS generate_compliance_exception_ref();
 DROP FUNCTION IF EXISTS prevent_audit_trail_modification();

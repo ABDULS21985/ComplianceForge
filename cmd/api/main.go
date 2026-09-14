@@ -43,16 +43,21 @@ func main() {
 	defer pool.Close()
 
 	// Create Chi router.
-	r := router.NewRouter(pool, cfg)
+	r, err := router.NewRouter(pool, cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to compose API router")
+	}
 
 	// Create HTTP server.
 	addr := fmt.Sprintf(":%d", cfg.App.Port)
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// Start server in a goroutine.

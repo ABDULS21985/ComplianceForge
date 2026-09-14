@@ -1,0 +1,1129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Digibit · ComplianceForge Capability Brief</title>
+  <meta
+    name="description"
+    content="ComplianceForge enterprise governance, risk and compliance platform capability brief."
+  />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
+
+    :root {
+      --accent: #ed4800;
+      --accent-dark: #bd3a00;
+      --ink: #1b1b1d;
+      --body: #444448;
+      --muted: #77797e;
+      --soft: #a9abb0;
+      --rule: #dadadd;
+      --rule-dark: #bfc0c4;
+      --wash: #f7f7fa;
+      --white: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    @page {
+      size: Letter portrait;
+      margin: 0;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: #ececef;
+      color: var(--ink);
+      font-family: 'Montserrat', 'Avenir Next', Avenir, Helvetica, Arial, sans-serif;
+      font-synthesis: none;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      padding: 24px 0;
+    }
+
+    .page {
+      position: relative;
+      width: 8.5in;
+      height: 11in;
+      overflow: hidden;
+      padding: 0.55in 0.58in 0.48in;
+      background: var(--white);
+      box-shadow: 0 8px 30px rgba(16, 24, 40, 0.10);
+      page-break-after: always;
+      break-after: page;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+
+    @media print {
+      body {
+        display: block;
+        padding: 0;
+        background: var(--white);
+      }
+
+      .page {
+        margin: 0;
+        box-shadow: none;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    p,
+    li {
+      color: var(--body);
+      font-size: 12.35px;
+      font-weight: 400;
+      line-height: 1.52;
+    }
+
+    strong {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .masthead {
+      height: 66px;
+      margin-bottom: 38px;
+    }
+
+    .masthead-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      height: 49px;
+    }
+
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+    }
+
+    .digibit-logo {
+      display: block;
+      width: 116px;
+      height: auto;
+    }
+
+    .masthead-meta {
+      padding-top: 8px;
+      text-align: right;
+    }
+
+    .eyebrow {
+      color: var(--soft);
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 2.1px;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+
+    .masthead-product {
+      margin-top: 7px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 3.1px;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .masthead-rule {
+      display: grid;
+      grid-template-columns: 20% 80%;
+      height: 3px;
+    }
+
+    .masthead-rule .lead {
+      background: var(--accent);
+    }
+
+    .masthead-rule .tail {
+      background: var(--rule-dark);
+    }
+
+    .verso-header {
+      height: 20px;
+      text-align: right;
+    }
+
+    .footer {
+      position: absolute;
+      right: 0.58in;
+      bottom: 0.27in;
+      left: 0.58in;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      height: 28px;
+      border-top: 1px solid var(--rule);
+      padding-top: 10px;
+    }
+
+    .footer-name {
+      color: var(--soft);
+      font-size: 7.4px;
+      font-weight: 600;
+      letter-spacing: 1.65px;
+      text-transform: uppercase;
+    }
+
+    .page-number {
+      color: var(--accent);
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    .hero-title {
+      font-size: 49px;
+      font-weight: 800;
+      letter-spacing: -2.7px;
+      line-height: 0.98;
+    }
+
+    .hero-descriptor {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 18px;
+      font-weight: 500;
+      letter-spacing: -0.45px;
+    }
+
+    .hero-promise {
+      margin-top: 19px;
+      color: var(--accent);
+      font-size: 13.4px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+
+    .intro-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 37px;
+      margin-top: 26px;
+    }
+
+    .intro-grid p {
+      font-size: 11.85px;
+      line-height: 1.56;
+    }
+
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin-top: 28px;
+      border-top: 1px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .metric {
+      min-height: 81px;
+      padding: 17px 15px 13px;
+      border-left: 1px solid var(--rule);
+    }
+
+    .metric:first-child {
+      padding-left: 0;
+      border-left: 0;
+    }
+
+    .metric-value {
+      color: var(--accent);
+      font-size: 27px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1;
+    }
+
+    .metric-label {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 7.3px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      line-height: 1.25;
+      text-transform: uppercase;
+    }
+
+    .section-kicker {
+      color: var(--ink);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.65px;
+      text-transform: uppercase;
+    }
+
+    .capability-section {
+      margin-top: 30px;
+    }
+
+    .bullet-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 38px;
+      margin-top: 17px;
+    }
+
+    .bullet-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .bullet-list li {
+      position: relative;
+      padding-left: 18px;
+      font-size: 10.55px;
+      line-height: 1.45;
+    }
+
+    .bullet-list li::before {
+      content: '›';
+      position: absolute;
+      top: 0;
+      left: 2px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .page-heading {
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -1.9px;
+      line-height: 1.05;
+    }
+
+    .page-subtitle {
+      margin-top: 12px;
+      color: var(--accent);
+      font-size: 14.3px;
+      font-weight: 500;
+      letter-spacing: -0.2px;
+    }
+
+    .page-lead {
+      margin-top: 19px;
+      font-size: 11.8px;
+      line-height: 1.55;
+    }
+
+    .foundation-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      margin-top: 29px;
+      border: 1px solid var(--rule);
+    }
+
+    .foundation-stat {
+      min-height: 72px;
+      padding: 17px 14px 13px;
+      border-left: 1px solid var(--rule);
+      border-top: 1px solid var(--rule);
+    }
+
+    .foundation-stat:nth-child(-n + 4) {
+      border-top: 0;
+    }
+
+    .foundation-stat:nth-child(4n + 1) {
+      border-left: 0;
+    }
+
+    .foundation-stat:nth-child(n + 5) {
+      background: #fafafa;
+    }
+
+    .foundation-stat .number {
+      color: var(--accent);
+      font-size: 23px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1;
+    }
+
+    .foundation-stat:nth-child(n + 5) .number {
+      color: var(--muted);
+    }
+
+    .foundation-stat .label {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 6.8px;
+      font-weight: 600;
+      letter-spacing: 1.15px;
+      line-height: 1.25;
+      text-transform: uppercase;
+    }
+
+    .proof-section {
+      margin-top: 30px;
+    }
+
+    .proof-section .bullet-list {
+      gap: 11px;
+      margin-top: 16px;
+    }
+
+    .proof-section .bullet-list li {
+      padding-left: 20px;
+      font-size: 10.9px;
+      line-height: 1.48;
+    }
+
+    .callout {
+      margin-top: 27px;
+      border-left: 3px solid var(--accent);
+      background: var(--wash);
+      padding: 22px 27px 23px;
+    }
+
+    .callout-title {
+      color: var(--accent);
+      font-size: 8.7px;
+      font-weight: 700;
+      letter-spacing: 1.45px;
+      text-transform: uppercase;
+    }
+
+    .callout p {
+      margin-top: 14px;
+      font-size: 10.55px;
+      line-height: 1.5;
+    }
+
+    .callout-note {
+      color: var(--muted);
+      font-size: 8.1px !important;
+      font-weight: 500;
+    }
+
+    .section-intro {
+      margin-top: 14px;
+      max-width: 680px;
+      font-size: 11.25px;
+      line-height: 1.55;
+    }
+
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      margin-top: 24px;
+      border: 1px solid var(--rule);
+    }
+
+    .workspace-card {
+      min-height: 191px;
+      padding: 17px 18px 15px;
+      border-top: 1px solid var(--rule);
+      border-left: 1px solid var(--rule);
+    }
+
+    .workspace-card:nth-child(-n + 2) {
+      border-top: 0;
+    }
+
+    .workspace-card:nth-child(odd) {
+      border-left: 0;
+    }
+
+    .workspace-label {
+      color: var(--muted);
+      font-size: 6.9px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+
+    .workspace-title {
+      margin-top: 7px;
+      font-size: 13.1px;
+      font-weight: 700;
+      letter-spacing: -0.45px;
+      line-height: 1.18;
+    }
+
+    .workspace-tagline {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 7.8px;
+      font-weight: 500;
+      line-height: 1.3;
+    }
+
+    .workspace-card .bullet-list {
+      gap: 7px;
+      margin-top: 10px;
+    }
+
+    .workspace-card .bullet-list li {
+      padding-left: 16px;
+      font-size: 8.65px;
+      line-height: 1.38;
+    }
+
+    .standards-copy {
+      margin-top: 13px;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 17px;
+    }
+
+    .standard-badge {
+      border: 1px solid var(--rule-dark);
+      padding: 7px 11px 6px;
+      color: var(--ink);
+      font-size: 7.7px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .impact {
+      margin-top: 31px;
+    }
+
+    .impact-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+    }
+
+    .impact-heading h2,
+    .why-heading {
+      font-size: 25px;
+      font-weight: 800;
+      letter-spacing: -1.2px;
+      line-height: 1.1;
+    }
+
+    .impact-qualifier {
+      color: var(--soft);
+      font-size: 7.1px;
+      font-weight: 700;
+      letter-spacing: 1.25px;
+      text-transform: uppercase;
+    }
+
+    .impact-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      margin-top: 15px;
+    }
+
+    .impact-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .impact-list li {
+      position: relative;
+      padding-left: 15px;
+      font-size: 9.5px;
+      line-height: 1.43;
+    }
+
+    .impact-list li::before {
+      content: '•';
+      position: absolute;
+      top: -1px;
+      left: 0;
+      color: var(--accent);
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .why {
+      margin-top: 29px;
+    }
+
+    .why-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      margin-top: 15px;
+      border: 1px solid var(--rule);
+    }
+
+    .why-card {
+      min-height: 139px;
+      padding: 17px 18px 15px;
+      border-top: 1px solid var(--rule);
+      border-left: 1px solid var(--rule);
+    }
+
+    .why-card:nth-child(-n + 2) {
+      border-top: 0;
+    }
+
+    .why-card:nth-child(odd) {
+      border-left: 0;
+    }
+
+    .why-card h3 {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: -0.35px;
+    }
+
+    .why-card p {
+      margin-top: 8px;
+      font-size: 9.3px;
+      line-height: 1.45;
+    }
+
+    .proof-line {
+      margin-top: 11px !important;
+      color: var(--accent) !important;
+      font-size: 8.3px !important;
+      font-weight: 700 !important;
+    }
+
+    .closing-statement {
+      max-width: 672px;
+      font-size: 16.4px;
+      font-weight: 500;
+      letter-spacing: -0.45px;
+      line-height: 1.48;
+    }
+
+    .engage {
+      margin-top: 42px;
+    }
+
+    .engage h1 {
+      font-size: 35px;
+      font-weight: 800;
+      letter-spacing: -1.7px;
+    }
+
+    .engage-copy {
+      margin-top: 12px;
+      max-width: 680px;
+      font-size: 10.8px;
+      line-height: 1.55;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 21px;
+      margin-top: 25px;
+    }
+
+    .step {
+      border-top: 2px solid var(--accent);
+      padding-top: 13px;
+    }
+
+    .step-number {
+      color: var(--soft);
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .step h3 {
+      margin-top: 10px;
+      font-size: 11.6px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .step p {
+      margin-top: 8px;
+      font-size: 9.4px;
+      line-height: 1.5;
+    }
+
+    .contact-band {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 25px;
+      margin-top: 43px;
+      min-height: 143px;
+      padding: 25px 28px;
+      background: var(--accent);
+    }
+
+    .contact-label {
+      color: var(--white);
+      font-size: 7.1px;
+      font-weight: 700;
+      letter-spacing: 1.25px;
+      text-transform: uppercase;
+    }
+
+    .contact-copy {
+      margin-top: 11px;
+      color: var(--white);
+      font-size: 9.3px;
+      line-height: 1.52;
+    }
+
+    .prepared-for {
+      margin-top: 19px;
+      color: var(--muted);
+      font-size: 8.8px;
+      font-weight: 600;
+    }
+
+    .document-note {
+      margin-top: 9px;
+      max-width: 680px;
+      color: var(--soft);
+      font-size: 7.1px;
+      font-weight: 500;
+      line-height: 1.35;
+    }
+  </style>
+</head>
+<body>
+  <!-- PAGE 01 — EXECUTIVE OVERVIEW -->
+  <section class="page">
+    <header class="masthead">
+      <div class="masthead-top">
+        <div class="brand-lockup">
+          <img class="digibit-logo" src="./assets/digibit-logo-full-color.svg" alt="Digibit — Beyond Technology" />
+        </div>
+        <div class="masthead-meta">
+          <div class="eyebrow">Capability brief · connected governance at scale</div>
+          <div class="masthead-product">ComplianceForge</div>
+        </div>
+      </div>
+      <div class="masthead-rule"><span class="lead"></span><span class="tail"></span></div>
+    </header>
+
+    <main>
+      <h1 class="hero-title">ComplianceForge</h1>
+      <p class="hero-descriptor">Enterprise Governance, Risk &amp; Compliance Platform</p>
+      <p class="hero-promise">One Platform. Every Obligation. Clear Accountability.</p>
+
+      <div class="intro-grid">
+        <p>
+          ComplianceForge is a connected GRC platform designed for organisations managing overlapping
+          standards and regulation across the UK and Europe. It gives compliance, risk, audit, privacy
+          and leadership teams one operating environment—from initial framework selection through
+          evidence, remediation and board reporting.
+        </p>
+        <p>
+          A unified data model links obligations to controls, risks, policies, owners, evidence,
+          findings and actions. Instead of rebuilding the same assurance story for every framework,
+          teams can reuse common controls, coordinate approvals and surface priorities in role-based
+          dashboards.
+        </p>
+      </div>
+
+      <div class="metric-strip" aria-label="Platform highlights">
+        <div class="metric"><div class="metric-value">9</div><div class="metric-label">Frameworks included</div></div>
+        <div class="metric"><div class="metric-value">72h</div><div class="metric-label">GDPR breach window</div></div>
+        <div class="metric"><div class="metric-value">3-phase</div><div class="metric-label">NIS2 reporting workflow</div></div>
+        <div class="metric"><div class="metric-value">24×7</div><div class="metric-label">Posture visibility</div></div>
+      </div>
+
+      <section class="capability-section">
+        <h2 class="section-kicker">Platform capabilities</h2>
+        <div class="bullet-columns">
+          <ul class="bullet-list">
+            <li>Multi-framework control library with cross-mapping, maturity views and gap analysis.</li>
+            <li>Risk registers, 5×5 heatmaps, appetite statements, treatments and key risk indicators.</li>
+            <li>Policy lifecycles with versioning, approvals, attestations, reviews and exceptions.</li>
+            <li>Audit planning, control testing, findings, evidence validity and remediation tracking.</li>
+          </ul>
+          <ul class="bullet-list">
+            <li>GDPR data-subject requests, ROPA, breach response and statutory deadline management.</li>
+            <li>NIS2 entity assessment, security measures, management accountability and staged reporting.</li>
+            <li>Configurable workflows, notifications, calendars, monitoring and drift detection.</li>
+            <li>Executive analytics, board and vendor portals, reports, APIs and integration patterns.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-name">Digibit Solutions Limited · ComplianceForge capability brief</div>
+      <div class="page-number">01</div>
+    </footer>
+  </section>
+
+  <!-- PAGE 02 — IMPLEMENTATION FOUNDATION -->
+  <section class="page">
+    <header class="verso-header">
+      <div class="eyebrow">Solution foundation · implementation snapshot</div>
+    </header>
+
+    <main>
+      <h1 class="page-heading">Built Across the GRC Lifecycle</h1>
+      <p class="page-subtitle">A connected foundation—from obligation to evidence and action</p>
+      <p class="page-lead">
+        ComplianceForge extends beyond a static control register. Its current implementation spans the
+        workflows, data structures and user experiences needed to coordinate governance, enterprise risk,
+        assurance, privacy, third-party oversight and executive reporting in one environment.
+      </p>
+
+      <div class="foundation-grid" aria-label="Implementation snapshot">
+        <div class="foundation-stat"><div class="number">9</div><div class="label">Supported frameworks</div></div>
+        <div class="foundation-stat"><div class="number">39</div><div class="label">Schema migrations</div></div>
+        <div class="foundation-stat"><div class="number">40+</div><div class="label">Domain services</div></div>
+        <div class="foundation-stat"><div class="number">29</div><div class="label">Workspace views</div></div>
+        <div class="foundation-stat"><div class="number">7</div><div class="label">Guided onboarding stages</div></div>
+        <div class="foundation-stat"><div class="number">5×5</div><div class="label">Risk matrix model</div></div>
+        <div class="foundation-stat"><div class="number">3</div><div class="label">NIS2 report phases</div></div>
+        <div class="foundation-stat"><div class="number">72h</div><div class="label">GDPR notification clock</div></div>
+      </div>
+
+      <section class="proof-section">
+        <h2 class="section-kicker">What the foundation establishes</h2>
+        <ul class="bullet-list">
+          <li>
+            A shared information model connects frameworks, controls, implementations, evidence, risks,
+            policies, audits, incidents, vendors and accountable owners—supporting a traceable assurance story.
+          </li>
+          <li>
+            Dedicated internal, vendor and board experiences bring operational teams and invited stakeholders
+            into focused workflows while preserving the context leadership needs for oversight.
+          </li>
+        </ul>
+      </section>
+
+      <aside class="callout">
+        <h2 class="callout-title">Why this matters beyond a control register</h2>
+        <p>
+          The same control can satisfy multiple obligations, support several audits and reduce repeated evidence
+          requests. ComplianceForge is designed to preserve those relationships, so a change in control status,
+          evidence currency or risk treatment can be understood across the wider compliance landscape.
+        </p>
+        <p>
+          That connected model creates the foundation for workflow automation, continuous monitoring, AI-assisted
+          remediation and executive analytics—turning compliance from a periodic reporting exercise into an
+          operating discipline with visible ownership and follow-through.
+        </p>
+        <p class="callout-note">
+          Snapshot figures describe the current repository implementation; production service levels and client
+          outcome measures are validated through deployment and pilot engagement.
+        </p>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-name">Digibit Solutions Limited · ComplianceForge capability brief</div>
+      <div class="page-number">02</div>
+    </footer>
+  </section>
+
+  <!-- PAGE 03 — SIX WORKSPACES -->
+  <section class="page">
+    <header class="masthead">
+      <div class="masthead-top">
+        <div class="brand-lockup">
+          <img class="digibit-logo" src="./assets/digibit-logo-full-color.svg" alt="Digibit — Beyond Technology" />
+        </div>
+        <div class="masthead-meta">
+          <div class="eyebrow">Connected operations · six GRC workspaces</div>
+          <div class="masthead-product">ComplianceForge</div>
+        </div>
+      </div>
+      <div class="masthead-rule"><span class="lead"></span><span class="tail"></span></div>
+    </header>
+
+    <main>
+      <h1 class="page-heading">Six Connected GRC Workspaces</h1>
+      <p class="section-intro">
+        Each workspace combines the records, workflows, accountability and reporting its discipline requires.
+        Teams operate in focused views while contributing to one shared risk and compliance picture.
+      </p>
+
+      <div class="workspace-grid">
+        <section class="workspace-card">
+          <div class="workspace-label">Governance · compliance</div>
+          <h2 class="workspace-title">Frameworks &amp; Control Assurance</h2>
+          <p class="workspace-tagline">One control model across multiple obligations</p>
+          <ul class="bullet-list">
+            <li>Adopt frameworks and organise domains, controls and guidance.</li>
+            <li>Map common requirements across standards.</li>
+            <li>Assign owners, maturity and implementation status.</li>
+            <li>Surface gaps, coverage and control-level evidence needs.</li>
+          </ul>
+        </section>
+
+        <section class="workspace-card">
+          <div class="workspace-label">Risk · resilience</div>
+          <h2 class="workspace-title">Enterprise Risk &amp; Continuity</h2>
+          <p class="workspace-tagline">From exposure to treatment and recovery readiness</p>
+          <ul class="bullet-list">
+            <li>Score inherent, residual and target risk.</li>
+            <li>Visualise appetite, heatmaps and trend movement.</li>
+            <li>Track treatments, indicators, owners and reviews.</li>
+            <li>Map BIA dependencies, continuity plans and exercises.</li>
+          </ul>
+        </section>
+
+        <section class="workspace-card">
+          <div class="workspace-label">Policy · accountability</div>
+          <h2 class="workspace-title">Policy, Attestation &amp; Exceptions</h2>
+          <p class="workspace-tagline">Governance that moves from document to action</p>
+          <ul class="bullet-list">
+            <li>Manage drafting, review, approval and publication.</li>
+            <li>Preserve versions, ownership and review schedules.</li>
+            <li>Run attestations and monitor acknowledgement rates.</li>
+            <li>Route exceptions through justification and approval.</li>
+          </ul>
+        </section>
+
+        <section class="workspace-card">
+          <div class="workspace-label">Audit · evidence</div>
+          <h2 class="workspace-title">Audit &amp; Evidence Management</h2>
+          <p class="workspace-tagline">A defensible trail from requirement to finding</p>
+          <ul class="bullet-list">
+            <li>Plan internal, external and certification audits.</li>
+            <li>Scope engagements and record structured findings.</li>
+            <li>Link evidence, validity, source and reviewer status.</li>
+            <li>Track corrective action and pre-audit readiness.</li>
+          </ul>
+        </section>
+
+        <section class="workspace-card">
+          <div class="workspace-label">Privacy · regulatory</div>
+          <h2 class="workspace-title">GDPR, DSR &amp; NIS2 Operations</h2>
+          <p class="workspace-tagline">Regulatory obligations translated into workflows</p>
+          <ul class="bullet-list">
+            <li>Coordinate DSR identity checks, tasks and deadlines.</li>
+            <li>Maintain processing records and data classifications.</li>
+            <li>Manage breach and staged NIS2 incident reporting.</li>
+            <li>Assess regulatory changes and create response actions.</li>
+          </ul>
+        </section>
+
+        <section class="workspace-card">
+          <div class="workspace-label">Third party · leadership</div>
+          <h2 class="workspace-title">Vendor &amp; Board Assurance</h2>
+          <p class="workspace-tagline">Focused collaboration beyond the GRC team</p>
+          <ul class="bullet-list">
+            <li>Maintain a risk-based vendor inventory.</li>
+            <li>Issue questionnaires and collect external evidence.</li>
+            <li>Present posture, alerts and decisions to the board.</li>
+            <li>Track board packs, decisions and follow-up actions.</li>
+          </ul>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-name">Digibit Solutions Limited · ComplianceForge capability brief</div>
+      <div class="page-number">03</div>
+    </footer>
+  </section>
+
+  <!-- PAGE 04 — ALIGNMENT, OUTCOMES, DIFFERENTIATION -->
+  <section class="page">
+    <header class="verso-header">
+      <div class="eyebrow">Frameworks · outcomes · why ComplianceForge</div>
+    </header>
+
+    <main>
+      <h1 class="page-heading">Framework &amp; Regulatory Alignment</h1>
+      <p class="standards-copy">
+        ComplianceForge brings recognised standards and Europe-focused obligations into one control environment.
+        Framework alignment is connected to evidence, risk and accountability—not treated as a checklist.
+      </p>
+
+      <div class="badge-row" aria-label="Supported frameworks and regulations">
+        <span class="standard-badge">ISO 27001</span>
+        <span class="standard-badge">UK GDPR</span>
+        <span class="standard-badge">NIS2</span>
+        <span class="standard-badge">NCSC CAF</span>
+        <span class="standard-badge">Cyber Essentials</span>
+        <span class="standard-badge">NIST 800-53</span>
+        <span class="standard-badge">NIST CSF 2.0</span>
+        <span class="standard-badge">PCI DSS 4.0</span>
+        <span class="standard-badge">COBIT 2019</span>
+        <span class="standard-badge">ITIL 4</span>
+        <span class="standard-badge">GDPR Article 30</span>
+        <span class="standard-badge">NIS2 Article 21</span>
+      </div>
+
+      <section class="impact">
+        <div class="impact-heading">
+          <h2>Designed Business Outcomes</h2>
+          <span class="impact-qualifier">Across the compliance lifecycle</span>
+        </div>
+        <div class="impact-grid">
+          <ul class="impact-list">
+            <li>Reduce repeated assessments through shared controls and cross-framework mappings.</li>
+            <li>Retrieve current, reviewable evidence faster during audits and assurance reviews.</li>
+            <li>Make accountability visible through owners, approvals, due dates and escalation paths.</li>
+            <li>Move findings and control gaps into structured remediation with measurable follow-through.</li>
+          </ul>
+          <ul class="impact-list">
+            <li>Respond to GDPR and NIS2 obligations with defined tasks and deadline-aware workflows.</li>
+            <li>Give privacy, procurement and security teams a shared view of third-party exposure.</li>
+            <li>Present executive-ready posture, priority risks, incidents and overdue actions.</li>
+            <li>Preserve an auditable history from requirement and decision through to supporting evidence.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="why">
+        <h2 class="why-heading">Why ComplianceForge</h2>
+        <div class="why-grid">
+          <section class="why-card">
+            <h3>Connected, Not Fragmented</h3>
+            <p>Controls, risks, policies, evidence, findings, owners and actions share context instead of living in separate registers.</p>
+            <p class="proof-line">→ One operating model across GRC disciplines</p>
+          </section>
+          <section class="why-card">
+            <h3>Europe-Focused by Design</h3>
+            <p>UK GDPR, NIS2, NCSC and Cyber Essentials workflows sit alongside globally recognised frameworks.</p>
+            <p class="proof-line">→ Dedicated privacy and NIS2 operating modules</p>
+          </section>
+          <section class="why-card">
+            <h3>Operational, Not Static</h3>
+            <p>Approvals, attestations, reminders, escalations and remediation connect written obligations to accountable work.</p>
+            <p class="proof-line">→ Workflow, monitoring and deadline patterns built in</p>
+          </section>
+          <section class="why-card">
+            <h3>Security-Conscious Foundation</h3>
+            <p>The design includes tenant isolation, JWT/OAuth patterns, RBAC, deny-overrides ABAC, encryption and audit trails.</p>
+            <p class="proof-line">→ Access and traceability designed at platform level</p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-name">Digibit Solutions Limited · ComplianceForge capability brief</div>
+      <div class="page-number">04</div>
+    </footer>
+  </section>
+
+  <!-- PAGE 05 — NEXT STEPS -->
+  <section class="page">
+    <header class="masthead">
+      <div class="masthead-top">
+        <div class="brand-lockup">
+          <img class="digibit-logo" src="./assets/digibit-logo-full-color.svg" alt="Digibit — Beyond Technology" />
+        </div>
+        <div class="masthead-meta">
+          <div class="eyebrow">Next steps · engage with us</div>
+          <div class="masthead-product">ComplianceForge</div>
+        </div>
+      </div>
+      <div class="masthead-rule"><span class="lead"></span><span class="tail"></span></div>
+    </header>
+
+    <main>
+      <p class="closing-statement">
+        ComplianceForge brings governance, risk, assurance and regulatory action into one connected view—helping
+        teams understand obligations, focus effort where it matters and demonstrate accountability with greater
+        confidence. From first assessment to continuous oversight, the platform is designed to turn compliance
+        complexity into coordinated action.
+      </p>
+
+      <section class="engage">
+        <h1>Engage With Us</h1>
+        <p class="engage-copy">
+          Whether you are establishing a GRC programme, consolidating fragmented tools, preparing for certification,
+          responding to European regulation or strengthening board oversight—we engage at the depth and pace your
+          organisation needs.
+        </p>
+
+        <div class="steps">
+          <section class="step">
+            <div class="step-number">1</div>
+            <h3>Capability Briefing</h3>
+            <p>A 30-minute discussion to map ComplianceForge to your regulatory context, operating model and priority outcomes.</p>
+          </section>
+          <section class="step">
+            <div class="step-number">2</div>
+            <h3>Tailored Demonstration</h3>
+            <p>A scenario-led walkthrough using your frameworks, roles and reference workflows to show the connected experience.</p>
+          </section>
+          <section class="step">
+            <div class="step-number">3</div>
+            <h3>Pilot Engagement</h3>
+            <p>A scoped pilot focused on one high-value use case, clear success measures and a practical scale-up pathway.</p>
+          </section>
+        </div>
+      </section>
+
+      <section class="contact-band">
+        <div>
+          <div class="contact-label">Platform</div>
+          <p class="contact-copy">
+            ComplianceForge<br />
+            Enterprise GRC<br />
+            UK &amp; Europe focused
+          </p>
+        </div>
+        <div>
+          <div class="contact-label">Delivery options</div>
+          <p class="contact-copy">
+            Cloud-hosted<br />
+            Private environment<br />
+            API &amp; integration enablement
+          </p>
+        </div>
+        <div>
+          <div class="contact-label">Connect</div>
+          <p class="contact-copy">
+            connect@globaldigibit.com<br />
+            globaldigibit.com<br />
+            +234 815 177 8448
+          </p>
+        </div>
+      </section>
+
+      <p class="prepared-for">Prepared for prospective enterprise and public-sector partners</p>
+      <p class="document-note">
+        Capability scope reflects the current solution design. Production service levels, certifications, deployment
+        references and quantified customer outcomes should be confirmed for each engagement before external issue.
+      </p>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-name">Digibit Solutions Limited · ComplianceForge capability brief</div>
+      <div class="page-number">05</div>
+    </footer>
+  </section>
+</body>
+</html>

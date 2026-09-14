@@ -1,0 +1,18 @@
+# Ordered, supported global reference-data bootstrap.
+#
+# Files not listed here are tenant/demo packs or legacy packs and are not run by
+# cmd/seed. Additions must be append-only after release; changing an applied file
+# intentionally fails the checksum guard.
+
+subscription_plans.sql
+rbac_defaults.sql
+frameworks.sql
+framework_controls.sql
+framework_mappings.sql
+risk_defaults.sql
+policy_defaults.sql
+notification_templates.sql
+dsr_response_templates.sql
+nis2_measures.sql
+analytics_widget_types.sql
+regulatory_sources.sql

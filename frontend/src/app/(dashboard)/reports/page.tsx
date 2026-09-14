@@ -3,15 +3,10 @@
 import { useState } from 'react';
 import {
   BarChart3,
-  FileText,
   AlertTriangle,
   Shield,
-  TrendingUp,
   AlertCircle,
-  Download,
   ChevronRight,
-  Target,
-  PieChart as PieChartIcon,
 } from 'lucide-react';
 import {
   BarChart,
@@ -31,7 +26,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { formatPercentage, getRiskLevelColor } from '@/lib/utils';
 import { useComplianceReport, useRiskReport } from '@/lib/api-hooks';

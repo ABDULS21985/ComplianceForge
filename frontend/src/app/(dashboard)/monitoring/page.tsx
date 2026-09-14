@@ -2,7 +2,6 @@
 
 import * as React from 'react';
 import {
-  Activity,
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -10,7 +9,6 @@ import {
   Play,
   Eye,
   RefreshCw,
-  Clock,
   TrendingUp,
   Shield,
 } from 'lucide-react';

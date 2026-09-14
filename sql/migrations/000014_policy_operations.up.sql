@@ -272,7 +272,7 @@ CREATE TABLE policy_exceptions (
 );
 
 -- Auto-generate exception_ref: EXC-XXXX
-CREATE OR REPLACE FUNCTION generate_exception_ref()
+CREATE OR REPLACE FUNCTION generate_policy_exception_ref()
 RETURNS TRIGGER AS $$
 DECLARE
     next_num INT;
@@ -296,7 +296,7 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_exceptions_generate_ref
     BEFORE INSERT ON policy_exceptions
-    FOR EACH ROW EXECUTE FUNCTION generate_exception_ref();
+    FOR EACH ROW EXECUTE FUNCTION generate_policy_exception_ref();
 
 CREATE INDEX idx_exc_org ON policy_exceptions(organization_id);
 CREATE INDEX idx_exc_policy ON policy_exceptions(policy_id);

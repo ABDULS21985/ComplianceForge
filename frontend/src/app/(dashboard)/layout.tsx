@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth-store";
 import { isAuthenticated } from "@/lib/auth";
+import { ROUTES } from "@/lib/routes";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 
@@ -19,7 +20,7 @@ export default function DashboardLayout({
   useEffect(() => {
     setMounted(true);
     if (!isAuthenticated()) {
-      router.replace("/login");
+      router.replace(ROUTES.auth.login);
     }
   }, [router]);
 

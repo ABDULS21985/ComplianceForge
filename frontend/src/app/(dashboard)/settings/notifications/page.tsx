@@ -5,11 +5,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Bell, Mail, MessageSquare, Webhook, Plus, Trash2, TestTube, Settings2,
-  Clock, Shield, AlertTriangle, FileText, ClipboardCheck, Building2, Activity,
+  Shield,
 } from 'lucide-react';
 
 import { api } from '@/lib/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -17,9 +17,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
-} from '@/components/ui/dialog';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -198,8 +195,8 @@ function PreferencesTab() {
 
 function RulesTab() {
   const queryClient = useQueryClient();
-  const [channelDialogOpen, setChannelDialogOpen] = useState(false);
-  const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
+  const [_channelDialogOpen, setChannelDialogOpen] = useState(false);
+  const [_ruleDialogOpen, setRuleDialogOpen] = useState(false);
 
   const { data: channels, isLoading: channelsLoading } = useQuery({
     queryKey: ['notification-channels'],

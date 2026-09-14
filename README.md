@@ -18,7 +18,7 @@ ComplianceForge is a governance, risk, and compliance (GRC) management platform 
 
 | Layer | Technology |
 |-------|------------|
-| Language | Go 1.22 |
+| Language | Go 1.24 |
 | HTTP Router | chi |
 | Database | PostgreSQL (pgx) |
 | Cache | Redis |
@@ -42,9 +42,8 @@ cp .env.example .env
 # Start all services
 docker compose up -d
 
-# Apply migrations and seed data
-make migrate-up
-make seed
+# Apply migrations and the supported, ordered reference-data seeds
+make bootstrap-db
 
 # The API is now available at http://localhost:8080
 ```
@@ -66,7 +65,9 @@ internal/
   service/      Business logic
   worker/       Async job processors
 proto/          Protocol Buffer definitions
-migrations/     SQL migration files
+sql/
+  migrations/  Versioned PostgreSQL migrations
+  seeds/       Ordered reference-data seeds and manifest
 docs/           Swagger / OpenAPI output
 scripts/        Helper scripts
 ```
@@ -79,7 +80,20 @@ make build         # Compile the API binary
 make test          # Run tests with race detection
 make lint          # Run golangci-lint
 make swagger       # Regenerate API docs
+make migrate-up    # Apply pending migrations
+make migrate-down  # Roll back one migration
+make seed          # Apply/verify immutable seeds from sql/seeds/manifest.txt
 ```
+
+Database commands prefer `DATABASE_URL`. If it is unset they fall back to the
+application's `CF_DATABASE_*` settings. `cmd/migrate` locates migrations in
+`sql/migrations` (or `MIGRATIONS_PATH`), and `cmd/seed` applies only files in
+`sql/seeds/manifest.txt` (or `SEEDS_PATH`) in declared order. Applied seed
+checksums and positions are recorded in `bootstrap_seed_history`; rerunning the
+command is safe, while changing or reordering an applied seed fails closed.
+
+Tenant-specific/demo seed packs are intentionally excluded from the bootstrap
+manifest and must be provisioned with a real organization context.
 
 ## License
 

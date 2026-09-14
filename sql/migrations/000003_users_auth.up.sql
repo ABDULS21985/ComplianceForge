@@ -122,9 +122,11 @@ CREATE INDEX idx_sessions_org ON user_sessions(organization_id);
 CREATE INDEX idx_sessions_token ON user_sessions(token_hash);
 CREATE INDEX idx_sessions_refresh ON user_sessions(refresh_token_hash) WHERE refresh_token_hash IS NOT NULL;
 CREATE INDEX idx_sessions_expires ON user_sessions(expires_at);
--- Partial index for active (non-revoked, non-expired) sessions
-CREATE INDEX idx_sessions_active ON user_sessions(user_id, organization_id)
-    WHERE revoked_at IS NULL AND expires_at > NOW();
+-- PostgreSQL requires partial-index predicates to be immutable. Keep the
+-- revocation predicate in the index and include expires_at as an indexed
+-- column; callers must still apply `expires_at > NOW()` at query time.
+CREATE INDEX idx_sessions_active ON user_sessions(user_id, organization_id, expires_at)
+    WHERE revoked_at IS NULL;
 
 COMMENT ON TABLE user_sessions IS 'Active user sessions. Tokens are stored as SHA-256 hashes — never in plaintext.';
 COMMENT ON COLUMN user_sessions.revoked_at IS 'Set when user logs out or session is force-revoked by admin. Checked on every request.';
@@ -145,8 +147,9 @@ CREATE TABLE password_reset_tokens (
 -- Indexes
 CREATE INDEX idx_password_reset_user ON password_reset_tokens(user_id);
 CREATE INDEX idx_password_reset_token ON password_reset_tokens(token_hash);
--- Partial index for unused, non-expired tokens
-CREATE INDEX idx_password_reset_active ON password_reset_tokens(token_hash)
-    WHERE used_at IS NULL AND expires_at > NOW();
+-- Expiry is evaluated by the query because NOW() is not valid in a partial
+-- index predicate. Including expires_at keeps the active-token lookup covered.
+CREATE INDEX idx_password_reset_active ON password_reset_tokens(token_hash, expires_at)
+    WHERE used_at IS NULL;
 
 COMMENT ON TABLE password_reset_tokens IS 'One-time password reset tokens. used_at prevents replay; expires_at enforces time limit.';

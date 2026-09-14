@@ -1,6 +1,5 @@
 'use client';
 
-import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -8,7 +7,6 @@ import {
   BookOpen,
   CheckCircle2,
   Clock,
-  Eye,
   FileText,
   Loader2,
   Send,
@@ -18,8 +16,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -28,7 +25,6 @@ import {
   usePublishPolicy,
   useAttestPolicy,
   useUpdatePolicy,
-  usePolicyAttestationStats,
 } from '@/lib/api-hooks';
 import {
   cn,

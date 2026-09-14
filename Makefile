@@ -1,4 +1,4 @@
-.PHONY: help build test lint migrate-up migrate-down seed docker-build docker-up docker-down generate-sqlc generate-proto swagger run clean test-integration test-e2e lint-all docker-build-all docker-push security-scan coverage-report
+.PHONY: help build test lint migrate-up migrate-down seed bootstrap-db docker-build docker-up docker-down generate-sqlc generate-proto swagger run clean test-integration test-e2e lint-all docker-build-all docker-push security-scan coverage-report
 
 APP_NAME := complianceforge
 API_BINARY := bin/$(APP_NAME)-api
@@ -29,15 +29,18 @@ lint:
 
 ## migrate-up: apply all pending database migrations
 migrate-up:
-	go run cmd/migrate/main.go up
+	go run ./cmd/migrate up
 
 ## migrate-down: roll back the last database migration
 migrate-down:
-	go run cmd/migrate/main.go down
+	go run ./cmd/migrate down -steps 1
 
 ## seed: populate the database with seed data
 seed:
-	go run cmd/seed/main.go
+	go run ./cmd/seed
+
+## bootstrap-db: apply migrations and the ordered reference-data seed manifest
+bootstrap-db: migrate-up seed
 
 ## docker-build: build Docker images
 docker-build:
@@ -81,7 +84,8 @@ test-integration:
 ## test-e2e: run Playwright E2E suite against local services
 test-e2e:
 	docker compose -f deployments/docker/docker-compose.yml up -d postgres redis
-	go run cmd/migrate/main.go up
+	go run ./cmd/migrate up
+	go run ./cmd/seed
 	cd frontend && npm ci && npm run build
 	go run cmd/api/main.go &
 	cd frontend && npm run start -- --port 3000 &

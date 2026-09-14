@@ -2,6 +2,7 @@
 // Singleton HTTP client with JWT auth, retry logic, and typed endpoint methods
 
 import { getToken, clearToken } from "./auth";
+import { ROUTES } from "./routes";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api/v1";
 const IS_DEV = process.env.NODE_ENV === "development";
@@ -125,7 +126,7 @@ class ApiClient {
     if (response.status === 401) {
       clearToken();
       if (typeof window !== "undefined") {
-        window.location.href = "/login";
+        window.location.href = ROUTES.auth.login;
       }
       throw { status: 401, message: "Unauthorized" } satisfies ApiError;
     }

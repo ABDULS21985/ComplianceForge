@@ -6,9 +6,11 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,9 +20,9 @@ import (
 
 // DSRService manages GDPR Data Subject Requests (Articles 15-22).
 type DSRService struct {
-	pool      *pgxpool.Pool
-	bus       *EventBus
-	encKey    []byte // AES-256 key (32 bytes) for PII encryption
+	pool   *pgxpool.Pool
+	bus    *EventBus
+	encKey []byte // AES-256 key (32 bytes) for PII encryption
 }
 
 // CreateDSRInput holds the input for creating a new DSR.
@@ -96,25 +98,31 @@ type DSRDashboard struct {
 
 // NewDSRService creates a new DSRService. It reads the PII encryption key
 // from the DSR_ENCRYPTION_KEY environment variable (base64-encoded, 32 bytes).
-func NewDSRService(pool *pgxpool.Pool, bus *EventBus) *DSRService {
-	keyB64 := os.Getenv("DSR_ENCRYPTION_KEY")
-	var key []byte
-	if keyB64 != "" {
-		var err error
-		key, err = base64.StdEncoding.DecodeString(keyB64)
-		if err != nil || len(key) != 32 {
-			log.Warn().Msg("DSR_ENCRYPTION_KEY invalid, using zero key (not for production)")
-			key = make([]byte, 32)
-		}
-	} else {
-		log.Warn().Msg("DSR_ENCRYPTION_KEY not set, PII encryption disabled (not for production)")
-		key = make([]byte, 32)
+func NewDSRService(pool *pgxpool.Pool, bus *EventBus) (*DSRService, error) {
+	if pool == nil {
+		return nil, errors.New("DSR database is required")
 	}
-	return &DSRService{pool: pool, bus: bus, encKey: key}
+	if bus == nil {
+		return nil, errors.New("DSR event bus is required")
+	}
+
+	keyB64 := os.Getenv("DSR_ENCRYPTION_KEY")
+	if strings.TrimSpace(keyB64) == "" {
+		return nil, errors.New("DSR_ENCRYPTION_KEY is required")
+	}
+	key, err := base64.StdEncoding.DecodeString(keyB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode DSR_ENCRYPTION_KEY: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("DSR_ENCRYPTION_KEY must decode to exactly 32 bytes")
+	}
+
+	return &DSRService{pool: pool, bus: bus, encKey: append([]byte(nil), key...)}, nil
 }
 
 // encryptPII encrypts a plaintext string using AES-256-GCM.
-func (s *DSRService) encryptPII(plaintext string) (string, error) {
+func (s *DSRService) encryptPII(orgID, field, plaintext string) (string, error) {
 	block, err := aes.NewCipher(s.encKey)
 	if err != nil {
 		return "", fmt.Errorf("create cipher: %w", err)
@@ -127,12 +135,16 @@ func (s *DSRService) encryptPII(plaintext string) (string, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", fmt.Errorf("generate nonce: %w", err)
 	}
-	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), piiAdditionalData(orgID, field))
+	return "v1:" + base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
 // decryptPII decrypts a base64-encoded AES-256-GCM ciphertext.
-func (s *DSRService) decryptPII(encoded string) (string, error) {
+func (s *DSRService) decryptPII(orgID, field, encoded string) (string, error) {
+	versioned := strings.HasPrefix(encoded, "v1:")
+	if versioned {
+		encoded = strings.TrimPrefix(encoded, "v1:")
+	}
 	data, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", fmt.Errorf("decode base64: %w", err)
@@ -149,35 +161,43 @@ func (s *DSRService) decryptPII(encoded string) (string, error) {
 	if len(data) < nonceSize {
 		return "", fmt.Errorf("ciphertext too short")
 	}
-	plaintext, err := gcm.Open(nil, data[:nonceSize], data[nonceSize:], nil)
+	var additionalData []byte
+	if versioned {
+		additionalData = piiAdditionalData(orgID, field)
+	}
+	plaintext, err := gcm.Open(nil, data[:nonceSize], data[nonceSize:], additionalData)
 	if err != nil {
 		return "", fmt.Errorf("decrypt: %w", err)
 	}
 	return string(plaintext), nil
 }
 
+func piiAdditionalData(orgID, field string) []byte {
+	return []byte("complianceforge:dsr-pii:v1:" + orgID + ":" + field)
+}
+
 // CreateRequest creates a new DSR with encrypted PII, default task checklist,
 // and audit trail entry.
 func (s *DSRService) CreateRequest(ctx context.Context, orgID string, req CreateDSRInput) (*DSRRequest, error) {
 	// Encrypt PII fields.
-	nameEnc, err := s.encryptPII(req.DataSubjectName)
+	nameEnc, err := s.encryptPII(orgID, "name", req.DataSubjectName)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt name: %w", err)
 	}
-	emailEnc, err := s.encryptPII(req.DataSubjectEmail)
+	emailEnc, err := s.encryptPII(orgID, "email", req.DataSubjectEmail)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt email: %w", err)
 	}
 	var phoneEnc, addressEnc *string
 	if req.DataSubjectPhone != "" {
-		enc, err := s.encryptPII(req.DataSubjectPhone)
+		enc, err := s.encryptPII(orgID, "phone", req.DataSubjectPhone)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt phone: %w", err)
 		}
 		phoneEnc = &enc
 	}
 	if req.DataSubjectAddress != "" {
-		enc, err := s.encryptPII(req.DataSubjectAddress)
+		enc, err := s.encryptPII(orgID, "address", req.DataSubjectAddress)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt address: %w", err)
 		}
@@ -195,7 +215,13 @@ func (s *DSRService) CreateRequest(ctx context.Context, orgID string, req Create
 	var daysRemaining int
 	var createdAt time.Time
 
-	err = s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin DSR transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	err = tx.QueryRow(ctx, `
 		INSERT INTO dsr_requests (
 			organization_id, request_type, priority,
 			data_subject_name_encrypted, data_subject_email_encrypted,
@@ -212,17 +238,20 @@ func (s *DSRService) CreateRequest(ctx context.Context, orgID string, req Create
 	}
 
 	// Create default task checklist.
-	if err := s.createTaskChecklist(ctx, orgID, id, req.RequestType); err != nil {
-		log.Error().Err(err).Str("dsr_id", id).Msg("failed to create task checklist")
+	if err := s.createTaskChecklist(ctx, tx, orgID, id, req.RequestType); err != nil {
+		return nil, err
 	}
 
 	// Insert audit trail entry.
-	_, err = s.pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO dsr_audit_trail (organization_id, dsr_request_id, action, description)
 		VALUES ($1, $2, 'request_received', $3)`,
 		orgID, id, fmt.Sprintf("DSR %s received: %s request via %s", requestRef, req.RequestType, req.RequestSource))
 	if err != nil {
-		log.Error().Err(err).Str("dsr_id", id).Msg("failed to create audit trail entry")
+		return nil, fmt.Errorf("create DSR audit trail: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit DSR transaction: %w", err)
 	}
 
 	// Emit event.
@@ -299,8 +328,14 @@ func (s *DSRService) GetRequest(ctx context.Context, orgID, requestID string) (*
 	}
 
 	// Decrypt PII.
-	r.DataSubjectName, _ = s.decryptPII(nameEnc)
-	r.DataSubjectEmail, _ = s.decryptPII(emailEnc)
+	r.DataSubjectName, err = s.decryptPII(orgID, "name", nameEnc)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt DSR subject name: %w", err)
+	}
+	r.DataSubjectEmail, err = s.decryptPII(orgID, "email", emailEnc)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt DSR subject email: %w", err)
+	}
 
 	r.ReceivedDate = receivedDate.Format("2006-01-02")
 	r.ResponseDeadline = responseDeadline.Format("2006-01-02")
@@ -451,8 +486,14 @@ func (s *DSRService) ListRequests(ctx context.Context, orgID string, page, pageS
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan DSR request: %w", err)
 		}
-		r.DataSubjectName, _ = s.decryptPII(nameEnc)
-		r.DataSubjectEmail, _ = s.decryptPII(emailEnc)
+		r.DataSubjectName, err = s.decryptPII(orgID, "name", nameEnc)
+		if err != nil {
+			return nil, 0, fmt.Errorf("decrypt DSR subject name: %w", err)
+		}
+		r.DataSubjectEmail, err = s.decryptPII(orgID, "email", emailEnc)
+		if err != nil {
+			return nil, 0, fmt.Errorf("decrypt DSR subject email: %w", err)
+		}
 		r.ReceivedDate = receivedDate.Format("2006-01-02")
 		r.ResponseDeadline = responseDeadline.Format("2006-01-02")
 		if extDeadline != nil {
@@ -773,8 +814,14 @@ func (s *DSRService) CheckSLACompliance(ctx context.Context, orgID string) ([]DS
 		); err != nil {
 			return nil, fmt.Errorf("scan at-risk DSR: %w", err)
 		}
-		r.DataSubjectName, _ = s.decryptPII(nameEnc)
-		r.DataSubjectEmail, _ = s.decryptPII(emailEnc)
+		r.DataSubjectName, err = s.decryptPII(orgID, "name", nameEnc)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt DSR subject name: %w", err)
+		}
+		r.DataSubjectEmail, err = s.decryptPII(orgID, "email", emailEnc)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt DSR subject email: %w", err)
+		}
 		r.ReceivedDate = receivedDate.Format("2006-01-02")
 		r.ResponseDeadline = responseDeadline.Format("2006-01-02")
 		if extDeadline != nil {
@@ -789,7 +836,7 @@ func (s *DSRService) CheckSLACompliance(ctx context.Context, orgID string) ([]DS
 }
 
 // createTaskChecklist generates default tasks based on DSR request type.
-func (s *DSRService) createTaskChecklist(ctx context.Context, orgID, requestID, requestType string) error {
+func (s *DSRService) createTaskChecklist(ctx context.Context, tx pgx.Tx, orgID, requestID, requestType string) error {
 	type taskDef struct {
 		taskType    string
 		description string
@@ -865,7 +912,7 @@ func (s *DSRService) createTaskChecklist(ctx context.Context, orgID, requestID, 
 	allTasks := append(commonTasks, specificTasks...)
 
 	for _, t := range allTasks {
-		_, err := s.pool.Exec(ctx, `
+		_, err := tx.Exec(ctx, `
 			INSERT INTO dsr_tasks (organization_id, dsr_request_id, task_type, description, sort_order)
 			VALUES ($1, $2, $3, $4, $5)`,
 			orgID, requestID, t.taskType, t.description, t.sortOrder)

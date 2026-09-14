@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -20,8 +21,8 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" {
+		requestID := middleware.GetReqID(r.Context())
+		if !validRequestID(requestID) {
 			requestID = uuid.New().String()
 		}
 
@@ -29,6 +30,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		r = r.WithContext(ctx)
 
 		w.Header().Set("X-Request-ID", requestID)
+		r.Header.Set("X-Request-ID", requestID)
 
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
@@ -39,14 +41,54 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		log.Info().
 			Str("request_id", requestID).
 			Str("method", r.Method).
-			Str("path", r.URL.Path).
+			Str("path", redactedRequestPath(r.URL.Path)).
 			Int("status", ww.Status()).
 			Dur("duration", duration).
-			Str("remote_addr", r.RemoteAddr).
-			Str("user_agent", r.UserAgent()).
+			Str("remote_addr", truncateLogField(r.RemoteAddr, 128)).
+			Str("user_agent", truncateLogField(r.UserAgent(), 256)).
 			Int("bytes_written", ww.BytesWritten()).
 			Msg("request completed")
 	})
+}
+
+func validRequestID(value string) bool {
+	if len(value) == 0 || len(value) > 64 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' || char == ':' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func redactedRequestPath(path string) string {
+	for _, prefix := range []string{
+		"/api/v1/vendor-portal",
+		"/api/v1/board-portal",
+		"/api/v1/calendar/ical",
+	} {
+		if !strings.HasPrefix(path, prefix+"/") {
+			continue
+		}
+		remainder := strings.TrimPrefix(path, prefix+"/")
+		_, suffix, found := strings.Cut(remainder, "/")
+		if !found {
+			return prefix + "/[REDACTED]"
+		}
+		return prefix + "/[REDACTED]/" + suffix
+	}
+	return path
+}
+
+func truncateLogField(value string, maxLength int) string {
+	if len(value) <= maxLength {
+		return value
+	}
+	return value[:maxLength]
 }
 
 // GetRequestIDFromContext extracts the request_id from the request context.

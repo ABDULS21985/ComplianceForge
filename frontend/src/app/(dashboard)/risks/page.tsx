@@ -53,6 +53,7 @@ import {
   getRiskScoreColor,
   getStatusColor,
 } from '@/lib/utils';
+import { useQuickCreate } from '@/lib/use-quick-create';
 
 // ---------------------------------------------------------------------------
 // Zod schema for creating a risk
@@ -597,7 +598,7 @@ export default function RiskRegisterPage() {
   const riskLevelFilter = searchParams.get('risk_level') ?? 'all';
 
   const [search, setSearch] = useState('');
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useQuickCreate('risk');
 
   // Build API params
   const apiParams = useMemo(() => {

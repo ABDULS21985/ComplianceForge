@@ -2,11 +2,13 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/complianceforge/platform/internal/database"
 )
 
 // TenantMiddleware returns a Chi-compatible middleware that extracts the
@@ -19,48 +21,34 @@ func TenantMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			orgID := GetOrgIDFromContext(r.Context())
-			if orgID == "" {
+			if _, err := uuid.Parse(orgID); err != nil {
 				log.Warn().
 					Str("path", r.URL.Path).
-					Msg("missing organization_id in context; ensure auth middleware runs first")
-				http.Error(w, `{"error":"missing tenant context"}`, http.StatusUnauthorized)
+					Msg("missing or invalid organization_id in authentication context")
+				http.Error(w, `{"error":"invalid tenant context"}`, http.StatusUnauthorized)
 				return
 			}
 
-			conn, err := pool.Acquire(r.Context())
+			handlerStarted := false
+			err := database.WithTenantConnection(r.Context(), pool, orgID, func(ctx context.Context) error {
+				// Keep the legacy concrete connection accessor available while
+				// repositories migrate to database.QuerierFromContext.
+				if conn, ok := database.QuerierFromContext(ctx, nil).(*pgxpool.Conn); ok {
+					ctx = context.WithValue(ctx, contextKeyTenantConn, conn)
+				}
+				handlerStarted = true
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return nil
+			})
 			if err != nil {
 				log.Error().
 					Err(err).
 					Str("organization_id", orgID).
-					Msg("failed to acquire database connection")
-				http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
-				return
+					Msg("tenant-scoped request failed")
+				if !handlerStarted {
+					http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+				}
 			}
-			defer conn.Release()
-
-			// Use a parameterized format to safely set the tenant variable.
-			// SET does not support $1 placeholders, so we use fmt.Sprintf with
-			// strict validation (orgID comes from a verified JWT claim).
-			query := fmt.Sprintf("SET app.current_tenant = '%s'", orgID)
-			_, err = conn.Exec(r.Context(), query)
-			if err != nil {
-				log.Error().
-					Err(err).
-					Str("organization_id", orgID).
-					Msg("failed to set tenant context in database session")
-				http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
-				return
-			}
-
-			// Store the tenant-scoped connection in context so downstream
-			// handlers can use it for RLS-filtered queries.
-			ctx := context.WithValue(r.Context(), contextKeyTenantConn, conn)
-
-			log.Debug().
-				Str("organization_id", orgID).
-				Msg("tenant context set")
-
-			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import api from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -71,7 +71,6 @@ interface BCExercise {
 // ---------------------------------------------------------------------------
 
 export default function BusinessImpactAnalysisPage() {
-  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'processes' | 'spof' | 'scenarios' | 'plans' | 'exercises'>('processes');
   const [criticalityFilter, setCriticalityFilter] = useState('');
 

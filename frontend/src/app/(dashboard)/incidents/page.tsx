@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
@@ -19,7 +19,7 @@ import {
   Database,
 } from 'lucide-react';
 
-import { cn, formatDate, formatDateTime, getStatusColor, getRiskLevelColor } from '@/lib/utils';
+import { cn, formatDate, getStatusColor, getRiskLevelColor } from '@/lib/utils';
 import {
   useIncidents,
   useIncidentStats,
@@ -51,6 +51,7 @@ import {
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
+import { useQuickCreate } from '@/lib/use-quick-create';
 
 // ---------------------------------------------------------------------------
 // Validation schema
@@ -123,7 +124,7 @@ export default function IncidentsPage() {
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(20);
   const [search, setSearch] = React.useState('');
-  const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [sheetOpen, setSheetOpen] = useQuickCreate('incident');
 
   // Urgent breaches polling
   const { data: urgentBreachesData } = useUrgentBreaches();

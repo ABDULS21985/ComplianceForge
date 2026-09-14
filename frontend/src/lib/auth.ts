@@ -1,9 +1,14 @@
 // ComplianceForge Auth Utilities
 // JWT token management, decoding, and session helpers
 
-const ACCESS_TOKEN_KEY = "cf_access_token";
-const REFRESH_TOKEN_KEY = "cf_refresh_token";
+import { ROUTES } from "./routes";
+import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from "./auth-constants";
 
+/**
+ * Compatibility boundary: these tokens remain browser-readable until the API
+ * provides a server/BFF session contract capable of issuing, rotating,
+ * validating, and revoking HttpOnly cookies. See ../../SECURITY.md.
+ */
 // ---------------------------------------------------------------------------
 // Token storage
 // ---------------------------------------------------------------------------
@@ -53,7 +58,7 @@ export interface JwtPayload {
   [key: string]: unknown;
 }
 
-function decodeJwt(token: string): JwtPayload | null {
+export function decodeJwt(token: string): JwtPayload | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
@@ -76,6 +81,10 @@ function decodeJwt(token: string): JwtPayload | null {
  */
 export function isAuthenticated(): boolean {
   const token = getToken();
+  return isTokenAuthenticated(token);
+}
+
+export function isTokenAuthenticated(token: string | null): boolean {
   if (!token) return false;
   const payload = decodeJwt(token);
   if (!payload) return false;
@@ -107,6 +116,6 @@ export function logout(queryClient?: { clear: () => void }): void {
     queryClient.clear();
   }
   if (typeof window !== "undefined") {
-    window.location.href = "/login";
+    window.location.href = ROUTES.auth.login;
   }
 }

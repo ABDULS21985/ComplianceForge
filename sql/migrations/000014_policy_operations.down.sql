@@ -51,7 +51,7 @@ DROP TRIGGER IF EXISTS trg_campaigns_updated_at ON policy_attestation_campaigns;
 DROP TRIGGER IF EXISTS trg_approval_steps_updated_at ON policy_approval_steps;
 DROP TRIGGER IF EXISTS trg_policy_workflows_updated_at ON policy_approval_workflows;
 
-DROP FUNCTION IF EXISTS generate_exception_ref();
+DROP FUNCTION IF EXISTS generate_policy_exception_ref();
 
 -- Drop tables in dependency order
 DROP TABLE IF EXISTS policy_control_mappings CASCADE;
