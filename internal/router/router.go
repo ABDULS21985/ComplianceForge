@@ -81,7 +81,8 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	permissionHandler := dependencies.Permissions
 	incidentHandler := dependencies.Incidents
 	assetHandler := dependencies.Assets
-	vendorHandler := dependencies.Domains.Vendor
+	vendorHandler := dependencies.Vendors
+	accessAdministrationHandler := dependencies.AccessAdministration
 	dashboardHandler := dependencies.Domains.Dashboard
 	reportHandler := dependencies.Domains.Report
 	notificationHandler := dependencies.Notifications
@@ -216,6 +217,19 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/stats", assetHandler.Stats)
 			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/{id}", assetHandler.GetByID)
 			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/{id}/events", assetHandler.ListEvents)
+		})
+		r.Route("/vendors", func(r chi.Router) {
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/", vendorHandler.List)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/statistics", vendorHandler.Statistics)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/due-for-assessment", vendorHandler.ListDueForAssessment)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/contracts/upcoming", vendorHandler.ListDueContracts)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/certifications/expiring", vendorHandler.ListExpiringCertifications)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/{id}", vendorHandler.GetByID)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/{id}/timeline", vendorHandler.ListEvents)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/{id}/contacts", vendorHandler.ListContacts)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/{id}/contracts", vendorHandler.ListContracts)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/{id}/certifications", vendorHandler.ListCertifications)
+			r.With(middleware.RequireAPIKeyPermission("read", "vendors")).Get("/{id}/subprocessors", vendorHandler.ListSubprocessors)
 		})
 	})
 
@@ -372,15 +386,39 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Vendors
 		r.Route("/vendors", func(r chi.Router) {
-			if vendorHandler != nil {
-				r.Post("/", vendorHandler.Create)
-				r.Get("/", vendorHandler.List)
-				r.Get("/due-for-assessment", vendorHandler.GetDueForAssessment)
-				r.Get("/{id}", vendorHandler.GetByID)
-				r.Put("/{id}", vendorHandler.Update)
-				r.Delete("/{id}", vendorHandler.Delete)
-				r.Post("/{id}/assess", vendorHandler.Assess)
-			}
+			r.Post("/", vendorHandler.Create)
+			r.Get("/", vendorHandler.List)
+			r.Get("/statistics", vendorHandler.Statistics)
+			// Backward-compatible route for the existing dashboard client.
+			r.Get("/stats", vendorHandler.Statistics)
+			r.Get("/due-for-assessment", vendorHandler.ListDueForAssessment)
+			r.Get("/contracts/upcoming", vendorHandler.ListDueContracts)
+			r.Get("/certifications/expiring", vendorHandler.ListExpiringCertifications)
+			r.Get("/{id}", vendorHandler.GetByID)
+			r.Put("/{id}", vendorHandler.Update)
+			r.Patch("/{id}", vendorHandler.Update)
+			r.Delete("/{id}", vendorHandler.Delete)
+			r.Post("/{id}/transitions", vendorHandler.Transition)
+			r.Post("/{id}/assessments", vendorHandler.RecordAssessment)
+			// Compatibility alias for the former assessment stub.
+			r.Post("/{id}/assess", vendorHandler.RecordAssessment)
+			r.Get("/{id}/timeline", vendorHandler.ListEvents)
+			r.Get("/{id}/contacts", vendorHandler.ListContacts)
+			r.Post("/{id}/contacts", vendorHandler.SaveContact)
+			r.Put("/{id}/contacts/{contactID}", vendorHandler.SaveContact)
+			r.Delete("/{id}/contacts/{contactID}", vendorHandler.DeleteContact)
+			r.Get("/{id}/contracts", vendorHandler.ListContracts)
+			r.Post("/{id}/contracts", vendorHandler.SaveContract)
+			r.Put("/{id}/contracts/{contractID}", vendorHandler.SaveContract)
+			r.Delete("/{id}/contracts/{contractID}", vendorHandler.DeleteContract)
+			r.Get("/{id}/certifications", vendorHandler.ListCertifications)
+			r.Post("/{id}/certifications", vendorHandler.SaveCertification)
+			r.Put("/{id}/certifications/{certificationID}", vendorHandler.SaveCertification)
+			r.Delete("/{id}/certifications/{certificationID}", vendorHandler.DeleteCertification)
+			r.Get("/{id}/subprocessors", vendorHandler.ListSubprocessors)
+			r.Post("/{id}/subprocessors", vendorHandler.SaveSubprocessor)
+			r.Put("/{id}/subprocessors/{subprocessorID}", vendorHandler.SaveSubprocessor)
+			r.Delete("/{id}/subprocessors/{subprocessorID}", vendorHandler.DeleteSubprocessor)
 		})
 
 		// Dashboard
@@ -553,6 +591,19 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 		// Access Policies (ABAC)
 		r.Route("/access", func(r chi.Router) {
 			r.Get("/my-permissions", permissionHandler.GetMyPermissions)
+			r.Get("/permissions", accessAdministrationHandler.ListPermissions)
+			r.Get("/roles", accessAdministrationHandler.ListRoles)
+			r.Post("/roles", accessAdministrationHandler.CreateRole)
+			r.Get("/roles/{id}", accessAdministrationHandler.GetRole)
+			r.Patch("/roles/{id}", accessAdministrationHandler.UpdateRole)
+			r.Put("/roles/{id}", accessAdministrationHandler.UpdateRole)
+			r.Delete("/roles/{id}", accessAdministrationHandler.DeleteRole)
+			r.Post("/roles/{id}/clone", accessAdministrationHandler.CloneRole)
+			r.Post("/roles/{id}/impact-preview", accessAdministrationHandler.PreviewImpact)
+			r.Get("/roles/{id}/assignments", accessAdministrationHandler.ListAssignments)
+			r.Post("/roles/{id}/assignments", accessAdministrationHandler.AssignRole)
+			r.Delete("/roles/{id}/assignments/{userID}", accessAdministrationHandler.UnassignRole)
+			r.Get("/roles/{id}/events", accessAdministrationHandler.ListEvents)
 			if accessHandler != nil {
 				r.Get("/policies", accessHandler.ListPolicies)
 				r.Post("/policies", accessHandler.CreatePolicy)

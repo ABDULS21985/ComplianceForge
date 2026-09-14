@@ -3,6 +3,10 @@
 DROP TRIGGER IF EXISTS trg_role_change_events_tenant_scope ON role_change_events;
 DROP FUNCTION IF EXISTS validate_role_change_event_scope();
 DROP TABLE IF EXISTS role_change_events;
+DROP POLICY IF EXISTS role_permissions_tenant_delete ON role_permissions;
+DROP POLICY IF EXISTS role_permissions_tenant_insert ON role_permissions;
+DROP POLICY IF EXISTS role_permissions_tenant_select ON role_permissions;
+ALTER TABLE role_permissions DISABLE ROW LEVEL SECURITY;
 DROP TRIGGER IF EXISTS trg_user_roles_tenant_scope ON user_roles;
 DROP FUNCTION IF EXISTS validate_user_role_tenant_scope();
 ALTER TABLE user_roles DROP CONSTRAINT IF EXISTS fk_user_roles_user_tenant;

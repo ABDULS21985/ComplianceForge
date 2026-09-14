@@ -38,6 +38,16 @@ import type {
   IncidentUnassignmentInput,
 } from '@/types/incident';
 import { formatIncidentError } from './incident';
+import type {
+  Asset,
+  AssetCreateInput,
+  AssetLifecycleEvent,
+  AssetListParams,
+  AssetPage,
+  AssetPatch,
+  AssetStats,
+} from '@/types/asset';
+import { formatAssetError } from './asset';
 import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
@@ -106,6 +116,8 @@ export const queryKeys = {
   assetsList: (params?: Record<string, unknown>) => ["assets", "list", params] as const,
   asset: (id: string) => ["assets", id] as const,
   assetStats: ["assets", "stats"] as const,
+  assetEvents: (id: string, params?: { page?: number; page_size?: number }) =>
+    ["assets", id, "events", params] as const,
 
   // Controls
   control: (id: string) => ["controls", id] as const,
@@ -929,8 +941,8 @@ export function useVendorStats(options?: Partial<UseQueryOptions>) {
 // ---------------------------------------------------------------------------
 
 export function useAssets(
-  params?: PaginationParams & { asset_type?: string; criticality?: string },
-  options?: Partial<UseQueryOptions>
+  params?: AssetListParams,
+  options?: Omit<UseQueryOptions<AssetPage<Asset>>, 'queryKey' | 'queryFn'>,
 ) {
   return useQuery({
     queryKey: queryKeys.assetsList(params as Record<string, unknown>),
@@ -939,7 +951,10 @@ export function useAssets(
   });
 }
 
-export function useAsset(id: string, options?: Partial<UseQueryOptions>) {
+export function useAsset(
+  id: string,
+  options?: Omit<UseQueryOptions<Asset>, 'queryKey' | 'queryFn'>,
+) {
   return useQuery({
     queryKey: queryKeys.asset(id),
     queryFn: () => api.assets.get(id),
@@ -951,40 +966,72 @@ export function useAsset(id: string, options?: Partial<UseQueryOptions>) {
 export function useCreateAsset() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: unknown) => api.assets.create(data),
+    mutationFn: (data: AssetCreateInput) => api.assets.create(data),
     onSuccess: () => {
       toast.success("Asset registered.");
       qc.invalidateQueries({ queryKey: queryKeys.assets });
       qc.invalidateQueries({ queryKey: queryKeys.assetStats });
       qc.invalidateQueries({ queryKey: queryKeys.dashboard });
     },
-    onError: () => {
-      toast.error("Failed to register asset.");
+    onError: (error) => {
+      toast.error(formatAssetError(error, 'Failed to register asset.'));
     },
   });
 }
 
-export function useUpdateAsset() {
+export function useUpdateAsset(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: unknown }) => api.assets.update(id, data),
-    onSuccess: (_data, variables) => {
+    mutationFn: (data: AssetPatch) => api.assets.update(id, data),
+    onSuccess: (asset) => {
       toast.success("Asset updated.");
-      qc.invalidateQueries({ queryKey: queryKeys.asset(variables.id) });
+      qc.setQueryData(queryKeys.asset(id), asset);
       qc.invalidateQueries({ queryKey: queryKeys.assets });
       qc.invalidateQueries({ queryKey: queryKeys.assetStats });
+      qc.invalidateQueries({ queryKey: queryKeys.assetEvents(id) });
     },
-    onError: () => {
-      toast.error("Failed to update asset.");
+    onError: (error) => {
+      toast.error(formatAssetError(error, 'Failed to update asset.'));
     },
   });
 }
 
-export function useAssetStats(options?: Partial<UseQueryOptions>) {
+export function useDeleteAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: number }) =>
+      api.assets.delete(id, expectedVersion),
+    onSuccess: (_data, { id }) => {
+      toast.success('Asset deleted.');
+      qc.removeQueries({ queryKey: queryKeys.asset(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.assets });
+      qc.invalidateQueries({ queryKey: queryKeys.assetStats });
+      qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+    },
+    onError: (error) => toast.error(formatAssetError(error, 'Failed to delete asset.')),
+  });
+}
+
+export function useAssetStats(
+  options?: Omit<UseQueryOptions<AssetStats>, 'queryKey' | 'queryFn'>,
+) {
   return useQuery({
     queryKey: queryKeys.assetStats,
     queryFn: () => api.assets.stats(),
     staleTime: 30 * 1000,
+    ...options,
+  });
+}
+
+export function useAssetEvents(
+  id: string,
+  params: { page?: number; page_size?: number },
+  options?: Omit<UseQueryOptions<AssetPage<AssetLifecycleEvent>>, 'queryKey' | 'queryFn'>,
+) {
+  return useQuery({
+    queryKey: queryKeys.assetEvents(id, params),
+    queryFn: () => api.assets.events(id, params),
+    enabled: Boolean(id),
     ...options,
   });
 }

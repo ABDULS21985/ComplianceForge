@@ -135,7 +135,7 @@ security-scan: security-tools docker-build-all
 	PATH=$(SECURITY_TOOLS_DIR):$$PATH govulncheck -format text -show version ./... > $(SECURITY_REPORT_DIR)/govulncheck.txt
 	cd frontend && npm ci --ignore-scripts --no-audit
 	cd frontend && npm audit --audit-level=high --json > $(SECURITY_REPORT_DIR)/npm-audit.json
-	PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy fs . --scanners vuln,misconfig,secret,license --license-full --include-dev-deps --skip-dirs .git --skip-dirs frontend/node_modules --skip-dirs frontend/.next --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-filesystem.json
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy fs . --scanners vuln,misconfig,secret --include-dev-deps --skip-dirs .git --skip-dirs frontend/node_modules --skip-dirs frontend/.next --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-filesystem.json
 	PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy fs frontend --scanners license --license-full --include-dev-deps --skip-dirs .next --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-licenses.json
 	@set -e; for component in api worker migrator frontend; do \
 		PATH=$(SECURITY_TOOLS_DIR):$$PATH syft complianceforge-$$component:scan --output spdx-json=$(SECURITY_REPORT_DIR)/sbom/$$component.spdx.json; \

@@ -84,6 +84,40 @@ CREATE TRIGGER trg_user_roles_tenant_scope
     BEFORE INSERT OR UPDATE ON user_roles
     FOR EACH ROW EXECUTE FUNCTION validate_user_role_tenant_scope();
 
+-- Permission mappings inherit their tenant boundary from the owning role.
+-- System-role grants remain readable by every tenant, while only mappings for
+-- an active custom role in the current tenant may be created or removed.
+ALTER TABLE role_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE role_permissions FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY role_permissions_tenant_select ON role_permissions FOR SELECT
+    USING (EXISTS (
+        SELECT 1 FROM roles role
+        WHERE role.id = role_permissions.role_id
+          AND (role.organization_id = get_current_tenant()
+               OR (role.organization_id IS NULL AND role.is_system_role))
+    ));
+
+CREATE POLICY role_permissions_tenant_insert ON role_permissions FOR INSERT
+    WITH CHECK (EXISTS (
+        SELECT 1 FROM roles role
+        WHERE role.id = role_permissions.role_id
+          AND role.organization_id = get_current_tenant()
+          AND role.is_custom
+          AND NOT role.is_system_role
+          AND role.deleted_at IS NULL
+    ));
+
+CREATE POLICY role_permissions_tenant_delete ON role_permissions FOR DELETE
+    USING (EXISTS (
+        SELECT 1 FROM roles role
+        WHERE role.id = role_permissions.role_id
+          AND role.organization_id = get_current_tenant()
+          AND role.is_custom
+          AND NOT role.is_system_role
+          AND role.deleted_at IS NULL
+    ));
+
 CREATE TABLE role_change_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,

@@ -405,13 +405,13 @@ func (r *vendorRepo) Transition(ctx context.Context, organizationID, actorID, id
 		if err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `UPDATE vendors SET status=$4,version=version+1,
-			onboarding_started_at=CASE WHEN $4='onboarding' THEN NOW() ELSE onboarding_started_at END,
-			onboarded_at=CASE WHEN $4='active' AND onboarded_at IS NULL THEN NOW() ELSE onboarded_at END,
-			suspended_at=CASE WHEN $4='suspended' THEN NOW() ELSE suspended_at END,
-			offboarding_started_at=CASE WHEN $4='offboarding' THEN NOW() ELSE offboarding_started_at END,
-			offboarded_at=CASE WHEN $4='offboarded' THEN NOW() ELSE offboarded_at END,
-			rejected_at=CASE WHEN $4='rejected' THEN NOW() ELSE rejected_at END
+		if err := tx.QueryRow(ctx, `UPDATE vendors SET status=$4::varchar,version=version+1,
+			onboarding_started_at=CASE WHEN $4::varchar='onboarding' THEN NOW() ELSE onboarding_started_at END,
+			onboarded_at=CASE WHEN $4::varchar='active' AND onboarded_at IS NULL THEN NOW() ELSE onboarded_at END,
+			suspended_at=CASE WHEN $4::varchar='suspended' THEN NOW() ELSE suspended_at END,
+			offboarding_started_at=CASE WHEN $4::varchar='offboarding' THEN NOW() ELSE offboarding_started_at END,
+			offboarded_at=CASE WHEN $4::varchar='offboarded' THEN NOW() ELSE offboarded_at END,
+			rejected_at=CASE WHEN $4::varchar='rejected' THEN NOW() ELSE rejected_at END
 			WHERE organization_id=$1::uuid AND id=$2::uuid AND version=$3 AND deleted_at IS NULL
 			RETURNING version`, organizationID, id, input.Version, input.Status).Scan(new(int64)); err != nil {
 			return classifyVendorMutation(ctx, tx, organizationID, id, input.Version, err)
@@ -946,7 +946,7 @@ func updateVendorCertification(ctx context.Context, q database.Querier, orgID, v
 func insertVendorSubprocessor(ctx context.Context, q database.Querier, orgID, vendorID, actorID string, input models.VendorSubprocessorInput) (*models.VendorSubprocessor, error) {
 	var x models.VendorSubprocessor
 	approved := input.Status == "approved"
-	err := q.QueryRow(ctx, `INSERT INTO vendor_subprocessors(organization_id,vendor_id,name,purpose,country_code,data_categories,status,approved_at,approved_by,removed_at,metadata,created_by)VALUES($1::uuid,$2::uuid,$3,$4,NULLIF($5,''),$6,$7,CASE WHEN $8 THEN NOW() END,CASE WHEN $8 THEN $9::uuid END,CASE WHEN $7='removed' THEN NOW() END,COALESCE($10::jsonb,'{}'::jsonb),$9::uuid)RETURNING id,organization_id,vendor_id,name,purpose,COALESCE(country_code::text,''),data_categories,status,approved_at,approved_by,removed_at,metadata,created_at,updated_at,deleted_at`, orgID, vendorID, input.Name, input.Purpose, input.CountryCode, input.DataCategories, input.Status, approved, actorID, nullableJSON(input.Metadata)).Scan(&x.ID, &x.OrganizationID, &x.VendorID, &x.Name, &x.Purpose, &x.CountryCode, &x.DataCategories, &x.Status, &x.ApprovedAt, &x.ApprovedBy, &x.RemovedAt, &x.Metadata, &x.CreatedAt, &x.UpdatedAt, &x.DeletedAt)
+	err := q.QueryRow(ctx, `INSERT INTO vendor_subprocessors(organization_id,vendor_id,name,purpose,country_code,data_categories,status,approved_at,approved_by,removed_at,metadata,created_by)VALUES($1::uuid,$2::uuid,$3,$4,NULLIF($5,''),$6,$7::varchar,CASE WHEN $8 THEN NOW() END,CASE WHEN $8 THEN $9::uuid END,CASE WHEN $7::varchar='removed' THEN NOW() END,COALESCE($10::jsonb,'{}'::jsonb),$9::uuid)RETURNING id,organization_id,vendor_id,name,purpose,COALESCE(country_code::text,''),data_categories,status,approved_at,approved_by,removed_at,metadata,created_at,updated_at,deleted_at`, orgID, vendorID, input.Name, input.Purpose, input.CountryCode, input.DataCategories, input.Status, approved, actorID, nullableJSON(input.Metadata)).Scan(&x.ID, &x.OrganizationID, &x.VendorID, &x.Name, &x.Purpose, &x.CountryCode, &x.DataCategories, &x.Status, &x.ApprovedAt, &x.ApprovedBy, &x.RemovedAt, &x.Metadata, &x.CreatedAt, &x.UpdatedAt, &x.DeletedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert vendor subprocessor: %w", err)
 	}
@@ -954,7 +954,7 @@ func insertVendorSubprocessor(ctx context.Context, q database.Querier, orgID, ve
 }
 func updateVendorSubprocessor(ctx context.Context, q database.Querier, orgID, vendorID, id, actorID string, input models.VendorSubprocessorInput) (*models.VendorSubprocessor, error) {
 	var x models.VendorSubprocessor
-	err := q.QueryRow(ctx, `UPDATE vendor_subprocessors SET name=$4,purpose=$5,country_code=NULLIF($6,''),data_categories=$7,status=$8,approved_at=CASE WHEN $8='approved' THEN COALESCE(approved_at,NOW()) ELSE approved_at END,approved_by=CASE WHEN $8='approved' THEN COALESCE(approved_by,$9::uuid) ELSE approved_by END,removed_at=CASE WHEN $8='removed' THEN COALESCE(removed_at,NOW()) ELSE NULL END,metadata=COALESCE($10::jsonb,metadata) WHERE organization_id=$1::uuid AND vendor_id=$2::uuid AND id=$3::uuid AND deleted_at IS NULL RETURNING id,organization_id,vendor_id,name,purpose,COALESCE(country_code::text,''),data_categories,status,approved_at,approved_by,removed_at,metadata,created_at,updated_at,deleted_at`, orgID, vendorID, id, input.Name, input.Purpose, input.CountryCode, input.DataCategories, input.Status, actorID, nullableJSON(input.Metadata)).Scan(&x.ID, &x.OrganizationID, &x.VendorID, &x.Name, &x.Purpose, &x.CountryCode, &x.DataCategories, &x.Status, &x.ApprovedAt, &x.ApprovedBy, &x.RemovedAt, &x.Metadata, &x.CreatedAt, &x.UpdatedAt, &x.DeletedAt)
+	err := q.QueryRow(ctx, `UPDATE vendor_subprocessors SET name=$4,purpose=$5,country_code=NULLIF($6,''),data_categories=$7,status=$8::varchar,approved_at=CASE WHEN $8::varchar='approved' THEN COALESCE(approved_at,NOW()) ELSE approved_at END,approved_by=CASE WHEN $8::varchar='approved' THEN COALESCE(approved_by,$9::uuid) ELSE approved_by END,removed_at=CASE WHEN $8::varchar='removed' THEN COALESCE(removed_at,NOW()) ELSE NULL END,metadata=COALESCE($10::jsonb,metadata) WHERE organization_id=$1::uuid AND vendor_id=$2::uuid AND id=$3::uuid AND deleted_at IS NULL RETURNING id,organization_id,vendor_id,name,purpose,COALESCE(country_code::text,''),data_categories,status,approved_at,approved_by,removed_at,metadata,created_at,updated_at,deleted_at`, orgID, vendorID, id, input.Name, input.Purpose, input.CountryCode, input.DataCategories, input.Status, actorID, nullableJSON(input.Metadata)).Scan(&x.ID, &x.OrganizationID, &x.VendorID, &x.Name, &x.Purpose, &x.CountryCode, &x.DataCategories, &x.Status, &x.ApprovedAt, &x.ApprovedBy, &x.RemovedAt, &x.Metadata, &x.CreatedAt, &x.UpdatedAt, &x.DeletedAt)
 	if err != nil {
 		return nil, fmt.Errorf("update vendor subprocessor: %w", err)
 	}

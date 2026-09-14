@@ -1,663 +1,93 @@
 'use client';
 
-import { useState } from 'react';
+import * as React from 'react';
 import Link from 'next/link';
-import { z } from 'zod';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Server,
-  AlertCircle,
-  AlertTriangle,
-  Plus,
-  ExternalLink,
-  ChevronLeft,
-  ChevronRight,
-  Shield,
-  Database,
-  Monitor,
-  Globe,
-  Users,
-  Building,
-  Network,
-} from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { AlertTriangle, Boxes, Building2, ChevronLeft, ChevronRight, Database, FilterX, Globe2, LockKeyhole, Monitor, Network, Plus, Search, Server, ShieldCheck, UsersRound } from 'lucide-react';
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AssetEditorDialog } from '@/components/assets/asset-editor-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
-import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib/utils';
-import { getRiskLevelColor } from '@/lib/utils';
-import {
-  useAssets,
-  useAssetStats,
-  useCreateAsset,
-} from '@/lib/api-hooks';
-import type { Asset, AssetStats, AssetType, AssetCriticality, Classification } from '@/types';
-import type { PaginatedResponse } from '@/lib/api';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAssetPermissions } from '@/hooks/use-asset-permissions';
+import { useAssets, useAssetStats } from '@/lib/api-hooks';
+import { assetPersonName, formatAssetError, humanizeAssetToken } from '@/lib/asset';
+import { cn, formatDateTime, getRiskLevelColor, getStatusColor } from '@/lib/utils';
+import type { Asset, AssetClassification, AssetCriticality, AssetStatus, AssetType } from '@/types/asset';
 
-// ---------------------------------------------------------------------------
-// Schema
-// ---------------------------------------------------------------------------
-
-const registerAssetSchema = z.object({
-  name: z.string().min(1, 'Asset name is required').max(200),
-  asset_type: z.enum(['hardware', 'software', 'data', 'service', 'network', 'people', 'facility']),
-  category: z.string().max(100).optional(),
-  description: z.string().max(1000).optional(),
-  criticality: z.enum(['critical', 'high', 'medium', 'low']),
-  owner_user_id: z.string().optional(),
-  location: z.string().max(200).optional(),
-  classification: z.enum(['public', 'internal', 'confidential', 'restricted']),
-  processes_personal_data: z.boolean().default(false),
-  linked_vendor_id: z.string().optional(),
-  tags: z.array(z.string()).default([]),
-});
-
-type RegisterAssetValues = z.infer<typeof registerAssetSchema>;
-
-const ASSET_TYPE_ICONS: Record<string, React.ElementType> = {
-  hardware: Monitor,
-  software: Server,
-  data: Database,
-  service: Globe,
-  network: Network,
-  people: Users,
-  facility: Building,
-};
-
-const CLASSIFICATION_COLORS: Record<string, string> = {
-  public: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-  internal: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-  confidential: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-  restricted: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-};
-
-const ASSET_TYPE_COLORS: Record<string, string> = {
-  hardware: 'bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400',
-  software: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-  data: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-  service: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400',
-  network: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
-  people: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
-  facility: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
-};
-
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-function StatCard({
-  title,
-  value,
-  subtitle,
-  icon: Icon,
-  className,
-}: {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  icon: React.ElementType;
-  className?: string;
-}) {
-  return (
-    <Card className={className}>
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <Icon className="h-5 w-5 text-muted-foreground" />
-        </div>
-        <div className="mt-2">
-          <p className="text-3xl font-bold">{value}</p>
-          {subtitle && (
-            <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function StatCardSkeleton() {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="animate-pulse space-y-3">
-          <div className="h-4 w-24 rounded bg-muted" />
-          <div className="h-8 w-16 rounded bg-muted" />
-          <div className="h-3 w-32 rounded bg-muted" />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TableSkeleton() {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-5 w-40 rounded bg-muted" />
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex gap-4">
-              <div className="h-4 w-1/6 rounded bg-muted" />
-              <div className="h-4 w-1/5 rounded bg-muted" />
-              <div className="h-4 w-1/6 rounded bg-muted" />
-              <div className="h-4 w-1/6 rounded bg-muted" />
-              <div className="h-4 w-1/6 rounded bg-muted" />
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Register Asset Sheet
-// ---------------------------------------------------------------------------
-
-function RegisterAssetSheet() {
-  const [open, setOpen] = useState(false);
-  const createAsset = useCreateAsset();
-
-  const form = useForm<RegisterAssetValues>({
-    resolver: zodResolver(registerAssetSchema),
-    defaultValues: {
-      name: '',
-      asset_type: 'software',
-      category: '',
-      description: '',
-      criticality: 'medium',
-      owner_user_id: '',
-      location: '',
-      classification: 'internal',
-      processes_personal_data: false,
-      linked_vendor_id: '',
-      tags: [],
-    },
-  });
-
-  const processesPersonalData = form.watch('processes_personal_data');
-  const [tagInput, setTagInput] = useState('');
-
-  const onSubmit = (values: RegisterAssetValues) => {
-    createAsset.mutate(values, {
-      onSuccess: () => {
-        setOpen(false);
-        form.reset();
-      },
-    });
-  };
-
-  const addTag = () => {
-    const tag = tagInput.trim();
-    if (tag && !form.getValues('tags').includes(tag)) {
-      form.setValue('tags', [...form.getValues('tags'), tag]);
-      setTagInput('');
-    }
-  };
-
-  const removeTag = (tag: string) => {
-    form.setValue('tags', form.getValues('tags').filter((t) => t !== tag));
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Register Asset
-        </Button>
-      </SheetTrigger>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle>Register New Asset</SheetTitle>
-          <SheetDescription>
-            Add a new asset to the inventory for tracking, classification, and compliance.
-          </SheetDescription>
-        </SheetHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="mt-6 space-y-5">
-          {/* Name */}
-          <div className="space-y-2">
-            <Label htmlFor="name">Asset Name *</Label>
-            <Input id="name" {...form.register('name')} placeholder="Production Database Server" />
-            {form.formState.errors.name && (
-              <p className="text-xs text-destructive">{form.formState.errors.name.message}</p>
-            )}
-          </div>
-
-          {/* Asset Type */}
-          <div className="space-y-2">
-            <Label>Asset Type *</Label>
-            <Select
-              value={form.watch('asset_type')}
-              onValueChange={(v) => form.setValue('asset_type', v as AssetType)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="hardware">Hardware</SelectItem>
-                <SelectItem value="software">Software</SelectItem>
-                <SelectItem value="data">Data</SelectItem>
-                <SelectItem value="service">Service</SelectItem>
-                <SelectItem value="network">Network</SelectItem>
-                <SelectItem value="people">People</SelectItem>
-                <SelectItem value="facility">Facility</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Category */}
-          <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
-            <Input id="category" {...form.register('category')} placeholder="e.g., Database, Endpoint, SaaS" />
-          </div>
-
-          {/* Description */}
-          <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              {...form.register('description')}
-              placeholder="Describe the asset..."
-              rows={3}
-            />
-          </div>
-
-          {/* Criticality */}
-          <div className="space-y-2">
-            <Label>Criticality *</Label>
-            <Select
-              value={form.watch('criticality')}
-              onValueChange={(v) => form.setValue('criticality', v as AssetCriticality)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select criticality" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="critical">Critical</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Owner */}
-          <div className="space-y-2">
-            <Label htmlFor="owner_user_id">Owner User ID</Label>
-            <Input id="owner_user_id" {...form.register('owner_user_id')} placeholder="User ID" />
-          </div>
-
-          {/* Location */}
-          <div className="space-y-2">
-            <Label htmlFor="location">Location</Label>
-            <Input id="location" {...form.register('location')} placeholder="e.g., AWS eu-west-2, London DC1" />
-          </div>
-
-          {/* Classification */}
-          <div className="space-y-2">
-            <Label>Classification *</Label>
-            <Select
-              value={form.watch('classification')}
-              onValueChange={(v) => form.setValue('classification', v as Classification)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select classification" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="public">Public</SelectItem>
-                <SelectItem value="internal">Internal</SelectItem>
-                <SelectItem value="confidential">Confidential</SelectItem>
-                <SelectItem value="restricted">Restricted</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <Separator />
-
-          {/* Personal Data Switch */}
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="processes_personal_data">Processes Personal Data</Label>
-              <p className="text-xs text-muted-foreground">
-                Does this asset process or store personal data?
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={processesPersonalData}
-              onClick={() => form.setValue('processes_personal_data', !processesPersonalData)}
-              className={cn(
-                'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
-                processesPersonalData ? 'bg-primary' : 'bg-muted'
-              )}
-            >
-              <span
-                className={cn(
-                  'pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform',
-                  processesPersonalData ? 'translate-x-5' : 'translate-x-0'
-                )}
-              />
-            </button>
-          </div>
-
-          {/* GDPR ROPA Notice */}
-          {processesPersonalData && (
-            <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-4 dark:border-yellow-700 dark:bg-yellow-950/40">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-yellow-600 dark:text-yellow-400" />
-                <div>
-                  <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">
-                    GDPR Article 30 &mdash; Record of Processing Activities
-                  </p>
-                  <p className="mt-1 text-xs text-yellow-700 dark:text-yellow-400">
-                    This asset will be flagged for inclusion in the Record of Processing Activities (ROPA)
-                    per GDPR Article 30. Ensure processing purposes and legal bases are documented.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Linked Vendor */}
-          <div className="space-y-2">
-            <Label htmlFor="linked_vendor_id">Linked Vendor ID (optional)</Label>
-            <Input
-              id="linked_vendor_id"
-              {...form.register('linked_vendor_id')}
-              placeholder="Vendor ID if externally managed"
-            />
-          </div>
-
-          <Separator />
-
-          {/* Tags */}
-          <div className="space-y-2">
-            <Label>Tags</Label>
-            <div className="flex gap-2">
-              <Input
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                placeholder="Add a tag"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addTag();
-                  }
-                }}
-              />
-              <Button type="button" variant="outline" onClick={addTag}>
-                Add
-              </Button>
-            </div>
-            {form.watch('tags').length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {form.watch('tags').map((tag) => (
-                  <Badge
-                    key={tag}
-                    variant="secondary"
-                    className="cursor-pointer"
-                    onClick={() => removeTag(tag)}
-                  >
-                    {tag} &times;
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Submit */}
-          <div className="flex gap-3 pt-4">
-            <Button type="submit" disabled={createAsset.isPending} className="flex-1">
-              {createAsset.isPending ? 'Registering...' : 'Register Asset'}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Main Page
-// ---------------------------------------------------------------------------
+const ASSET_TYPES: AssetType[] = ['hardware', 'software', 'data', 'service', 'network', 'people', 'facility'];
+const CRITICALITIES: AssetCriticality[] = ['critical', 'high', 'medium', 'low'];
+const CLASSIFICATIONS: AssetClassification[] = ['public', 'internal', 'confidential', 'restricted'];
+const STATUSES: AssetStatus[] = ['active', 'inactive', 'decommissioned'];
+const PAGE_SIZES = [10, 20, 50, 100] as const;
+const TYPE_ICONS: Record<AssetType, React.ElementType> = { hardware: Monitor, software: Server, data: Database, service: Globe2, network: Network, people: UsersRound, facility: Building2 };
+const CLASSIFICATION_STYLES: Record<AssetClassification, string> = { public: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200', internal: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200', confidential: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200', restricted: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200' };
 
 export default function AssetsPage() {
-  const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const router = useRouter();
+  const access = useAssetPermissions();
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState<number>(20);
+  const [searchDraft, setSearchDraft] = React.useState('');
+  const [search, setSearch] = React.useState('');
+  const [tag, setTag] = React.useState('');
+  const [assetType, setAssetType] = React.useState<AssetType | 'all'>('all');
+  const [criticality, setCriticality] = React.useState<AssetCriticality | 'all'>('all');
+  const [classification, setClassification] = React.useState<AssetClassification | 'all'>('all');
+  const [status, setStatus] = React.useState<AssetStatus | 'all'>('all');
+  const [personalData, setPersonalData] = React.useState<'all' | 'true' | 'false'>('all');
+  const [sortBy, setSortBy] = React.useState<'updated_at' | 'created_at' | 'name' | 'asset_ref' | 'asset_type' | 'criticality'>('updated_at');
+  const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('desc');
+  const [createOpen, setCreateOpen] = React.useState(false);
 
-  const assets = useAssets({ page, page_size: pageSize });
-  const stats = useAssetStats();
+  const assetsQuery = useAssets({ page, page_size: pageSize, search: search || undefined, tag: tag || undefined, asset_type: assetType === 'all' ? undefined : assetType, criticality: criticality === 'all' ? undefined : criticality, classification: classification === 'all' ? undefined : classification, status: status === 'all' ? undefined : status, processes_personal_data: personalData === 'all' ? undefined : personalData === 'true', sort_by: sortBy, sort_dir: sortDir }, { enabled: access.canRead });
+  const statsQuery = useAssetStats({ enabled: access.canRead });
+  const assets = assetsQuery.data?.items ?? [];
+  const totalPages = Math.max(assetsQuery.data?.total_pages ?? 0, 1);
 
-  const assetsData = assets.data as PaginatedResponse<Asset> | undefined;
-  const statsData = stats.data as AssetStats | undefined;
+  React.useEffect(() => { if (!assetsQuery.data || page <= totalPages) return; const timer = window.setTimeout(() => setPage(totalPages), 0); return () => window.clearTimeout(timer); }, [assetsQuery.data, page, totalPages]);
 
-  return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Asset Inventory</h1>
-          <p className="text-muted-foreground">
-            Track and classify all organisational assets for risk management and compliance.
-          </p>
-        </div>
-        <RegisterAssetSheet />
-      </div>
+  if (access.isLoading || !access.user) return <AssetListSkeleton />;
+  if (access.isError) return <AccessState title="Asset access could not be verified" description="The permission service is unavailable, so inventory data was not loaded." action={<Button onClick={() => void access.retry()}>Try again</Button>} />;
+  if (!access.canRead) return <AccessState title="Asset inventory unavailable" description="Your role does not grant read access to assets." />;
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
-        ) : stats.error ? (
-          <Card className="col-span-full">
-            <CardContent className="flex items-center gap-2 p-6 text-destructive">
-              <AlertCircle className="h-5 w-5" />
-              <span>Failed to load asset statistics.</span>
-            </CardContent>
-          </Card>
-        ) : statsData ? (
-          <>
-            <StatCard
-              title="Total Assets"
-              value={statsData.total}
-              subtitle="All registered assets"
-              icon={Server}
-            />
-            <StatCard
-              title="Critical Assets"
-              value={statsData.critical}
-              subtitle="Highest criticality"
-              icon={AlertCircle}
-              className="border-l-4 border-l-red-500"
-            />
-            <StatCard
-              title="Personal Data Assets"
-              value={statsData.personal_data}
-              subtitle="GDPR Article 30 scope"
-              icon={Shield}
-              className="border-l-4 border-l-yellow-500"
-            />
-            <Card>
-              <CardContent className="p-6">
-                <p className="text-sm font-medium text-muted-foreground">By Type</p>
-                <div className="mt-3 space-y-2">
-                  {statsData.by_type && Object.entries(statsData.by_type).length > 0 ? (
-                    Object.entries(statsData.by_type)
-                      .sort(([, a], [, b]) => b - a)
-                      .slice(0, 4)
-                      .map(([type, count]) => (
-                        <div key={type} className="flex items-center justify-between text-sm">
-                          <span className="capitalize text-muted-foreground">{type}</span>
-                          <span className="font-medium">{count}</span>
-                        </div>
-                      ))
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No data</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        ) : null}
-      </div>
+  const filtersActive = Boolean(search || tag || assetType !== 'all' || criticality !== 'all' || classification !== 'all' || status !== 'all' || personalData !== 'all');
+  function applySearch(event: React.FormEvent) { event.preventDefault(); setSearch(searchDraft.trim()); setTag(tag.trim().toLowerCase()); setPage(1); }
+  function resetFilters() { setSearchDraft(''); setSearch(''); setTag(''); setAssetType('all'); setCriticality('all'); setClassification('all'); setStatus('all'); setPersonalData('all'); setPage(1); }
 
-      {/* Data Table */}
-      {assets.isLoading ? (
-        <TableSkeleton />
-      ) : assets.error ? (
-        <Card>
-          <CardContent className="flex items-center gap-2 p-6 text-destructive">
-            <AlertCircle className="h-5 w-5" />
-            <span>Failed to load assets. Please try again.</span>
-          </CardContent>
-        </Card>
-      ) : !assetsData?.items?.length ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-            <Server className="h-12 w-12 text-muted-foreground/50" />
-            <h3 className="mt-4 text-lg font-semibold">No assets registered</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Get started by registering your first asset.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">
-              Asset Register ({assetsData.total} total)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Ref</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Name</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Type</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Criticality</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Classification</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Personal Data</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Owner</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Location</th>
-                    <th className="pb-3 font-medium text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {assetsData.items.map((asset) => {
-                    const TypeIcon = ASSET_TYPE_ICONS[asset.asset_type] ?? Server;
-                    return (
-                      <tr key={asset.id} className="border-b last:border-0 hover:bg-muted/50">
-                        <td className="py-3 pr-4 font-mono text-xs text-muted-foreground">
-                          {asset.asset_ref}
-                        </td>
-                        <td className="py-3 pr-4 font-medium">{asset.name}</td>
-                        <td className="py-3 pr-4">
-                          <Badge className={cn('capitalize', ASSET_TYPE_COLORS[asset.asset_type] ?? '')}>
-                            <TypeIcon className="mr-1 h-3 w-3" />
-                            {asset.asset_type}
-                          </Badge>
-                        </td>
-                        <td className="py-3 pr-4">
-                          <Badge className={cn('capitalize', getRiskLevelColor(asset.criticality))}>
-                            {asset.criticality}
-                          </Badge>
-                        </td>
-                        <td className="py-3 pr-4">
-                          <Badge className={cn('capitalize', CLASSIFICATION_COLORS[asset.classification] ?? '')}>
-                            {asset.classification}
-                          </Badge>
-                        </td>
-                        <td className="py-3 pr-4">
-                          {asset.processes_personal_data ? (
-                            <div className="flex items-center gap-1 text-yellow-600 dark:text-yellow-400">
-                              <AlertTriangle className="h-4 w-4" />
-                              <span className="text-xs font-medium">Yes</span>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">No</span>
-                          )}
-                        </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
-                          {asset.owner
-                            ? `${asset.owner.first_name} ${asset.owner.last_name}`
-                            : '—'}
-                        </td>
-                        <td className="py-3 pr-4 text-muted-foreground">
-                          {asset.location ?? '—'}
-                        </td>
-                        <td className="py-3">
-                          <Link href={`/assets/${asset.id}`}>
-                            <Button variant="ghost" size="sm">
-                              <ExternalLink className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+  return <div className="space-y-6">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><h1 className="text-3xl font-bold tracking-tight">Asset inventory</h1><p className="mt-1 text-muted-foreground">Maintain ownership, sensitivity, criticality, and lifecycle evidence for enterprise assets.</p></div>{access.canCreate && <Button className="w-full sm:w-auto" onClick={() => setCreateOpen(true)}><Plus aria-hidden="true" className="mr-2 h-4 w-4" />Register asset</Button>}</div>
 
-            {/* Pagination */}
-            {assetsData.total_pages > 1 && (
-              <div className="mt-4 flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  Page {assetsData.page} of {assetsData.total_pages}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page <= 1}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => p + 1)}
-                    disabled={page >= assetsData.total_pages}
-                  >
-                    Next
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Asset portfolio metrics"><SummaryCard label="Total assets" value={statsQuery.data?.total} loading={statsQuery.isLoading} icon={<Boxes aria-hidden="true" className="h-4 w-4 text-blue-600" />} /><SummaryCard label="Active" value={statsQuery.data?.active} loading={statsQuery.isLoading} icon={<ShieldCheck aria-hidden="true" className="h-4 w-4 text-emerald-600" />} /><SummaryCard label="Critical" value={statsQuery.data?.critical} loading={statsQuery.isLoading} highlight={Boolean(statsQuery.data?.critical)} icon={<AlertTriangle aria-hidden="true" className="h-4 w-4 text-red-600" />} /><SummaryCard label="Processes personal data" value={statsQuery.data?.personal_data} loading={statsQuery.isLoading} highlight={Boolean(statsQuery.data?.personal_data)} icon={<Database aria-hidden="true" className="h-4 w-4 text-purple-600" />} /></div>
+    {statsQuery.isError && <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Asset statistics are temporarily unavailable.</div>}
+
+    <Card><CardHeader className="pb-4"><CardTitle className="text-base">Find assets</CardTitle></CardHeader><CardContent><form role="search" className="grid gap-3 md:grid-cols-2 xl:grid-cols-8" onSubmit={applySearch}>
+      <div className="space-y-2 md:col-span-2"><Label htmlFor="asset-search">Reference, name, category, or description</Label><div className="relative"><Search aria-hidden="true" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="asset-search" className="pl-9" maxLength={200} value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} /></div></div>
+      <FilterSelect id="asset-type-filter" label="Type" value={assetType} options={ASSET_TYPES} onValueChange={(value) => { setAssetType(value as AssetType | 'all'); setPage(1); }} />
+      <FilterSelect id="asset-criticality-filter" label="Criticality" value={criticality} options={CRITICALITIES} onValueChange={(value) => { setCriticality(value as AssetCriticality | 'all'); setPage(1); }} />
+      <FilterSelect id="asset-classification-filter" label="Classification" value={classification} options={CLASSIFICATIONS} onValueChange={(value) => { setClassification(value as AssetClassification | 'all'); setPage(1); }} />
+      <FilterSelect id="asset-status-filter" label="Status" value={status} options={STATUSES} onValueChange={(value) => { setStatus(value as AssetStatus | 'all'); setPage(1); }} />
+      <FilterSelect id="asset-privacy-filter" label="Personal data" value={personalData} options={['true', 'false']} labels={{ true: 'Processes data', false: 'Does not process' }} onValueChange={(value) => { setPersonalData(value as typeof personalData); setPage(1); }} />
+      <div className="space-y-2"><Label htmlFor="asset-tag-filter">Tag</Label><Input id="asset-tag-filter" maxLength={64} value={tag} onChange={(event) => setTag(event.target.value)} /></div>
+      <div className="flex items-end gap-2 md:col-span-2"><Button type="submit">Search</Button>{filtersActive && <Button type="button" variant="outline" onClick={resetFilters}><FilterX aria-hidden="true" className="mr-2 h-4 w-4" />Reset</Button>}</div>
+    </form><div className="mt-4 flex flex-wrap items-end gap-3 border-t pt-4"><FilterSelect id="asset-sort" label="Sort by" value={sortBy} options={['updated_at', 'created_at', 'name', 'asset_ref', 'asset_type', 'criticality']} includeAll={false} onValueChange={(value) => { setSortBy(value as typeof sortBy); setPage(1); }} /><FilterSelect id="asset-sort-direction" label="Direction" value={sortDir} options={['desc', 'asc']} labels={{ desc: 'Descending', asc: 'Ascending' }} includeAll={false} onValueChange={(value) => { setSortDir(value as 'asc' | 'desc'); setPage(1); }} /></div></CardContent></Card>
+
+    <Card><CardContent className="p-0">{assetsQuery.isLoading ? <div className="space-y-3 p-6" aria-label="Loading assets">{Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-14" />)}</div> : assetsQuery.isError ? <ListError message={formatAssetError(assetsQuery.error, 'Assets could not be loaded.')} retry={() => void assetsQuery.refetch()} /> : assets.length === 0 ? <EmptyState filtered={filtersActive} create={access.canCreate ? () => setCreateOpen(true) : undefined} /> : <><AssetTable assets={assets} /><AssetCards assets={assets} /></>}
+      {assetsQuery.data && assetsQuery.data.total > 0 && <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><Label htmlFor="asset-page-size" className="text-sm text-muted-foreground">Rows</Label><Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setPage(1); }}><SelectTrigger id="asset-page-size" className="w-20"><SelectValue /></SelectTrigger><SelectContent>{PAGE_SIZES.map((value) => <SelectItem key={value} value={String(value)}>{value}</SelectItem>)}</SelectContent></Select><p className="text-sm text-muted-foreground">Page {page} of {totalPages} · {assetsQuery.data.total} total</p></div><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft aria-hidden="true" className="mr-1 h-4 w-4" />Previous</Button><Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>Next<ChevronRight aria-hidden="true" className="ml-1 h-4 w-4" /></Button></div></div>}
+    </CardContent></Card>
+    {access.canCreate && <AssetEditorDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={(asset) => router.push(`/assets/${asset.id}`)} />}
+  </div>;
 }
+
+function AssetTable({ assets }: { assets: Asset[] }) { return <div className="hidden overflow-x-auto md:block"><table className="w-full text-sm"><caption className="sr-only">Asset search results</caption><thead><tr className="border-b bg-muted/50"><th scope="col" className="px-4 py-3 text-left font-medium">Asset</th><th scope="col" className="px-4 py-3 text-left font-medium">Type</th><th scope="col" className="px-4 py-3 text-left font-medium">Criticality</th><th scope="col" className="px-4 py-3 text-left font-medium">Classification</th><th scope="col" className="px-4 py-3 text-left font-medium">Owner</th><th scope="col" className="px-4 py-3 text-left font-medium">Status</th><th scope="col" className="px-4 py-3 text-left font-medium">Updated</th></tr></thead><tbody>{assets.map((asset) => { const Icon = TYPE_ICONS[asset.asset_type]; return <tr key={asset.id} className="border-b last:border-0 hover:bg-muted/40"><td className="max-w-sm px-4 py-3"><Link href={`/assets/${asset.id}`} className="font-medium text-primary hover:underline">{asset.name}</Link><span className="mt-1 block font-mono text-xs text-muted-foreground">{asset.asset_ref}</span></td><td className="px-4 py-3"><span className="inline-flex items-center gap-2"><Icon aria-hidden="true" className="h-4 w-4" />{humanizeAssetToken(asset.asset_type)}</span></td><td className="px-4 py-3"><Badge className={getRiskLevelColor(asset.criticality)}>{humanizeAssetToken(asset.criticality)}</Badge></td><td className="px-4 py-3"><Badge className={CLASSIFICATION_STYLES[asset.classification]}>{humanizeAssetToken(asset.classification)}</Badge></td><td className="px-4 py-3">{assetPersonName(asset.owner, asset.owner_user_id)}</td><td className="px-4 py-3"><Badge className={getStatusColor(asset.status)}>{humanizeAssetToken(asset.status)}</Badge></td><td className="whitespace-nowrap px-4 py-3">{formatDateTime(asset.updated_at)}</td></tr>; })}</tbody></table></div>; }
+function AssetCards({ assets }: { assets: Asset[] }) { return <ul className="divide-y md:hidden">{assets.map((asset) => { const Icon = TYPE_ICONS[asset.asset_type]; return <li key={asset.id}><Link href={`/assets/${asset.id}`} className="block space-y-3 p-4 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"><div className="flex items-start gap-3"><Icon aria-hidden="true" className="mt-1 h-5 w-5 shrink-0" /><div className="min-w-0"><p className="font-medium">{asset.name}</p><p className="font-mono text-xs text-muted-foreground">{asset.asset_ref}</p></div></div><div className="flex flex-wrap gap-2"><Badge className={getRiskLevelColor(asset.criticality)}>{humanizeAssetToken(asset.criticality)}</Badge><Badge className={CLASSIFICATION_STYLES[asset.classification]}>{humanizeAssetToken(asset.classification)}</Badge><Badge className={getStatusColor(asset.status)}>{humanizeAssetToken(asset.status)}</Badge>{asset.processes_personal_data && <Badge variant="outline">Personal data</Badge>}</div><p className="text-xs text-muted-foreground">Owner: {assetPersonName(asset.owner, asset.owner_user_id)}</p></Link></li>; })}</ul>; }
+function FilterSelect({ id, label, value, options, labels = {}, includeAll = true, onValueChange }: { id: string; label: string; value: string; options: readonly string[]; labels?: Record<string, string>; includeAll?: boolean; onValueChange: (value: string) => void }) { return <div className="space-y-2"><Label htmlFor={id}>{label}</Label><Select value={value} onValueChange={onValueChange}><SelectTrigger id={id}><SelectValue /></SelectTrigger><SelectContent>{includeAll && <SelectItem value="all">All</SelectItem>}{options.map((option) => <SelectItem key={option} value={option}>{labels[option] ?? humanizeAssetToken(option)}</SelectItem>)}</SelectContent></Select></div>; }
+function SummaryCard({ label, value, loading, highlight, icon }: { label: string; value?: number; loading: boolean; highlight?: boolean; icon: React.ReactNode }) { return <Card className={cn(highlight && 'border-orange-400')}><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">{label}</CardTitle>{icon}</CardHeader><CardContent>{loading ? <Skeleton className="h-8 w-16" /> : <p className={cn('text-2xl font-bold', highlight && 'text-orange-700 dark:text-orange-300')}>{value ?? '—'}</p>}</CardContent></Card>; }
+function ListError({ message, retry }: { message: string; retry: () => void }) { return <div role="alert" className="flex flex-col items-center gap-3 p-10 text-center"><AlertTriangle aria-hidden="true" className="h-9 w-9 text-destructive" /><p>{message}</p><Button variant="outline" onClick={retry}>Retry</Button></div>; }
+function EmptyState({ filtered, create }: { filtered: boolean; create?: () => void }) { return <div className="flex flex-col items-center gap-3 p-12 text-center"><Boxes aria-hidden="true" className="h-10 w-10 text-muted-foreground" /><h2 className="text-lg font-medium">{filtered ? 'No assets match these filters' : 'No assets registered'}</h2><p className="text-sm text-muted-foreground">{filtered ? 'Adjust or reset the filters to broaden the result set.' : 'Register an asset to establish the inventory.'}</p>{create && !filtered && <Button onClick={create}><Plus aria-hidden="true" className="mr-2 h-4 w-4" />Register asset</Button>}</div>; }
+function AccessState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <Card><CardContent role="alert" className="flex flex-col items-center gap-3 py-12 text-center"><LockKeyhole aria-hidden="true" className="h-9 w-9" /><h1 className="text-xl font-semibold">{title}</h1><p className="max-w-lg text-sm text-muted-foreground">{description}</p>{action}</CardContent></Card>; }
+function AssetListSkeleton() { return <div className="space-y-5" aria-label="Loading asset inventory"><Skeleton className="h-10 w-72" /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-28" />)}</div><Skeleton className="h-80" /></div>; }

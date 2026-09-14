@@ -64,7 +64,7 @@ export function getRiskLevelColor(level: string | undefined | null): string {
 
 export function getStatusColor(status: string): string {
   switch (status) {
-    case 'effective': case 'implemented': case 'completed': case 'published': case 'approved': case 'resolved': case 'closed': case 'attested': case 'certified':
+    case 'effective': case 'implemented': case 'completed': case 'published': case 'approved': case 'resolved': case 'closed': case 'attested': case 'certified': case 'active':
       return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
     case 'partial': case 'in_progress': case 'under_review': case 'pending_approval': case 'investigating': case 'contained':
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
@@ -74,7 +74,7 @@ export function getStatusColor(status: string): string {
       return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
     case 'not_implemented': case 'not_started': case 'open': case 'overdue': case 'failed':
       return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-    case 'not_applicable': case 'archived': case 'retired': case 'cancelled': case 'superseded':
+    case 'not_applicable': case 'archived': case 'retired': case 'cancelled': case 'superseded': case 'inactive': case 'decommissioned':
       return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
     default:
       return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';

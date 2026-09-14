@@ -21,6 +21,8 @@
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@emnapi/core": "1.11.3",
+    "@emnapi/runtime": "1.11.3",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-alert-dialog": "^1.1.0",
     "@radix-ui/react-avatar": "^1.1.0",
@@ -54,10 +56,6 @@
     "tailwind-merge": "^2.4.0",
     "zod": "^3.23.0",
     "zustand": "^4.5.0"
-  },
-  "optionalDependencies": {
-    "@emnapi/core": "1.11.3",
-    "@emnapi/runtime": "1.11.3"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

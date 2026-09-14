@@ -348,6 +348,9 @@ func TestAccessAdministrationWithNonSuperuserTenants(t *testing.T) {
 		VALUES ($1,$2,$3,$1)`, userB, clone.ID, orgB); err == nil {
 		t.Fatal("database accepted a custom role from another tenant")
 	}
+	if _, err := conn.Exec(ctx, `INSERT INTO role_permissions(role_id,permission_id) VALUES ($1,$2)`, clone.ID, readPermissionID); err == nil {
+		t.Fatal("database accepted a permission mapping for another tenant's custom role")
+	}
 	var visibleCustom int
 	if err := conn.QueryRow(ctx, `SELECT count(*) FROM roles WHERE organization_id IS NOT NULL`).Scan(&visibleCustom); err != nil || visibleCustom != 0 {
 		t.Fatalf("tenant B custom role visibility=%d err=%v", visibleCustom, err)

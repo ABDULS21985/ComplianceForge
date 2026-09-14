@@ -31,6 +31,8 @@ const (
 	testAuditID     = "a0000000-0000-0000-0000-000000000010"
 	testIncidentID  = "b0000000-0000-0000-0000-000000000010"
 	testAssetID     = "c1000000-0000-0000-0000-000000000010"
+	testVendorID    = "d1000000-0000-0000-0000-000000000010"
+	testRoleID      = "e1000000-0000-0000-0000-000000000010"
 )
 
 type routerAuthService struct {
@@ -146,6 +148,99 @@ type routerIncidentService struct {
 }
 
 type routerAssetService struct{ asset *models.Asset }
+
+type routerVendorService struct {
+	handler.VendorService
+	vendor *models.Vendor
+}
+
+type routerAccessAdministrationService struct {
+	role *models.ManagedRole
+}
+
+func (routerAccessAdministrationService) ListPermissions(context.Context, string) ([]models.PermissionGrant, error) {
+	return []models.PermissionGrant{{Resource: "settings", Action: "read"}}, nil
+}
+
+func (s routerAccessAdministrationService) CreateRole(_ context.Context, organizationID, _ string, input models.ManagedRoleCreateInput) (*models.ManagedRole, error) {
+	item := *s.role
+	item.OrganizationID, item.Name, item.Slug, item.Permissions = &organizationID, input.Name, input.Slug, input.Permissions
+	return &item, nil
+}
+
+func (s routerAccessAdministrationService) GetRole(context.Context, string, string) (*models.ManagedRole, error) {
+	return s.role, nil
+}
+
+func (s routerAccessAdministrationService) ListRoles(context.Context, string, models.ManagedRoleListFilter) ([]models.ManagedRole, int, error) {
+	return []models.ManagedRole{*s.role}, 1, nil
+}
+
+func (s routerAccessAdministrationService) UpdateRole(context.Context, string, string, string, models.ManagedRolePatch) (*models.ManagedRole, error) {
+	return s.role, nil
+}
+
+func (routerAccessAdministrationService) DeleteRole(context.Context, string, string, string, int64) error {
+	return nil
+}
+
+func (s routerAccessAdministrationService) CloneRole(context.Context, string, string, string, models.ManagedRoleCloneInput) (*models.ManagedRole, error) {
+	return s.role, nil
+}
+
+func (s routerAccessAdministrationService) PreviewImpact(context.Context, string, string, []models.PermissionGrant) (*models.ManagedRoleImpact, error) {
+	return &models.ManagedRoleImpact{RoleID: s.role.ID}, nil
+}
+
+func (routerAccessAdministrationService) ListAssignments(context.Context, string, string) ([]models.ManagedRoleAssignment, error) {
+	return []models.ManagedRoleAssignment{}, nil
+}
+
+func (routerAccessAdministrationService) AssignRole(context.Context, string, string, string, models.ManagedRoleAssignmentInput) error {
+	return nil
+}
+
+func (routerAccessAdministrationService) UnassignRole(context.Context, string, string, string, string, models.ManagedRoleUnassignmentInput) error {
+	return nil
+}
+
+func (routerAccessAdministrationService) ListEvents(context.Context, string, string, models.PaginationRequest) ([]models.RoleChangeEvent, int, error) {
+	return []models.RoleChangeEvent{}, 0, nil
+}
+
+func (s routerVendorService) Create(_ context.Context, organizationID, actorID string, input models.VendorCreateInput) (*models.Vendor, error) {
+	item := *s.vendor
+	item.OrganizationID, item.CreatedBy, item.Name = organizationID, actorID, input.Name
+	return &item, nil
+}
+
+func (s routerVendorService) GetByID(context.Context, string, string) (*models.Vendor, error) {
+	return s.vendor, nil
+}
+
+func (s routerVendorService) List(context.Context, string, models.VendorListFilter) ([]models.Vendor, int, error) {
+	return []models.Vendor{*s.vendor}, 1, nil
+}
+
+func (routerVendorService) Statistics(context.Context, string) (*models.VendorStatistics, error) {
+	return &models.VendorStatistics{Total: 1, Active: 1, ByStatus: map[models.VendorStatus]int{}, ByTier: map[models.VendorTier]int{}, ByCriticality: map[models.VendorCriticality]int{}}, nil
+}
+
+func (routerVendorService) ListDueForAssessment(context.Context, string, int, int) ([]models.Vendor, error) {
+	return []models.Vendor{}, nil
+}
+
+func (routerVendorService) ListDueContracts(context.Context, string, int, int) ([]models.VendorDueContract, error) {
+	return []models.VendorDueContract{}, nil
+}
+
+func (routerVendorService) ListExpiringCertifications(context.Context, string, int, int) ([]models.VendorExpiringCertification, error) {
+	return []models.VendorExpiringCertification{}, nil
+}
+
+func (routerVendorService) ListEvents(context.Context, string, string, models.PaginationRequest) ([]models.VendorEvent, int, error) {
+	return []models.VendorEvent{}, 0, nil
+}
 
 func (s routerAssetService) Create(_ context.Context, organizationID, actorID string, input models.AssetCreateInput) (*models.Asset, error) {
 	item := *s.asset
@@ -353,6 +448,10 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"unconfigured incident handler", func(d *RouterDependencies) { d.Incidents = handler.NewIncidentHandler(nil) }, "incident handler is required"},
 		{"asset handler", func(d *RouterDependencies) { d.Assets = nil }, "asset handler is required"},
 		{"unconfigured asset handler", func(d *RouterDependencies) { d.Assets = handler.NewAssetHandler(nil) }, "asset handler is required"},
+		{"vendor handler", func(d *RouterDependencies) { d.Vendors = nil }, "vendor handler is required"},
+		{"unconfigured vendor handler", func(d *RouterDependencies) { d.Vendors = handler.NewVendorHandler(nil) }, "vendor handler is required"},
+		{"access administration handler", func(d *RouterDependencies) { d.AccessAdministration = nil }, "access administration handler is required"},
+		{"unconfigured access administration handler", func(d *RouterDependencies) { d.AccessAdministration = handler.NewAccessAdministrationHandler(nil) }, "access administration handler is required"},
 		{"permission handler", func(d *RouterDependencies) { d.Permissions = nil }, "permission handler is required"},
 		{"unconfigured permission handler", func(d *RouterDependencies) { d.Permissions = handler.NewPermissionHandler(nil) }, "permission handler is required"},
 		{"notification handler", func(d *RouterDependencies) { d.Notifications = nil }, "notification handler is required"},
@@ -471,6 +570,19 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 		{name: "create policy", method: http.MethodPost, path: "/api/v1/policies", body: `{"title":"Security policy","initial_version":{"content_text":"Policy content"}}`, authorized: true, wantStatus: http.StatusCreated},
 		{name: "policy categories", method: http.MethodGet, path: "/api/v1/policies/categories", authorized: true, wantStatus: http.StatusOK},
 		{name: "effective permissions", method: http.MethodGet, path: "/api/v1/access/my-permissions", authorized: true, wantStatus: http.StatusOK},
+		{name: "permission catalogue", method: http.MethodGet, path: "/api/v1/access/permissions", authorized: true, wantStatus: http.StatusOK},
+		{name: "list managed roles", method: http.MethodGet, path: "/api/v1/access/roles", authorized: true, wantStatus: http.StatusOK},
+		{name: "create managed role", method: http.MethodPost, path: "/api/v1/access/roles", body: `{"name":"Control reviewer","permissions":[]}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "get managed role", method: http.MethodGet, path: "/api/v1/access/roles/" + testRoleID, authorized: true, wantStatus: http.StatusOK},
+		{name: "patch managed role", method: http.MethodPatch, path: "/api/v1/access/roles/" + testRoleID, body: `{"expected_version":1}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "replace managed role", method: http.MethodPut, path: "/api/v1/access/roles/" + testRoleID, body: `{"expected_version":1}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "clone managed role", method: http.MethodPost, path: "/api/v1/access/roles/" + testRoleID + "/clone", body: `{"name":"Cloned reviewer"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "preview role impact", method: http.MethodPost, path: "/api/v1/access/roles/" + testRoleID + "/impact-preview", body: `{"permissions":[]}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "list role assignments", method: http.MethodGet, path: "/api/v1/access/roles/" + testRoleID + "/assignments", authorized: true, wantStatus: http.StatusOK},
+		{name: "assign managed role", method: http.MethodPost, path: "/api/v1/access/roles/" + testRoleID + "/assignments", body: `{"user_id":"` + testUserID + `","reason":"Operational assignment"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "unassign managed role", method: http.MethodDelete, path: "/api/v1/access/roles/" + testRoleID + "/assignments/" + testUserID, body: `{"reason":"Role no longer needed"}`, authorized: true, wantStatus: http.StatusNoContent},
+		{name: "managed role history", method: http.MethodGet, path: "/api/v1/access/roles/" + testRoleID + "/events", authorized: true, wantStatus: http.StatusOK},
+		{name: "delete managed role", method: http.MethodDelete, path: "/api/v1/access/roles/" + testRoleID + "?expected_version=1", authorized: true, wantStatus: http.StatusNoContent},
 		{name: "list incidents", method: http.MethodGet, path: "/api/v1/incidents", authorized: true, wantStatus: http.StatusOK},
 		{name: "create incident", method: http.MethodPost, path: "/api/v1/incidents", body: `{"title":"Database exposure","description":"A production snapshot was exposed","category":"privacy","severity":"high"}`, authorized: true, wantStatus: http.StatusCreated},
 		{name: "incident statistics", method: http.MethodGet, path: "/api/v1/incidents/statistics", authorized: true, wantStatus: http.StatusOK},
@@ -478,6 +590,10 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 		{name: "create asset", method: http.MethodPost, path: "/api/v1/assets", body: `{"name":"Customer database","asset_type":"data"}`, authorized: true, wantStatus: http.StatusCreated},
 		{name: "asset statistics", method: http.MethodGet, path: "/api/v1/assets/stats", authorized: true, wantStatus: http.StatusOK},
 		{name: "asset history", method: http.MethodGet, path: "/api/v1/assets/" + testAssetID + "/events", authorized: true, wantStatus: http.StatusOK},
+		{name: "list vendors", method: http.MethodGet, path: "/api/v1/vendors", authorized: true, wantStatus: http.StatusOK},
+		{name: "create vendor", method: http.MethodPost, path: "/api/v1/vendors", body: `{"name":"Nimbus Hosting","service_description":"Managed hosting","contact_name":"Ada Vendor","contact_email":"ada@example.test"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "vendor statistics", method: http.MethodGet, path: "/api/v1/vendors/statistics", authorized: true, wantStatus: http.StatusOK},
+		{name: "vendor history", method: http.MethodGet, path: "/api/v1/vendors/" + testVendorID + "/timeline", authorized: true, wantStatus: http.StatusOK},
 	}
 
 	for _, tt := range tests {
@@ -587,6 +703,37 @@ func TestAssetAutomationRoutesAreReadOnly(t *testing.T) {
 	}
 }
 
+func TestVendorAutomationRoutesAreReadOnly(t *testing.T) {
+	dependencies := testRouterDependencies()
+	dependencies.APIKeyAuthenticator = routerAPIKeyAuthenticator{permissions: []string{"read:vendors"}}
+	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/api/v1/automation/vendors",
+		"/api/v1/automation/vendors/statistics",
+		"/api/v1/automation/vendors/due-for-assessment",
+		"/api/v1/automation/vendors/" + testVendorID,
+		"/api/v1/automation/vendors/" + testVendorID + "/timeline",
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("X-API-Key", "cf_live_test")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/automation/vendors", strings.NewReader(`{}`))
+	request.Header.Set("X-API-Key", "cf_live_test")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("automation vendor mutation status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestRouterHealthEndpoints(t *testing.T) {
 	dependencies := testRouterDependencies()
 	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
@@ -670,22 +817,36 @@ func testRouterDependencies() RouterDependencies {
 		Criticality: models.AssetCriticalityCritical, Classification: models.AssetClassificationRestricted,
 		Status: models.AssetStatusActive, Version: 1, CreatedBy: testUserID, Tags: []string{},
 	}
+	vendor := &models.Vendor{
+		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testVendorID}, OrganizationID: testOrgID},
+		VendorRef:   "VND-000001", Name: "Nimbus Hosting", Status: models.VendorStatusActive,
+		Criticality: models.VendorCriticalityHigh, VendorTier: models.VendorTierOne,
+		RiskTier: models.VendorRiskHigh, Version: 1, CreatedBy: testUserID,
+		Services: []string{"hosting"}, DataCategories: []string{}, ProcessingLocations: []string{}, Certifications: []string{},
+	}
+	roleOrganizationID := testOrgID
+	managedRole := &models.ManagedRole{
+		ID: testRoleID, OrganizationID: &roleOrganizationID, Name: "Control reviewer", Slug: "control-reviewer",
+		IsCustom: true, Version: 1, Permissions: []models.PermissionGrant{},
+	}
 	return RouterDependencies{
-		Auth:                handler.NewAuthHandler(&routerAuthService{user: user}),
-		Organizations:       handler.NewOrganizationHandler(&routerOrganizationService{organization: organization}),
-		Frameworks:          handler.NewFrameworkHandler(routerComplianceService{}),
-		Controls:            handler.NewControlHandler(routerComplianceService{}),
-		Risks:               handler.NewRiskHandler(routerRiskService{risk: risk}),
-		Policies:            handler.NewPolicyHandler(routerPolicyService{policy: policy}),
-		Audits:              handler.NewAuditHandler(routerAuditService{audit: audit}),
-		Incidents:           handler.NewIncidentHandler(routerIncidentService{incident: incident}),
-		Assets:              handler.NewAssetHandler(routerAssetService{asset: asset}),
-		Permissions:         handler.NewPermissionHandler(routerPermissionService{}),
-		Notifications:       handler.NewNotificationHandler(dummyPool, notificationEngine, notificationProtector),
-		Integrations:        handler.NewIntegrationHandler(integrationService),
-		APIKeyAuthenticator: routerAPIKeyAuthenticator{permissions: []string{"read:controls"}},
-		APIKeyRateLimiter:   routerAPIKeyLimiter{},
-		RequestRateLimiter:  routerAPIKeyLimiter{},
+		Auth:                 handler.NewAuthHandler(&routerAuthService{user: user}),
+		Organizations:        handler.NewOrganizationHandler(&routerOrganizationService{organization: organization}),
+		Frameworks:           handler.NewFrameworkHandler(routerComplianceService{}),
+		Controls:             handler.NewControlHandler(routerComplianceService{}),
+		Risks:                handler.NewRiskHandler(routerRiskService{risk: risk}),
+		Policies:             handler.NewPolicyHandler(routerPolicyService{policy: policy}),
+		Audits:               handler.NewAuditHandler(routerAuditService{audit: audit}),
+		Incidents:            handler.NewIncidentHandler(routerIncidentService{incident: incident}),
+		Assets:               handler.NewAssetHandler(routerAssetService{asset: asset}),
+		Vendors:              handler.NewVendorHandler(routerVendorService{vendor: vendor}),
+		AccessAdministration: handler.NewAccessAdministrationHandler(routerAccessAdministrationService{role: managedRole}),
+		Permissions:          handler.NewPermissionHandler(routerPermissionService{}),
+		Notifications:        handler.NewNotificationHandler(dummyPool, notificationEngine, notificationProtector),
+		Integrations:         handler.NewIntegrationHandler(integrationService),
+		APIKeyAuthenticator:  routerAPIKeyAuthenticator{permissions: []string{"read:controls"}},
+		APIKeyRateLimiter:    routerAPIKeyLimiter{},
+		RequestRateLimiter:   routerAPIKeyLimiter{},
 		AccessTokenValidator: routerTokenValidator{claims: &authdomain.Claims{
 			UserID:         testUserID,
 			OrganizationID: testOrgID,

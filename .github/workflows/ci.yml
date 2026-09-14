@@ -482,11 +482,11 @@ jobs:
         working-directory: frontend
         run: npm audit --audit-level=high --json > ../security-reports/npm-audit.json
 
-      - name: Scan source dependencies, licenses, secrets, and IaC
+      - name: Scan source dependencies, secrets, and IaC
         id: source-trivy
         continue-on-error: true
         run: >-
-          trivy fs . --scanners vuln,misconfig,secret,license --license-full
+          trivy fs . --scanners vuln,misconfig,secret
           --include-dev-deps
           --skip-dirs .git --skip-dirs frontend/node_modules --skip-dirs frontend/.next
           --severity HIGH,CRITICAL --exit-code 1 --format json

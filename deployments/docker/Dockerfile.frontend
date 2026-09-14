@@ -19,7 +19,14 @@ RUN npm run build
 # Stage 3: Runtime
 FROM node:24.21.0-alpine3.24@sha256:be80f76cf40ec8e42b9bec49f60a55e0660f30af58d3e5a25530785b30ea67e2 AS runner
 
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Apply the Alpine security repository's patched runtime packages and remove
+# npm/npx: the standalone Next.js server needs only node, and retaining a
+# package manager unnecessarily expands the production attack surface.
+RUN apk upgrade --no-cache \
+    && rm -rf /usr/local/lib/node_modules/npm \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx \
+    && addgroup -S appgroup \
+    && adduser -S appuser -G appgroup
 
 WORKDIR /app
 

@@ -95,7 +95,7 @@ export default function IncidentDetailPage() {
 
       {access.canUpdate && <IncidentEditorDialog incident={incident} open={editOpen} onOpenChange={setEditOpen} />}
       <IncidentActionDialog incident={incident} action={action} onOpenChange={(open) => !open && setAction(null)} />
-      {access.canApprove && <><BreachAssessmentDialog incident={incident} open={breachOpen} onOpenChange={setBreachOpen} /><DPANotificationDialog incident={incident} open={dpaOpen} onOpenChange={setDpaOpen} /></>}
+      {access.canApprove && <><BreachAssessmentDialog key={`breach-${incident.version}`} incident={incident} open={breachOpen} onOpenChange={setBreachOpen} /><DPANotificationDialog key={`dpa-${incident.version}`} incident={incident} open={dpaOpen} onOpenChange={setDpaOpen} /></>}
       {access.canAssign && <><IncidentAssignmentDialog incident={incident} open={assignOpen} onOpenChange={setAssignOpen} />{unassigning && <IncidentAssignmentDialog incident={incident} assignment={unassigning} open onOpenChange={(open) => !open && setUnassigning(null)} />}</>}
       {access.canDelete && <IncidentDeleteDialog incident={incident} open={deleteOpen} onOpenChange={setDeleteOpen} onDeleted={() => { router.push('/incidents'); router.refresh(); }} />}
     </div>

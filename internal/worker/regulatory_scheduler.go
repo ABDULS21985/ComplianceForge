@@ -389,30 +389,65 @@ func (rs *RegulatoryScheduler) CheckFindingRemediations(ctx context.Context) err
 
 // CheckVendorAssessments queries vendors where next_assessment_date is approaching.
 func (rs *RegulatoryScheduler) CheckVendorAssessments(ctx context.Context) error {
-	rows, err := rs.pool.Query(ctx, `
-		SELECT v.id, v.organization_id, v.name, v.next_assessment_date, v.owner_id, v.risk_tier
-		FROM vendors v
-		WHERE v.deleted_at IS NULL
-		  AND v.status = 'Active'
-		  AND v.next_assessment_date IS NOT NULL
-		  AND v.next_assessment_date <= NOW() + INTERVAL '30 days'
-	`)
+	if rs == nil || rs.pool == nil || rs.bus == nil {
+		return fmt.Errorf("vendor assessment scheduler is not configured")
+	}
+	rows, err := rs.pool.Query(ctx, `SELECT organization_id FROM vendor_due_tenants($1)`, 1000)
 	if err != nil {
-		return fmt.Errorf("query vendor assessments: %w", err)
+		return fmt.Errorf("discover tenants with due vendor assessments: %w", err)
+	}
+	var tenantIDs []string
+	for rows.Next() {
+		var tenantID string
+		if err := rows.Scan(&tenantID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan tenant with due vendor assessment: %w", err)
+		}
+		tenantIDs = append(tenantIDs, tenantID)
+	}
+	rowErr := rows.Err()
+	rows.Close()
+	if rowErr != nil {
+		return fmt.Errorf("iterate tenants with due vendor assessments: %w", rowErr)
+	}
+
+	var tenantErrors []error
+	for _, tenantID := range tenantIDs {
+		tenantID := tenantID
+		if err := database.WithTenantConnection(ctx, rs.pool, tenantID, func(tenantCtx context.Context) error {
+			return rs.checkVendorAssessmentsForTenant(tenantCtx, tenantID)
+		}); err != nil {
+			tenantErrors = append(tenantErrors, fmt.Errorf("tenant %s vendor assessments: %w", tenantID, err))
+		}
+	}
+	return errors.Join(tenantErrors...)
+}
+
+func (rs *RegulatoryScheduler) checkVendorAssessmentsForTenant(ctx context.Context, tenantID string) error {
+	rows, err := database.QuerierFromContext(ctx, rs.pool).Query(ctx, `
+		SELECT v.id,v.vendor_ref,v.name,v.next_assessment_date,v.owner_user_id,v.risk_tier
+		FROM vendors AS v
+		WHERE v.organization_id=$1::uuid
+		  AND v.deleted_at IS NULL
+		  AND v.status IN ('active','suspended')
+		  AND v.next_assessment_date IS NOT NULL
+		  AND v.next_assessment_date <= CURRENT_DATE + 30
+		ORDER BY v.next_assessment_date,v.id
+	`, tenantID)
+	if err != nil {
+		return fmt.Errorf("query due vendor assessments: %w", err)
 	}
 	defer rows.Close()
 
 	now := time.Now().UTC()
 
 	for rows.Next() {
-		var vendorID, orgID, name string
+		var vendorID, vendorRef, name, riskTier string
 		var nextAssessment time.Time
 		var ownerID *string
-		var riskTier *string
 
-		if err := rows.Scan(&vendorID, &orgID, &name, &nextAssessment, &ownerID, &riskTier); err != nil {
-			log.Error().Err(err).Msg("scan vendor assessment row")
-			continue
+		if err := rows.Scan(&vendorID, &vendorRef, &name, &nextAssessment, &ownerID, &riskTier); err != nil {
+			return fmt.Errorf("scan due vendor assessment: %w", err)
 		}
 
 		daysUntilAssessment := nextAssessment.Sub(now).Hours() / 24
@@ -443,17 +478,15 @@ func (rs *RegulatoryScheduler) CheckVendorAssessments(ctx context.Context) error
 		if ownerID != nil {
 			data["owner_id"] = *ownerID
 		}
-		if riskTier != nil {
-			data["risk_tier"] = *riskTier
-		}
+		data["risk_tier"] = riskTier
 
 		rs.bus.Publish(service.Event{
 			Type:       eventType,
 			Severity:   severity,
-			OrgID:      orgID,
+			OrgID:      tenantID,
 			EntityType: "vendor",
 			EntityID:   vendorID,
-			EntityRef:  name,
+			EntityRef:  vendorRef,
 			Data:       data,
 			Timestamp:  now,
 		})

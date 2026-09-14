@@ -45,6 +45,16 @@ import type {
 } from '@/types/audit';
 import type { PermissionMap } from '@/types/access';
 import type {
+  Asset,
+  AssetCollectionEnvelope,
+  AssetCreateInput,
+  AssetLifecycleEvent,
+  AssetListParams,
+  AssetPage,
+  AssetPatch,
+  AssetStats,
+} from '@/types/asset';
+import type {
   Incident,
   IncidentAssignment,
   IncidentAssignmentInput,
@@ -65,6 +75,7 @@ import type {
   IncidentUnassignmentInput,
 } from '@/types/incident';
 import { AUDIT_API_ROUTES, normalizeAuditCollection } from './audit';
+import { ASSET_API_ROUTES, normalizeAssetCollection } from './asset';
 import { INCIDENT_API_ROUTES, normalizeIncidentCollection } from './incident';
 import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from "./routes";
 import { fetchWithCsrf, resetCsrfToken } from "./csrf-client";
@@ -536,20 +547,31 @@ class ApiClient {
   // ========================================================================
 
   assets = {
-    list: (params?: PaginationParams & { asset_type?: string; criticality?: string }) =>
-      this.get<PaginatedResponse<unknown>>("/assets", params as Record<string, unknown>),
+    list: (params?: AssetListParams): Promise<AssetPage<Asset>> =>
+      this.get<AssetCollectionEnvelope<Asset>>(
+        ASSET_API_ROUTES.collection,
+        params as Record<string, unknown>,
+      ).then(normalizeAssetCollection),
 
-    get: (id: string) =>
-      this.get<unknown>(`/assets/${id}`),
+    get: (id: string) => this.get<Asset>(ASSET_API_ROUTES.detail(id)),
 
-    create: (data: unknown) =>
-      this.post<unknown>("/assets", data),
+    create: (data: AssetCreateInput) => this.post<Asset>(ASSET_API_ROUTES.collection, data),
 
-    update: (id: string, data: unknown) =>
-      this.put<unknown>(`/assets/${id}`, data),
+    update: (id: string, data: AssetPatch) =>
+      this.patch<Asset>(ASSET_API_ROUTES.detail(id), data),
 
-    stats: () =>
-      this.get<unknown>("/assets/stats"),
+    delete: (id: string, expectedVersion: number) =>
+      this.request<void>('DELETE', ASSET_API_ROUTES.detail(id), {
+        params: { expected_version: expectedVersion },
+      }),
+
+    stats: () => this.get<AssetStats>(ASSET_API_ROUTES.statistics),
+
+    events: (id: string, params?: Pick<AssetListParams, 'page' | 'page_size'>) =>
+      this.get<AssetCollectionEnvelope<AssetLifecycleEvent>>(
+        ASSET_API_ROUTES.events(id),
+        params,
+      ).then(normalizeAssetCollection),
   };
 
   // ========================================================================

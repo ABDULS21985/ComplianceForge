@@ -1,5 +1,6 @@
 export * from './access';
 export * from './audit';
+export * from './asset';
 export * from './incident';
 
 // === API Response Wrappers ===
@@ -36,8 +37,6 @@ export type VendorRiskTier = 'critical' | 'high' | 'medium' | 'low';
 export type Classification = 'public' | 'internal' | 'confidential' | 'restricted';
 export type ReviewStatus = 'current' | 'review_due' | 'overdue' | 'not_applicable';
 export type TreatmentType = 'mitigate' | 'transfer' | 'avoid' | 'accept';
-export type AssetType = 'hardware' | 'software' | 'data' | 'service' | 'network' | 'people' | 'facility';
-export type AssetCriticality = 'critical' | 'high' | 'medium' | 'low';
 
 // === Auth ===
 export interface LoginRequest { email: string; password: string; }
@@ -256,22 +255,6 @@ export interface Vendor {
 export interface VendorStats {
   total: number; critical_risk: number; high_risk: number;
   missing_dpa: number; total_contract_value_eur: number;
-}
-
-// === Assets ===
-export interface Asset {
-  id: string; organization_id: string; asset_ref: string; name: string;
-  asset_type: AssetType; category?: string; description?: string;
-  criticality: AssetCriticality; owner_user_id?: string; location?: string;
-  ip_address?: string; classification: Classification;
-  processes_personal_data: boolean; linked_vendor_id?: string;
-  status: string; tags: string[]; created_at: string; updated_at: string;
-  owner?: User;
-}
-
-export interface AssetStats {
-  total: number; critical: number; personal_data: number;
-  by_type: Record<string, number>;
 }
 
 // === Dashboard ===

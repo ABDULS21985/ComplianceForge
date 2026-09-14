@@ -155,6 +155,14 @@ func permissionForProtectedRequest(method, path string) (routePermission, bool) 
 			action = "update"
 		}
 	}
+	if segment == "vendors" {
+		switch {
+		case containsActionSegment(lowerPath, "transitions", "assess", "assessments"):
+			action = "approve"
+		case containsActionSegment(lowerPath, "contacts", "contracts", "certifications", "subprocessors") && method != http.MethodGet && method != http.MethodHead:
+			action = "update"
+		}
+	}
 	// An acknowledgement is the authenticated principal's own read receipt.
 	// Requiring policy update would prevent read-only employees from complying.
 	if segment == "policies" && containsActionSegment(lowerPath, "acknowledge") {

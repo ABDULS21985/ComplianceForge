@@ -38,9 +38,11 @@ type SortRequest struct {
 
 // ErrorResponse is the standard API error payload.
 type ErrorResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Details string `json:"details,omitempty"`
+	Code      int    `json:"code"`
+	ErrorCode string `json:"error_code"`
+	Message   string `json:"message"`
+	Details   string `json:"details,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // ComplianceStatus represents the compliance state of a control or requirement.

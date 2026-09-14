@@ -192,8 +192,40 @@ func writeError(w http.ResponseWriter, code int, message, details string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-		Code:    code,
-		Message: message,
-		Details: details,
+		Code:      code,
+		ErrorCode: stableHTTPErrorCode(code),
+		Message:   message,
+		Details:   details,
+		RequestID: w.Header().Get("X-Request-ID"),
 	})
+}
+
+func stableHTTPErrorCode(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "invalid_request"
+	case http.StatusUnauthorized:
+		return "authentication_required"
+	case http.StatusForbidden:
+		return "permission_denied"
+	case http.StatusNotFound:
+		return "resource_not_found"
+	case http.StatusMethodNotAllowed:
+		return "method_not_allowed"
+	case http.StatusConflict:
+		return "state_conflict"
+	case http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case http.StatusUnprocessableEntity:
+		return "validation_failed"
+	case http.StatusTooManyRequests:
+		return "rate_limit_exceeded"
+	case http.StatusServiceUnavailable:
+		return "service_unavailable"
+	default:
+		if status >= http.StatusInternalServerError {
+			return "internal_error"
+		}
+		return "request_failed"
+	}
 }

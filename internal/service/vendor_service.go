@@ -503,6 +503,12 @@ func normalizeVendorCreate(input *models.VendorCreateInput) {
 	input.DataCategories = normalizeVendorStrings(input.DataCategories, 50, 100)
 	input.ProcessingLocations = normalizeVendorStrings(input.ProcessingLocations, 50, 100)
 	input.Certifications = normalizeVendorStrings(input.Certifications, 50, 150)
+	for index := range input.InitialContracts {
+		normalizeVendorContract(&input.InitialContracts[index])
+	}
+	for index := range input.InitialSubProcessors {
+		normalizeVendorSubprocessor(&input.InitialSubProcessors[index])
+	}
 }
 
 func normalizeVendorPatch(patch *models.VendorPatch) {
@@ -583,13 +589,11 @@ func validateVendorCreate(input models.VendorCreateInput, now time.Time) error {
 		return fmt.Errorf("%w: retention and next assessment dates cannot be in the past", ErrVendorInvalid)
 	}
 	for _, contract := range input.InitialContracts {
-		normalizeVendorContract(&contract)
 		if err := validateVendorContract(contract); err != nil {
 			return err
 		}
 	}
 	for _, subprocessor := range input.InitialSubProcessors {
-		normalizeVendorSubprocessor(&subprocessor)
 		if err := validateVendorSubprocessor(subprocessor); err != nil {
 			return err
 		}

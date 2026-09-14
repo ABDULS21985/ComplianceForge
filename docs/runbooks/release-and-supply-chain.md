@@ -18,7 +18,7 @@ The main CI workflow performs:
 - Go 1.26.8 compilation/tests, Go vet, golangci-lint 2.13.2, Gosec 2.28.0, and govulncheck 1.8.0.
 - Frontend lint/type/unit/E2E checks on supported Node.js 24 LTS.
 - Migration pair/continuity validation, complete seed-manifest validation, clean `up/down/up`, and double seed application.
-- Full-history Gitleaks 8.30.1 scanning and Trivy 0.74.0 source, secret, IaC, dependency, full installed-graph license, and image scanning. Frontend lifecycle scripts remain disabled while the graph is materialized for analysis.
+- Full-history Gitleaks 8.30.1 scanning and separate Trivy 0.74.0 vulnerability/secret/IaC, full installed-graph license, and image gates. Frontend lifecycle scripts remain disabled while the graph is materialized for analysis. License policy is intentionally evaluated in its own blocking job so legal findings cannot be mistaken for CVEs or silently hidden by a clean vulnerability report.
 - SPDX JSON SBOM creation with Syft 1.51.1 for API, worker, migrator, and frontend images.
 - High/critical image vulnerability gates (including findings without an
   upstream fix) and retained JSON/SARIF evidence.

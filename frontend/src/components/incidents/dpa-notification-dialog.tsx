@@ -18,6 +18,7 @@ export function DPANotificationDialog({ incident, open, onOpenChange }: { incide
   const [reference, setReference] = React.useState('');
   const [reason, setReason] = React.useState('');
   const [validationError, setValidationError] = React.useState<string | null>(null);
+  const idempotencyKey = React.useRef<string | null>(null);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -28,16 +29,18 @@ export function DPANotificationDialog({ incident, open, onOpenChange }: { incide
     }
     setValidationError(null);
     try {
+      idempotencyKey.current ??= crypto.randomUUID();
       await mutation.mutateAsync({
         version: incident.version,
-        idempotency_key: crypto.randomUUID(),
+        idempotency_key: idempotencyKey.current,
         notified_at: notifiedAtIso,
         reference: reference.trim(),
         reason: reason.trim(),
       });
+      idempotencyKey.current = null;
       onOpenChange(false);
     } catch {
-      // Mutation error remains visible and the idempotency key is regenerated only on retry.
+      // Mutation error remains visible and retries keep the same idempotency key.
     }
   }
 

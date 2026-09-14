@@ -430,11 +430,16 @@ func lockManagedCustomRole(ctx context.Context, tx pgx.Tx, organizationID, roleI
 	var isSystem bool
 	if err := tx.QueryRow(ctx, `SELECT is_system_role FROM roles
 		WHERE id=$2::uuid AND (organization_id=$1::uuid OR (organization_id IS NULL AND is_system_role))
-		  AND deleted_at IS NULL FOR UPDATE`, organizationID, roleID).Scan(&isSystem); err != nil {
+		  AND deleted_at IS NULL`, organizationID, roleID).Scan(&isSystem); err != nil {
 		return nil, err
 	}
 	if isSystem {
 		return nil, ErrManagedRoleImmutable
+	}
+	if err := tx.QueryRow(ctx, `SELECT is_system_role FROM roles
+		WHERE id=$2::uuid AND organization_id=$1::uuid AND deleted_at IS NULL
+		FOR UPDATE`, organizationID, roleID).Scan(&isSystem); err != nil {
+		return nil, err
 	}
 	return getManagedRoleWithQuerier(ctx, tx, organizationID, roleID)
 }

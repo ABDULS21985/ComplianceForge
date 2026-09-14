@@ -41,6 +41,8 @@ type RouterDependencies struct {
 	Audits               *handler.AuditHandler
 	Incidents            *handler.IncidentHandler
 	Assets               *handler.AssetHandler
+	Vendors              *handler.VendorHandler
+	AccessAdministration *handler.AccessAdministrationHandler
 	Permissions          *handler.PermissionHandler
 	Notifications        *handler.NotificationHandler
 	Integrations         *handler.IntegrationHandler
@@ -58,7 +60,6 @@ type RouterDependencies struct {
 // composition slice. Keeping them in the dependency object makes their
 // disabled state explicit instead of creating hidden nil handlers in NewRouter.
 type DomainHandlers struct {
-	Vendor           *handler.VendorHandler
 	Dashboard        *handler.DashboardHandler
 	Report           *handler.ReportHandler
 	DSR              *handler.DSRHandler
@@ -109,6 +110,10 @@ var (
 	_ handler.IncidentService                 = (*service.IncidentService)(nil)
 	_ service.AssetManagementRepository       = repository.AssetRepository(nil)
 	_ handler.AssetManagementService          = (*service.AssetService)(nil)
+	_ service.VendorManagementRepository      = repository.VendorRepository(nil)
+	_ handler.VendorService                   = (*service.VendorService)(nil)
+	_ service.AccessAdministrationStore       = repository.AccessAdministrationRepository(nil)
+	_ handler.AccessAdministrationService     = (*service.AccessAdministrationService)(nil)
 	_ handler.PermissionService               = (*service.RBACAuthorizer)(nil)
 	_ handler.IntegrationSvc                  = (*service.IntegrationService)(nil)
 )
@@ -165,6 +170,18 @@ func BuildDependencies(
 		return RouterDependencies{}, fmt.Errorf("building asset repository: %w", err)
 	}
 	assetService := service.NewAssetService(assetRepo, log.Logger)
+	var vendorRepo service.VendorManagementRepository
+	vendorRepo, err = repository.NewVendorRepository(pool, domainOutbox, incidentQueue)
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building vendor repository: %w", err)
+	}
+	vendorService := service.NewVendorService(vendorRepo, log.Logger)
+	var accessAdministrationRepo service.AccessAdministrationStore
+	accessAdministrationRepo, err = repository.NewAccessAdministrationRepository(pool, domainOutbox, incidentQueue)
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building access administration repository: %w", err)
+	}
+	accessAdministrationService := service.NewAccessAdministrationService(accessAdministrationRepo, log.Logger)
 	integrationService, err := service.NewIntegrationService(pool, cfg.Encryption.IntegrationKey)
 	if err != nil {
 		return RouterDependencies{}, fmt.Errorf("building integration service: %w", err)
@@ -213,6 +230,8 @@ func BuildDependencies(
 		Audits:               handler.NewAuditHandler(auditService),
 		Incidents:            handler.NewIncidentHandler(incidentService),
 		Assets:               handler.NewAssetHandler(assetService),
+		Vendors:              handler.NewVendorHandler(vendorService),
+		AccessAdministration: handler.NewAccessAdministrationHandler(accessAdministrationService),
 		Permissions:          handler.NewPermissionHandler(authorizer),
 		Notifications:        handler.NewNotificationHandler(pool, notificationEngine, notificationProtector),
 		Integrations:         handler.NewIntegrationHandler(integrationService),
@@ -261,6 +280,12 @@ func (d RouterDependencies) Validate() error {
 	}
 	if d.Assets == nil || !d.Assets.Ready() {
 		missing = append(missing, errors.New("asset handler is required"))
+	}
+	if d.Vendors == nil || !d.Vendors.Ready() {
+		missing = append(missing, errors.New("vendor handler is required"))
+	}
+	if d.AccessAdministration == nil || !d.AccessAdministration.Ready() {
+		missing = append(missing, errors.New("access administration handler is required"))
 	}
 	if d.Permissions == nil || !d.Permissions.Ready() {
 		missing = append(missing, errors.New("permission handler is required"))
