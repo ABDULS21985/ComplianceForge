@@ -11,8 +11,14 @@ x-backend-environment: &backend-environment
   REDIS_PORT: 6379
   RABBITMQ_URL: amqp://complianceforge:${RABBITMQ_PASSWORD:-complianceforge}@rabbitmq:5672/
   JWT_SECRET: ${JWT_SECRET:-development-only-jwt-secret}
+  DSR_ENCRYPTION_KEY: ${DSR_ENCRYPTION_KEY:-ZGV2ZWxvcG1lbnQtZHNyLWtleS0zMi1ieXRlcyEhISE=}
+  INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-646576656c6f706d656e742d696e746567726174696f6e2d6b65792d33326221}
+  NOTIFICATION_ENCRYPTION_KEY: ${NOTIFICATION_ENCRYPTION_KEY:-6e6f74696669636174696f6e2d6465762d6b65792d33322d62797465732d3031}
   SMTP_HOST: mailpit
   SMTP_PORT: 1025
+  SMTP_FROM: noreply@complianceforge.local
+  SMTP_TLS_MODE: disabled
+  SMTP_TIMEOUT_SECONDS: 15
   STORAGE_TYPE: local
   STORAGE_PATH: /app/storage
   CORS_ALLOWED_ORIGINS: http://localhost:3000
@@ -77,11 +83,9 @@ services:
     build:
       context: ../../frontend
       dockerfile: ../deployments/docker/Dockerfile.frontend
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
+      API_INTERNAL_URL: http://api:8080/api/v1
     ports:
       - "3000:3000"
     depends_on:

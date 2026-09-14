@@ -45,6 +45,12 @@ func NewAuthHandler(service AuthService) *AuthHandler {
 	}
 }
 
+// Ready reports whether the handler has its required service dependency. The
+// router uses it to reject partially constructed dependency graphs at startup.
+func (h *AuthHandler) Ready() bool {
+	return h != nil && h.service != nil && h.validator != nil
+}
+
 // Login handles POST /auth/login.
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest

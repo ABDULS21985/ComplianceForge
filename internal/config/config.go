@@ -1,7 +1,10 @@
 package config
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"strings"
 
@@ -50,6 +53,15 @@ type JWTConfig struct {
 	ExpiryHours int    `mapstructure:"expiry_hours"`
 }
 
+// EncryptionConfig holds application-layer data-encryption keys. Values are
+// encoded for transport in environment variables and decoded by the owning
+// service; they must never be logged or returned by diagnostics.
+type EncryptionConfig struct {
+	DSRKey          string `mapstructure:"dsr_key"`
+	IntegrationKey  string `mapstructure:"integration_key"`
+	NotificationKey string `mapstructure:"notification_key"`
+}
+
 // OAuthConfig holds OAuth2 client settings.
 type OAuthConfig struct {
 	ClientID     string `mapstructure:"client_id"`
@@ -59,11 +71,15 @@ type OAuthConfig struct {
 
 // SMTPConfig holds email/SMTP settings.
 type SMTPConfig struct {
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	User     string `mapstructure:"user"`
-	Password string `mapstructure:"password"`
-	From     string `mapstructure:"from"`
+	Host           string `mapstructure:"host"`
+	Port           int    `mapstructure:"port"`
+	User           string `mapstructure:"user"`
+	Password       string `mapstructure:"password"`
+	From           string `mapstructure:"from"`
+	TLSMode        string `mapstructure:"tls_mode"`
+	TimeoutSeconds int    `mapstructure:"timeout_seconds"`
+	HelloName      string `mapstructure:"hello_name"`
+	ServerName     string `mapstructure:"server_name"`
 }
 
 // StorageConfig holds file storage settings.
@@ -92,17 +108,18 @@ type RateLimitConfig struct {
 
 // Config is the root configuration struct for ComplianceForge.
 type Config struct {
-	App       AppConfig       `mapstructure:"app"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Redis     RedisConfig     `mapstructure:"redis"`
-	RabbitMQ  RabbitMQConfig  `mapstructure:"rabbitmq"`
-	JWT       JWTConfig       `mapstructure:"jwt"`
-	OAuth     OAuthConfig     `mapstructure:"oauth"`
-	SMTP      SMTPConfig      `mapstructure:"smtp"`
-	Storage   StorageConfig   `mapstructure:"storage"`
-	Log       LogConfig       `mapstructure:"log"`
-	CORS      CORSConfig      `mapstructure:"cors"`
-	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
+	App        AppConfig        `mapstructure:"app"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Redis      RedisConfig      `mapstructure:"redis"`
+	RabbitMQ   RabbitMQConfig   `mapstructure:"rabbitmq"`
+	JWT        JWTConfig        `mapstructure:"jwt"`
+	Encryption EncryptionConfig `mapstructure:"encryption"`
+	OAuth      OAuthConfig      `mapstructure:"oauth"`
+	SMTP       SMTPConfig       `mapstructure:"smtp"`
+	Storage    StorageConfig    `mapstructure:"storage"`
+	Log        LogConfig        `mapstructure:"log"`
+	CORS       CORSConfig       `mapstructure:"cors"`
+	RateLimit  RateLimitConfig  `mapstructure:"rate_limit"`
 }
 
 // DatabaseDSN returns the PostgreSQL connection string derived from the database config.
@@ -169,6 +186,7 @@ func Load() (*Config, error) {
 	v.SetDefault("jwt.secret", "change-me-in-production")
 	v.SetDefault("jwt.issuer", "complianceforge")
 	v.SetDefault("jwt.expiry_hours", 24)
+	v.SetDefault("encryption.notification_key", "")
 
 	v.SetDefault("oauth.client_id", "")
 	v.SetDefault("oauth.client_secret", "")
@@ -179,6 +197,10 @@ func Load() (*Config, error) {
 	v.SetDefault("smtp.user", "")
 	v.SetDefault("smtp.password", "")
 	v.SetDefault("smtp.from", "noreply@complianceforge.io")
+	v.SetDefault("smtp.tls_mode", "starttls")
+	v.SetDefault("smtp.timeout_seconds", 15)
+	v.SetDefault("smtp.hello_name", "")
+	v.SetDefault("smtp.server_name", "")
 
 	v.SetDefault("storage.type", "local")
 	v.SetDefault("storage.path", "./uploads")
@@ -216,44 +238,51 @@ func Load() (*Config, error) {
 // aliases and should not be introduced into new deployments.
 func bindEnvironment(v *viper.Viper) error {
 	bindings := map[string][]string{
-		"app.name":             {"APP_NAME", "CF_APP_NAME"},
-		"app.env":              {"APP_ENV", "CF_APP_ENV"},
-		"app.port":             {"APP_PORT", "PORT", "CF_APP_PORT"},
-		"app.grpc_port":        {"APP_GRPC_PORT", "CF_APP_GRPC_PORT"},
-		"database.url":         {"DATABASE_URL", "CF_DATABASE_URL"},
-		"database.host":        {"DB_HOST", "CF_DATABASE_HOST"},
-		"database.port":        {"DB_PORT", "CF_DATABASE_PORT"},
-		"database.user":        {"DB_USER", "CF_DATABASE_USER"},
-		"database.password":    {"DB_PASSWORD", "CF_DATABASE_PASSWORD"},
-		"database.dbname":      {"DB_NAME", "CF_DATABASE_DBNAME"},
-		"database.sslmode":     {"DB_SSL_MODE", "CF_DATABASE_SSLMODE"},
-		"database.max_conns":   {"DB_MAX_CONNS", "CF_DATABASE_MAX_CONNS"},
-		"database.min_conns":   {"DB_MIN_CONNS", "CF_DATABASE_MIN_CONNS"},
-		"redis.url":            {"REDIS_URL", "CF_REDIS_URL"},
-		"redis.host":           {"REDIS_HOST", "CF_REDIS_HOST"},
-		"redis.port":           {"REDIS_PORT", "CF_REDIS_PORT"},
-		"redis.password":       {"REDIS_PASSWORD", "CF_REDIS_PASSWORD"},
-		"redis.db":             {"REDIS_DB", "CF_REDIS_DB"},
-		"rabbitmq.url":         {"RABBITMQ_URL", "CF_RABBITMQ_URL"},
-		"jwt.secret":           {"JWT_SECRET", "CF_JWT_SECRET"},
-		"jwt.issuer":           {"JWT_ISSUER", "CF_JWT_ISSUER"},
-		"jwt.expiry_hours":     {"JWT_EXPIRY_HOURS", "CF_JWT_EXPIRY_HOURS"},
-		"oauth.client_id":      {"OAUTH_CLIENT_ID", "CF_OAUTH_CLIENT_ID"},
-		"oauth.client_secret":  {"OAUTH_CLIENT_SECRET", "CF_OAUTH_CLIENT_SECRET"},
-		"oauth.redirect_url":   {"OAUTH_REDIRECT_URL", "CF_OAUTH_REDIRECT_URL"},
-		"smtp.host":            {"SMTP_HOST", "CF_SMTP_HOST"},
-		"smtp.port":            {"SMTP_PORT", "CF_SMTP_PORT"},
-		"smtp.user":            {"SMTP_USER", "CF_SMTP_USER"},
-		"smtp.password":        {"SMTP_PASSWORD", "CF_SMTP_PASSWORD"},
-		"smtp.from":            {"SMTP_FROM", "CF_SMTP_FROM"},
-		"storage.type":         {"STORAGE_TYPE", "CF_STORAGE_TYPE"},
-		"storage.path":         {"STORAGE_PATH", "CF_STORAGE_PATH"},
-		"storage.s3_bucket":    {"S3_BUCKET", "CF_STORAGE_S3_BUCKET"},
-		"storage.s3_region":    {"S3_REGION", "CF_STORAGE_S3_REGION"},
-		"log.level":            {"LOG_LEVEL", "CF_LOG_LEVEL"},
-		"log.format":           {"LOG_FORMAT", "CF_LOG_FORMAT"},
-		"cors.allowed_origins": {"CORS_ALLOWED_ORIGINS", "CF_CORS_ALLOWED_ORIGINS"},
-		"rate_limit.rps":       {"RATE_LIMIT_RPS", "CF_RATE_LIMIT_RPS"},
+		"app.name":                    {"APP_NAME", "CF_APP_NAME"},
+		"app.env":                     {"APP_ENV", "CF_APP_ENV"},
+		"app.port":                    {"APP_PORT", "PORT", "CF_APP_PORT"},
+		"app.grpc_port":               {"APP_GRPC_PORT", "CF_APP_GRPC_PORT"},
+		"database.url":                {"DATABASE_URL", "CF_DATABASE_URL"},
+		"database.host":               {"DB_HOST", "CF_DATABASE_HOST"},
+		"database.port":               {"DB_PORT", "CF_DATABASE_PORT"},
+		"database.user":               {"DB_USER", "CF_DATABASE_USER"},
+		"database.password":           {"DB_PASSWORD", "CF_DATABASE_PASSWORD"},
+		"database.dbname":             {"DB_NAME", "CF_DATABASE_DBNAME"},
+		"database.sslmode":            {"DB_SSL_MODE", "CF_DATABASE_SSLMODE"},
+		"database.max_conns":          {"DB_MAX_CONNS", "CF_DATABASE_MAX_CONNS"},
+		"database.min_conns":          {"DB_MIN_CONNS", "CF_DATABASE_MIN_CONNS"},
+		"redis.url":                   {"REDIS_URL", "CF_REDIS_URL"},
+		"redis.host":                  {"REDIS_HOST", "CF_REDIS_HOST"},
+		"redis.port":                  {"REDIS_PORT", "CF_REDIS_PORT"},
+		"redis.password":              {"REDIS_PASSWORD", "CF_REDIS_PASSWORD"},
+		"redis.db":                    {"REDIS_DB", "CF_REDIS_DB"},
+		"rabbitmq.url":                {"RABBITMQ_URL", "CF_RABBITMQ_URL"},
+		"jwt.secret":                  {"JWT_SECRET", "CF_JWT_SECRET"},
+		"jwt.issuer":                  {"JWT_ISSUER", "CF_JWT_ISSUER"},
+		"jwt.expiry_hours":            {"JWT_EXPIRY_HOURS", "CF_JWT_EXPIRY_HOURS"},
+		"encryption.dsr_key":          {"DSR_ENCRYPTION_KEY", "CF_DSR_ENCRYPTION_KEY"},
+		"encryption.integration_key":  {"INTEGRATION_ENCRYPTION_KEY", "CF_INTEGRATION_ENCRYPTION_KEY"},
+		"encryption.notification_key": {"NOTIFICATION_ENCRYPTION_KEY", "CF_NOTIFICATION_ENCRYPTION_KEY"},
+		"oauth.client_id":             {"OAUTH_CLIENT_ID", "CF_OAUTH_CLIENT_ID"},
+		"oauth.client_secret":         {"OAUTH_CLIENT_SECRET", "CF_OAUTH_CLIENT_SECRET"},
+		"oauth.redirect_url":          {"OAUTH_REDIRECT_URL", "CF_OAUTH_REDIRECT_URL"},
+		"smtp.host":                   {"SMTP_HOST", "CF_SMTP_HOST"},
+		"smtp.port":                   {"SMTP_PORT", "CF_SMTP_PORT"},
+		"smtp.user":                   {"SMTP_USER", "CF_SMTP_USER"},
+		"smtp.password":               {"SMTP_PASSWORD", "CF_SMTP_PASSWORD"},
+		"smtp.from":                   {"SMTP_FROM", "CF_SMTP_FROM"},
+		"smtp.tls_mode":               {"SMTP_TLS_MODE", "CF_SMTP_TLS_MODE"},
+		"smtp.timeout_seconds":        {"SMTP_TIMEOUT_SECONDS", "CF_SMTP_TIMEOUT_SECONDS"},
+		"smtp.hello_name":             {"SMTP_HELLO_NAME", "CF_SMTP_HELLO_NAME"},
+		"smtp.server_name":            {"SMTP_SERVER_NAME", "CF_SMTP_SERVER_NAME"},
+		"storage.type":                {"STORAGE_TYPE", "CF_STORAGE_TYPE"},
+		"storage.path":                {"STORAGE_PATH", "CF_STORAGE_PATH"},
+		"storage.s3_bucket":           {"S3_BUCKET", "CF_STORAGE_S3_BUCKET"},
+		"storage.s3_region":           {"S3_REGION", "CF_STORAGE_S3_REGION"},
+		"log.level":                   {"LOG_LEVEL", "CF_LOG_LEVEL"},
+		"log.format":                  {"LOG_FORMAT", "CF_LOG_FORMAT"},
+		"cors.allowed_origins":        {"CORS_ALLOWED_ORIGINS", "CF_CORS_ALLOWED_ORIGINS"},
+		"rate_limit.rps":              {"RATE_LIMIT_RPS", "CF_RATE_LIMIT_RPS"},
 	}
 
 	for key, names := range bindings {
@@ -332,20 +361,30 @@ func (c *Config) Validate() error {
 	if c.RateLimit.RPS < 1 {
 		return fmt.Errorf("RATE_LIMIT_RPS must be greater than zero")
 	}
+	if err := validateSMTPConfig(&c.SMTP, c.App.Env == "staging" || c.App.Env == "production"); err != nil {
+		return err
+	}
 	if len(c.CORS.AllowedOrigins) == 0 {
 		return fmt.Errorf("CORS_ALLOWED_ORIGINS must contain at least one origin")
 	}
 
+	seenOrigins := make(map[string]struct{}, len(c.CORS.AllowedOrigins))
 	for i, configuredOrigin := range c.CORS.AllowedOrigins {
 		origin := strings.TrimSpace(configuredOrigin)
-		c.CORS.AllowedOrigins[i] = origin
 		parsed, err := url.Parse(origin)
 		if origin == "*" {
-			continue
+			return fmt.Errorf("CORS wildcard origin is incompatible with credentialed requests")
 		}
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return fmt.Errorf("invalid CORS origin %q", origin)
 		}
+		origin = strings.TrimSuffix(origin, "/")
+		if _, duplicate := seenOrigins[origin]; duplicate {
+			return fmt.Errorf("duplicate CORS origin %q", origin)
+		}
+		seenOrigins[origin] = struct{}{}
+		c.CORS.AllowedOrigins[i] = origin
 	}
 
 	storageType := strings.ToLower(strings.TrimSpace(c.Storage.Type))
@@ -399,14 +438,53 @@ func (c *Config) Validate() error {
 		if c.Storage.Type == "local" {
 			return fmt.Errorf("STORAGE_TYPE=local is not supported in staging or production")
 		}
+		if err := validateEncryptionKeys(c.Encryption, true); err != nil {
+			return err
+		}
 		for _, origin := range c.CORS.AllowedOrigins {
 			parsed, _ := url.Parse(strings.TrimSpace(origin))
-			if origin == "*" || parsed.Scheme != "https" {
-				return fmt.Errorf("CORS origins must use HTTPS and cannot be wildcarded in staging or production")
+			if parsed.Scheme != "https" {
+				return fmt.Errorf("CORS origins must use HTTPS in staging or production")
 			}
 		}
 	}
 
+	return validateEncryptionKeys(c.Encryption, false)
+}
+
+func validateEncryptionKeys(keys EncryptionConfig, required bool) error {
+	if keys.DSRKey == "" {
+		if required {
+			return fmt.Errorf("DSR_ENCRYPTION_KEY is required in staging and production")
+		}
+	} else {
+		decoded, err := base64.StdEncoding.DecodeString(keys.DSRKey)
+		if err != nil || len(decoded) != 32 {
+			return fmt.Errorf("DSR_ENCRYPTION_KEY must be base64-encoded 32-byte key material")
+		}
+	}
+
+	if keys.IntegrationKey == "" {
+		if required {
+			return fmt.Errorf("INTEGRATION_ENCRYPTION_KEY is required in staging and production")
+		}
+	} else {
+		decoded, err := hex.DecodeString(keys.IntegrationKey)
+		if err != nil || len(decoded) != 32 {
+			return fmt.Errorf("INTEGRATION_ENCRYPTION_KEY must be hex-encoded 32-byte key material")
+		}
+	}
+
+	if keys.NotificationKey == "" {
+		if required {
+			return fmt.Errorf("NOTIFICATION_ENCRYPTION_KEY is required in staging and production")
+		}
+	} else {
+		decoded, err := hex.DecodeString(keys.NotificationKey)
+		if err != nil || len(decoded) != 32 {
+			return fmt.Errorf("NOTIFICATION_ENCRYPTION_KEY must be hex-encoded 32-byte key material")
+		}
+	}
 	return nil
 }
 
@@ -425,4 +503,49 @@ func databaseURLUsesTLS(rawURL string) bool {
 		return false
 	}
 	return isTLSDatabaseMode(parsed.Query().Get("sslmode"))
+}
+
+func validateSMTPConfig(cfg *SMTPConfig, secureEnvironment bool) error {
+	cfg.Host = strings.TrimSpace(cfg.Host)
+	cfg.User = strings.TrimSpace(cfg.User)
+	cfg.From = strings.TrimSpace(cfg.From)
+	cfg.TLSMode = strings.ToLower(strings.TrimSpace(cfg.TLSMode))
+	cfg.HelloName = strings.TrimSpace(cfg.HelloName)
+	cfg.ServerName = strings.TrimSpace(cfg.ServerName)
+
+	if cfg.Host == "" || strings.ContainsAny(cfg.Host, "/\r\n") {
+		return fmt.Errorf("SMTP_HOST is required and must be a hostname or IP address")
+	}
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return fmt.Errorf("SMTP_PORT must be between 1 and 65535")
+	}
+	if cfg.TimeoutSeconds < 1 || cfg.TimeoutSeconds > 120 {
+		return fmt.Errorf("SMTP_TIMEOUT_SECONDS must be between 1 and 120")
+	}
+	if cfg.TLSMode != "starttls" && cfg.TLSMode != "implicit" && cfg.TLSMode != "disabled" {
+		return fmt.Errorf("SMTP_TLS_MODE must be starttls, implicit, or disabled")
+	}
+	if secureEnvironment && cfg.TLSMode == "disabled" {
+		return fmt.Errorf("SMTP_TLS_MODE must require TLS in staging and production")
+	}
+	if (cfg.User == "") != (cfg.Password == "") {
+		return fmt.Errorf("SMTP_USER and SMTP_PASSWORD must be configured together")
+	}
+	if cfg.User != "" && cfg.TLSMode == "disabled" {
+		return fmt.Errorf("SMTP authentication requires TLS")
+	}
+	if strings.ContainsAny(cfg.From, "\r\n") {
+		return fmt.Errorf("SMTP_FROM must be a valid email address")
+	}
+	from, err := mail.ParseAddress(cfg.From)
+	if err != nil || from.Address == "" || !strings.Contains(from.Address, "@") {
+		return fmt.Errorf("SMTP_FROM must be a valid email address")
+	}
+	if cfg.HelloName != "" && (strings.ContainsAny(cfg.HelloName, " /\r\n") || strings.Contains(cfg.HelloName, ":")) {
+		return fmt.Errorf("SMTP_HELLO_NAME must be a hostname without whitespace or a port")
+	}
+	if cfg.ServerName != "" && strings.ContainsAny(cfg.ServerName, " /\r\n") {
+		return fmt.Errorf("SMTP_SERVER_NAME must be a hostname")
+	}
+	return nil
 }

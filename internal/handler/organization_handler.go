@@ -30,6 +30,11 @@ func NewOrganizationHandler(service OrganizationService) *OrganizationHandler {
 	return &OrganizationHandler{service: service}
 }
 
+// Ready reports whether the handler has its required service dependency.
+func (h *OrganizationHandler) Ready() bool {
+	return h != nil && h.service != nil
+}
+
 // Create handles POST /organizations.
 func (h *OrganizationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var org models.Organization

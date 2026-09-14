@@ -27,10 +27,10 @@ func TestRenderTemplate(t *testing.T) {
 			expected: "Incident INC-0001 — Data Breach (critical)",
 		},
 		{
-			name:     "missing variable renders empty",
-			tmpl:     "Hello {{.Name}}, your score is {{.Score}}",
-			data:     map[string]interface{}{"Name": "User"},
-			expected: "Hello User, your score is <no value>",
+			name:    "missing variable fails closed",
+			tmpl:    "Hello {{.Name}}, your score is {{.Score}}",
+			data:    map[string]interface{}{"Name": "User"},
+			wantErr: true,
 		},
 		{
 			name:    "invalid template syntax",

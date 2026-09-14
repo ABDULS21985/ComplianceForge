@@ -27,38 +27,6 @@ export const MATURITY_LABELS: Record<number, string> = {
   5: 'Optimizing',
 };
 
-export const NAV_ITEMS = [
-  { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
-  { label: 'Frameworks', href: '/frameworks', icon: 'Shield' },
-  { label: 'Risk Register', href: '/risks', icon: 'AlertTriangle' },
-  { label: 'Policies', href: '/policies', icon: 'FileText' },
-  { label: 'Exceptions', href: '/exceptions', icon: 'ShieldOff' },
-  { label: 'Evidence', href: '/evidence', icon: 'FolderCheck' },
-  { label: 'Audits', href: '/audits', icon: 'ClipboardCheck' },
-  { label: 'Incidents', href: '/incidents', icon: 'AlertOctagon', badgeKey: 'open_incidents' },
-  { label: 'Vendors', href: '/vendors', icon: 'Building2' },
-  { label: 'Assessments', href: '/vendor-assessments', icon: 'ClipboardList' },
-  { label: 'Assets', href: '/assets', icon: 'Server' },
-  { label: 'Data Governance', href: '/data', icon: 'Database' },
-  { label: 'Board', href: '/board', icon: 'Users' },
-  { label: 'Reports', href: '/reports', icon: 'BarChart3' },
-  { label: 'DSR Requests', href: '/dsr', icon: 'UserCheck' },
-  { label: 'NIS2', href: '/nis2', icon: 'ShieldCheck' },
-  { label: 'Monitoring', href: '/monitoring', icon: 'Activity' },
-  { label: 'Remediation', href: '/remediation', icon: 'Wrench' },
-  { label: 'Marketplace', href: '/marketplace', icon: 'Store' },
-  { label: 'Regulatory', href: '/regulatory', icon: 'Scale' },
-  { label: 'BIA', href: '/bia', icon: 'Zap' },
-  { label: 'Analytics', href: '/analytics', icon: 'TrendingUp' },
-  { label: 'Workflows', href: '/workflows', icon: 'GitPullRequest' },
-  { label: 'Calendar', href: '/calendar', icon: 'CalendarDays' },
-  { label: 'Knowledge Base', href: '/knowledge', icon: 'BookOpen' },
-  { label: 'Activity', href: '/activity', icon: 'Clock' },
-  { label: 'Search', href: '/search', icon: 'Search' },
-  { label: 'Notifications', href: '/settings/notifications', icon: 'Bell' },
-  { label: 'Settings', href: '/settings', icon: 'Settings' },
-] as const;
-
 export const COUNTRIES_EU_UK = [
   { code: 'GB', name: 'United Kingdom' }, { code: 'DE', name: 'Germany' },
   { code: 'FR', name: 'France' }, { code: 'IT', name: 'Italy' },

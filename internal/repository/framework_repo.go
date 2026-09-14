@@ -2,158 +2,184 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/complianceforge/platform/internal/database"
 	"github.com/complianceforge/platform/internal/models"
 )
 
-// FrameworkRepository defines data-access operations for compliance frameworks.
+// FrameworkRepository exposes only catalog reads and tenant adoption. Catalog
+// mutation is intentionally not part of the tenant API.
 type FrameworkRepository interface {
-	Create(ctx context.Context, framework *models.ComplianceFramework) error
-	GetByID(ctx context.Context, orgID, id string) (*models.ComplianceFramework, error)
-	Update(ctx context.Context, framework *models.ComplianceFramework) error
-	Delete(ctx context.Context, orgID, id string) error
 	List(ctx context.Context, orgID string, pagination models.PaginationRequest) ([]models.ComplianceFramework, int, error)
-	ListByCategory(ctx context.Context, orgID, category string) ([]models.ComplianceFramework, error)
-	GetWithControls(ctx context.Context, orgID, id string) (*models.ComplianceFramework, error)
+	GetByID(ctx context.Context, orgID, frameworkID string) (*models.ComplianceFramework, error)
+	Adopt(ctx context.Context, orgID, userID, frameworkID string) (*models.OrganizationFramework, error)
 }
 
-type frameworkRepo struct {
-	pool *pgxpool.Pool
-}
+type frameworkRepo struct{ pool *pgxpool.Pool }
 
-// NewFrameworkRepository returns a concrete FrameworkRepository backed by pgxpool.
 func NewFrameworkRepository(pool *pgxpool.Pool) FrameworkRepository {
 	return &frameworkRepo{pool: pool}
 }
 
-func (r *frameworkRepo) Create(ctx context.Context, fw *models.ComplianceFramework) error {
-	query := `
-		INSERT INTO compliance_frameworks (id, organization_id, name, version, description,
-			authority, category, is_active, effective_date, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-		RETURNING id, created_at, updated_at`
-
-	return r.pool.QueryRow(ctx, query,
-		fw.OrganizationID,
-		fw.Name,
-		fw.Version,
-		fw.Description,
-		fw.Authority,
-		fw.Category,
-		fw.IsActive,
-		fw.EffectiveDate,
-	).Scan(&fw.ID, &fw.CreatedAt, &fw.UpdatedAt)
-}
-
-func (r *frameworkRepo) GetByID(ctx context.Context, orgID, id string) (*models.ComplianceFramework, error) {
-	query := `
-		SELECT id, organization_id, name, version, description, authority, category,
-			is_active, effective_date, created_at, updated_at
-		FROM compliance_frameworks
-		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`
-
-	fw := &models.ComplianceFramework{}
-	err := r.pool.QueryRow(ctx, query, id, orgID).Scan(
-		&fw.ID,
-		&fw.OrganizationID,
-		&fw.Name,
-		&fw.Version,
-		&fw.Description,
-		&fw.Authority,
-		&fw.Category,
-		&fw.IsActive,
-		&fw.EffectiveDate,
-		&fw.CreatedAt,
-		&fw.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("framework not found: %w", err)
-	}
-	return fw, nil
-}
-
-func (r *frameworkRepo) Update(ctx context.Context, fw *models.ComplianceFramework) error {
-	// TODO: UPDATE compliance_frameworks SET name=$3, version=$4, description=$5,
-	//   authority=$6, category=$7, is_active=$8, effective_date=$9, updated_at=NOW()
-	//   WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL
-	_ = ctx
-	_ = fw
-	return fmt.Errorf("not implemented")
-}
-
-func (r *frameworkRepo) Delete(ctx context.Context, orgID, id string) error {
-	// TODO: UPDATE compliance_frameworks SET deleted_at=NOW()
-	//   WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL
-	_ = ctx
-	_ = orgID
-	_ = id
-	return fmt.Errorf("not implemented")
-}
+const frameworkColumns = `
+	cf.id, cf.organization_id, cf.code, cf.name, cf.full_name, cf.version,
+	cf.description, cf.issuing_body, cf.category, cf.applicable_regions,
+	cf.applicable_industries, cf.is_system_framework, cf.is_active,
+	cf.effective_date, cf.sunset_date, cf.total_controls, cf.icon_url,
+	cf.color_hex, cf.metadata, cf.created_at, cf.updated_at, cf.deleted_at,
+	of.id, of.status, of.adoption_date, of.target_completion_date,
+	of.compliance_score, of.responsible_user_id, of.created_at, of.updated_at`
 
 func (r *frameworkRepo) List(ctx context.Context, orgID string, pagination models.PaginationRequest) ([]models.ComplianceFramework, int, error) {
-	countQuery := `SELECT COUNT(*) FROM compliance_frameworks WHERE organization_id = $1 AND deleted_at IS NULL`
+	q := database.QuerierFromContext(ctx, r.pool)
 	var total int
-	if err := r.pool.QueryRow(ctx, countQuery, orgID).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("counting frameworks: %w", err)
+	if err := q.QueryRow(ctx, `
+		SELECT count(*)
+		FROM compliance_frameworks cf
+		WHERE cf.deleted_at IS NULL AND cf.is_active
+		  AND (cf.organization_id IS NULL OR cf.organization_id = $1::uuid)`, orgID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting visible frameworks: %w", err)
 	}
 
-	query := `
-		SELECT id, organization_id, name, version, description, authority, category,
-			is_active, effective_date, created_at, updated_at
-		FROM compliance_frameworks
-		WHERE organization_id = $1 AND deleted_at IS NULL
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3`
-
-	offset := (pagination.Page - 1) * pagination.PageSize
-	rows, err := r.pool.Query(ctx, query, orgID, pagination.PageSize, offset)
+	rows, err := q.Query(ctx, `SELECT `+frameworkColumns+`
+		FROM compliance_frameworks cf
+		LEFT JOIN organization_frameworks of
+		  ON of.framework_id = cf.id AND of.organization_id = $1::uuid
+		WHERE cf.deleted_at IS NULL AND cf.is_active
+		  AND (cf.organization_id IS NULL OR cf.organization_id = $1::uuid)
+		ORDER BY cf.name, cf.version DESC
+		LIMIT $2 OFFSET $3`, orgID, pagination.PageSize, (pagination.Page-1)*pagination.PageSize)
 	if err != nil {
-		return nil, 0, fmt.Errorf("listing frameworks: %w", err)
+		return nil, 0, fmt.Errorf("listing visible frameworks: %w", err)
 	}
 	defer rows.Close()
 
-	var frameworks []models.ComplianceFramework
+	frameworks := make([]models.ComplianceFramework, 0)
 	for rows.Next() {
-		var fw models.ComplianceFramework
-		if err := rows.Scan(
-			&fw.ID,
-			&fw.OrganizationID,
-			&fw.Name,
-			&fw.Version,
-			&fw.Description,
-			&fw.Authority,
-			&fw.Category,
-			&fw.IsActive,
-			&fw.EffectiveDate,
-			&fw.CreatedAt,
-			&fw.UpdatedAt,
-		); err != nil {
-			return nil, 0, fmt.Errorf("scanning framework row: %w", err)
+		framework, err := scanFramework(rows, orgID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scanning framework: %w", err)
 		}
-		frameworks = append(frameworks, fw)
+		frameworks = append(frameworks, *framework)
 	}
 	return frameworks, total, rows.Err()
 }
 
-func (r *frameworkRepo) ListByCategory(ctx context.Context, orgID, category string) ([]models.ComplianceFramework, error) {
-	// TODO: SELECT ... FROM compliance_frameworks
-	//   WHERE organization_id=$1 AND category=$2 AND deleted_at IS NULL
-	//   ORDER BY name ASC
-	_ = ctx
-	_ = orgID
-	_ = category
-	return nil, fmt.Errorf("not implemented")
+func (r *frameworkRepo) GetByID(ctx context.Context, orgID, frameworkID string) (*models.ComplianceFramework, error) {
+	q := database.QuerierFromContext(ctx, r.pool)
+	row := q.QueryRow(ctx, `SELECT `+frameworkColumns+`
+		FROM compliance_frameworks cf
+		LEFT JOIN organization_frameworks of
+		  ON of.framework_id = cf.id AND of.organization_id = $1::uuid
+		WHERE cf.id = $2::uuid AND cf.deleted_at IS NULL
+		  AND (cf.organization_id IS NULL OR cf.organization_id = $1::uuid)`, orgID, frameworkID)
+	framework, err := scanFramework(row, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("getting visible framework: %w", err)
+	}
+	return framework, nil
 }
 
-func (r *frameworkRepo) GetWithControls(ctx context.Context, orgID, id string) (*models.ComplianceFramework, error) {
-	// TODO: 1) Fetch framework via GetByID
-	//       2) SELECT ... FROM controls WHERE framework_id=$1 AND organization_id=$2 AND deleted_at IS NULL
-	//       3) Attach controls slice to framework
-	_ = ctx
-	_ = orgID
-	_ = id
-	return nil, fmt.Errorf("not implemented")
+type transactionStarter interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
+func (r *frameworkRepo) Adopt(ctx context.Context, orgID, userID, frameworkID string) (*models.OrganizationFramework, error) {
+	q := database.QuerierFromContext(ctx, r.pool)
+	starter, ok := q.(transactionStarter)
+	if !ok {
+		return nil, errors.New("framework adoption requires a transactional database executor")
+	}
+	tx, err := starter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning framework adoption: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var adoption models.OrganizationFramework
+	err = tx.QueryRow(ctx, `
+		INSERT INTO organization_frameworks (
+			organization_id, framework_id, status, adoption_date, responsible_user_id
+		)
+		SELECT $1::uuid, cf.id, 'not_started', CURRENT_DATE,
+			CASE WHEN EXISTS (
+				SELECT 1 FROM users u
+				WHERE u.id = $2::uuid AND u.organization_id = $1::uuid AND u.deleted_at IS NULL
+			) THEN $2::uuid ELSE NULL END
+		FROM compliance_frameworks cf
+		WHERE cf.id = $3::uuid AND cf.deleted_at IS NULL AND cf.is_active
+		  AND (cf.organization_id IS NULL OR cf.organization_id = $1::uuid)
+		ON CONFLICT (organization_id, framework_id) DO UPDATE
+		SET responsible_user_id = COALESCE(organization_frameworks.responsible_user_id, EXCLUDED.responsible_user_id)
+		RETURNING id, organization_id, framework_id, status, adoption_date,
+			target_completion_date, compliance_score, responsible_user_id,
+			created_at, updated_at`, orgID, userID, frameworkID).Scan(
+		&adoption.ID, &adoption.OrganizationID, &adoption.FrameworkID,
+		&adoption.Status, &adoption.AdoptionDate, &adoption.TargetCompletionDate,
+		&adoption.ComplianceScore, &adoption.ResponsibleUserID,
+		&adoption.CreatedAt, &adoption.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("adopting visible framework: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO control_implementations (
+			organization_id, framework_control_id, org_framework_id,
+			status, implementation_status, maturity_level
+		)
+		SELECT $1::uuid, fc.id, $2::uuid, 'not_implemented', 'not_started', 0
+		FROM framework_controls fc
+		JOIN compliance_frameworks cf ON cf.id = fc.framework_id
+		WHERE fc.framework_id = $3::uuid AND cf.deleted_at IS NULL
+		  AND (cf.organization_id IS NULL OR cf.organization_id = $1::uuid)
+		ON CONFLICT (organization_id, framework_control_id) DO NOTHING`, orgID, adoption.ID, frameworkID); err != nil {
+		return nil, fmt.Errorf("seeding control implementations: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing framework adoption: %w", err)
+	}
+	return &adoption, nil
+}
+
+type complianceRowScanner interface{ Scan(...any) error }
+
+func scanFramework(row complianceRowScanner, orgID string) (*models.ComplianceFramework, error) {
+	framework := &models.ComplianceFramework{}
+	var metadata []byte
+	var adoptionID, adoptionStatus *string
+	var adoptionDate, targetDate *time.Time
+	var complianceScore *float64
+	var responsibleUserID *string
+	var adoptionCreatedAt, adoptionUpdatedAt *time.Time
+	if err := row.Scan(
+		&framework.ID, &framework.OrganizationID, &framework.Code, &framework.Name,
+		&framework.FullName, &framework.Version, &framework.Description,
+		&framework.IssuingBody, &framework.Category, &framework.ApplicableRegions,
+		&framework.ApplicableIndustries, &framework.IsSystemFramework,
+		&framework.IsActive, &framework.EffectiveDate, &framework.SunsetDate,
+		&framework.TotalControls, &framework.IconURL, &framework.ColorHex,
+		&metadata, &framework.CreatedAt, &framework.UpdatedAt, &framework.DeletedAt,
+		&adoptionID, &adoptionStatus, &adoptionDate, &targetDate, &complianceScore,
+		&responsibleUserID, &adoptionCreatedAt, &adoptionUpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	framework.Metadata = metadata
+	if adoptionID != nil {
+		framework.Adoption = &models.OrganizationFramework{
+			BaseModel:      models.BaseModel{ID: *adoptionID, CreatedAt: *adoptionCreatedAt, UpdatedAt: *adoptionUpdatedAt},
+			OrganizationID: orgID, FrameworkID: framework.ID, Status: *adoptionStatus,
+			AdoptionDate: adoptionDate, TargetCompletionDate: targetDate,
+			ComplianceScore: *complianceScore, ResponsibleUserID: responsibleUserID,
+		}
+	}
+	return framework, nil
 }

@@ -16,8 +16,12 @@ import {
 interface BoardPortalData {
   member_name: string;
   organization_name: string;
-  compliance_score: number;
-  risk_appetite_score: number;
+  role?: string;
+  upcoming_meetings: number;
+  unread_reports: number;
+  pending_decisions_count: number;
+  compliance_score: number | null;
+  risk_appetite_score: number | null;
   key_alerts: {
     id: string;
     message: string;
@@ -185,27 +189,43 @@ function BoardPortalInner() {
         <div className="max-w-6xl mx-auto px-8 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold">{data.organization_name}</h1>
+              <h1 className="text-xl font-bold">{data.organization_name || 'Board Portal'}</h1>
               <p className="text-sm text-slate-300 mt-1">Executive Board Portal</p>
             </div>
             <div className="text-right">
               <p className="text-sm text-slate-300">Welcome,</p>
               <p className="font-medium">{data.member_name}</p>
+              {data.role && <p className="text-xs text-slate-300">{data.role}</p>}
             </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-8 py-8 space-y-8">
-        {/* Gauges Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white rounded-xl shadow-sm border p-6 flex justify-center">
-            <GaugeChart value={data.compliance_score} label="Compliance Posture" />
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border p-6 flex justify-center">
-            <GaugeChart value={data.risk_appetite_score} label="Risk Appetite Utilization" />
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            ['Upcoming meetings', data.upcoming_meetings],
+            ['Pending decisions', data.pending_decisions_count],
+            ['Unread reports', data.unread_reports],
+          ].map(([label, value]) => (
+            <div key={label} className="bg-white rounded-xl shadow-sm border p-5">
+              <p className="text-sm text-gray-500">{label}</p>
+              <p className="mt-1 text-3xl font-semibold text-gray-900">{value}</p>
+            </div>
+          ))}
         </div>
+
+        {typeof data.compliance_score === 'number' &&
+          typeof data.risk_appetite_score === 'number' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border p-6 flex justify-center">
+                <GaugeChart value={data.compliance_score} label="Compliance Posture" />
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border p-6 flex justify-center">
+                <GaugeChart value={data.risk_appetite_score} label="Risk Appetite Utilization" />
+              </div>
+            </div>
+          )}
 
         {/* Key Alerts */}
         {data.key_alerts.length > 0 && (

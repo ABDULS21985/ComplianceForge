@@ -3,12 +3,32 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/complianceforge/platform/internal/models"
 )
+
+var ErrInvalidAPIKey = errors.New("invalid API key")
+
+// APIKeyPrincipal is the authenticated, tenant-scoped identity represented by
+// a programmatic API key. It contains no raw key or stored credential hash.
+type APIKeyPrincipal struct {
+	KeyID              string
+	OrganizationID     string
+	Permissions        []string
+	RateLimitPerMinute int
+}
+
+// APIKeyAuthenticator resolves and validates an API key before tenant
+// middleware runs. Implementations must return a generic credential error for
+// all invalid, revoked, and expired keys to avoid account enumeration.
+type APIKeyAuthenticator interface {
+	AuthenticateAPIKey(ctx context.Context, rawKey, clientIP string) (*APIKeyPrincipal, error)
+}
 
 const (
 	TokenTypeAccess  = "access"

@@ -3,150 +3,364 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/complianceforge/platform/internal/middleware"
 	"github.com/complianceforge/platform/internal/models"
+	"github.com/complianceforge/platform/internal/service"
 )
 
-// RiskService defines the methods required by RiskHandler.
 type RiskService interface {
-	Create(ctx context.Context, risk *models.Risk) error
-	GetByID(ctx context.Context, id string) (*models.Risk, error)
-	Update(ctx context.Context, risk *models.Risk) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, pagination models.PaginationRequest) ([]models.Risk, int, error)
-	GetRiskMatrix(ctx context.Context) (interface{}, error)
-	GetHeatmap(ctx context.Context) (interface{}, error)
+	Create(context.Context, string, models.RiskCreateInput) (*models.Risk, error)
+	GetByID(context.Context, string, string) (*models.Risk, error)
+	Update(context.Context, string, string, models.RiskPatch) (*models.Risk, error)
+	Assign(context.Context, string, string, *string, *string) (*models.Risk, error)
+	Delete(context.Context, string, string) error
+	List(context.Context, string, models.RiskListFilter) ([]models.Risk, int, error)
+	ListCategories(context.Context, string) ([]models.RiskCategory, error)
+	GetRiskMatrix(context.Context, string, string) (*models.RiskMatrixView, error)
+	GetRiskHeatmap(context.Context, string) ([]models.RiskHeatmapEntry, error)
+	CreateAssessment(context.Context, string, string, string, models.RiskAssessmentInput) (*models.RiskAssessment, error)
+	ListAssessments(context.Context, string, string, models.PaginationRequest) ([]models.RiskAssessment, int, error)
+	CreateTreatment(context.Context, string, string, string, models.RiskTreatmentInput) (*models.RiskTreatment, error)
+	GetTreatment(context.Context, string, string, string) (*models.RiskTreatment, error)
+	ListTreatments(context.Context, string, string, models.PaginationRequest) ([]models.RiskTreatment, int, error)
+	UpdateTreatment(context.Context, string, string, string, models.RiskTreatmentPatch) (*models.RiskTreatment, error)
+	ListAppetite(context.Context, string) ([]models.RiskAppetiteStatement, error)
+	UpsertAppetite(context.Context, string, string, string, models.RiskAppetiteInput) (*models.RiskAppetiteStatement, error)
+	ApproveAppetite(context.Context, string, string, string, models.RiskAppetiteInput) (*models.RiskAppetiteStatement, error)
+	CreateIndicator(context.Context, string, string, string, models.RiskIndicatorInput) (*models.RiskIndicator, error)
+	ListIndicators(context.Context, string, string) ([]models.RiskIndicator, error)
+	RecordIndicatorValue(context.Context, string, string, string, string, models.RiskIndicatorValueInput) (*models.RiskIndicatorValue, error)
+	ListIndicatorValues(context.Context, string, string, string, models.PaginationRequest) ([]models.RiskIndicatorValue, int, error)
 }
 
-// RiskHandler handles risk management endpoints.
-type RiskHandler struct {
-	service RiskService
-}
+type RiskHandler struct{ service RiskService }
 
-// NewRiskHandler creates a new RiskHandler with the given service.
-func NewRiskHandler(service RiskService) *RiskHandler {
-	return &RiskHandler{service: service}
-}
+func NewRiskHandler(service RiskService) *RiskHandler { return &RiskHandler{service: service} }
+func (h *RiskHandler) Ready() bool                    { return h != nil && h.service != nil }
 
-// Create handles POST /risks.
 func (h *RiskHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var risk models.Risk
-	if err := json.NewDecoder(r.Body).Decode(&risk); err != nil {
+	var input models.RiskCreateInput
+	if err := decodeRiskJSON(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
-
-	if err := h.service.Create(r.Context(), &risk); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to create risk", err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, risk)
-}
-
-// GetByID handles GET /risks/{id}.
-func (h *RiskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "Missing risk ID", "")
-		return
-	}
-
-	risk, err := h.service.GetByID(r.Context(), id)
+	item, err := h.service.Create(r.Context(), riskOrgID(r), input)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Risk not found", err.Error())
+		writeRiskError(w, err, "Failed to create risk")
 		return
 	}
-
-	writeJSON(w, http.StatusOK, risk)
+	writeJSON(w, http.StatusCreated, item)
 }
 
-// Update handles PUT /risks/{id}.
-func (h *RiskHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "Missing risk ID", "")
+func (h *RiskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	item, err := h.service.GetByID(r.Context(), riskOrgID(r), chi.URLParam(r, "id"))
+	if err != nil {
+		writeRiskError(w, err, "Failed to get risk")
 		return
 	}
+	writeJSON(w, http.StatusOK, item)
+}
 
-	var risk models.Risk
-	if err := json.NewDecoder(r.Body).Decode(&risk); err != nil {
+func (h *RiskHandler) Update(w http.ResponseWriter, r *http.Request) {
+	var patch models.RiskPatch
+	if err := decodeRiskJSON(w, r, &patch); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
-	risk.ID = id
-
-	if err := h.service.Update(r.Context(), &risk); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to update risk", err.Error())
+	item, err := h.service.Update(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), patch)
+	if err != nil {
+		writeRiskError(w, err, "Failed to update risk")
 		return
 	}
-
-	writeJSON(w, http.StatusOK, risk)
+	writeJSON(w, http.StatusOK, item)
 }
 
-// Delete handles DELETE /risks/{id}.
+func (h *RiskHandler) Assign(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		OwnerUserID    *string `json:"owner_user_id"`
+		DelegateUserID *string `json:"delegate_user_id"`
+	}
+	if err := decodeRiskJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	item, err := h.service.Assign(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), input.OwnerUserID, input.DelegateUserID)
+	if err != nil {
+		writeRiskError(w, err, "Failed to assign risk")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (h *RiskHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "Missing risk ID", "")
+	if err := h.service.Delete(r.Context(), riskOrgID(r), chi.URLParam(r, "id")); err != nil {
+		writeRiskError(w, err, "Failed to delete risk")
 		return
 	}
-
-	if err := h.service.Delete(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to delete risk", err.Error())
-		return
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// List handles GET /risks.
 func (h *RiskHandler) List(w http.ResponseWriter, r *http.Request) {
-	pagination := parsePagination(r)
-
-	risks, total, err := h.service.List(r.Context(), pagination)
+	filter := models.RiskListFilter{
+		PaginationRequest: parsePagination(r),
+		Status:            r.URL.Query().Get("status"),
+		Level:             r.URL.Query().Get("level"),
+		CategoryID:        r.URL.Query().Get("category_id"),
+		OwnerUserID:       r.URL.Query().Get("owner_user_id"),
+		Search:            r.URL.Query().Get("search"),
+	}
+	if raw := r.URL.Query().Get("emerging"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid emerging filter", err.Error())
+			return
+		}
+		filter.Emerging = &value
+	}
+	items, total, err := h.service.List(r.Context(), riskOrgID(r), filter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to list risks", err.Error())
+		writeRiskError(w, err, "Failed to list risks")
 		return
 	}
-
-	totalPages := 0
-	if pagination.PageSize > 0 {
-		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data": risks,
-		"pagination": models.PaginationResponse{
-			Page:       pagination.Page,
-			PageSize:   pagination.PageSize,
-			TotalItems: total,
-			TotalPages: totalPages,
-		},
-	})
+	writeRiskPaginated(w, items, total, filter.PaginationRequest)
 }
 
-// GetMatrix handles GET /risks/matrix.
 func (h *RiskHandler) GetMatrix(w http.ResponseWriter, r *http.Request) {
-	matrix, err := h.service.GetRiskMatrix(r.Context())
+	item, err := h.service.GetRiskMatrix(r.Context(), riskOrgID(r), r.URL.Query().Get("dimension"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get risk matrix", err.Error())
+		writeRiskError(w, err, "Failed to get risk matrix")
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": matrix})
+	writeJSON(w, http.StatusOK, map[string]any{"data": item})
 }
 
-// GetHeatmap handles GET /risks/heatmap.
-func (h *RiskHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
-	heatmap, err := h.service.GetHeatmap(r.Context())
+func (h *RiskHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.ListCategories(r.Context(), riskOrgID(r))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get risk heatmap", err.Error())
+		writeRiskError(w, err, "Failed to list risk categories")
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": heatmap})
+func (h *RiskHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.GetRiskHeatmap(r.Context(), riskOrgID(r))
+	if err != nil {
+		writeRiskError(w, err, "Failed to get risk heatmap")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (h *RiskHandler) CreateAssessment(w http.ResponseWriter, r *http.Request) {
+	var input models.RiskAssessmentInput
+	if err := decodeRiskJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	item, err := h.service.CreateAssessment(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), riskUserID(r), input)
+	if err != nil {
+		writeRiskError(w, err, "Failed to create risk assessment")
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (h *RiskHandler) ListAssessments(w http.ResponseWriter, r *http.Request) {
+	p := parsePagination(r)
+	items, total, err := h.service.ListAssessments(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), p)
+	if err != nil {
+		writeRiskError(w, err, "Failed to list risk assessments")
+		return
+	}
+	writeRiskPaginated(w, items, total, p)
+}
+
+func (h *RiskHandler) CreateTreatment(w http.ResponseWriter, r *http.Request) {
+	var input models.RiskTreatmentInput
+	if err := decodeRiskJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	item, err := h.service.CreateTreatment(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), riskUserID(r), input)
+	if err != nil {
+		writeRiskError(w, err, "Failed to create risk treatment")
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (h *RiskHandler) ListTreatments(w http.ResponseWriter, r *http.Request) {
+	p := parsePagination(r)
+	items, total, err := h.service.ListTreatments(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), p)
+	if err != nil {
+		writeRiskError(w, err, "Failed to list risk treatments")
+		return
+	}
+	writeRiskPaginated(w, items, total, p)
+}
+
+func (h *RiskHandler) GetTreatment(w http.ResponseWriter, r *http.Request) {
+	item, err := h.service.GetTreatment(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), chi.URLParam(r, "treatmentID"))
+	if err != nil {
+		writeRiskError(w, err, "Failed to get risk treatment")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *RiskHandler) UpdateTreatment(w http.ResponseWriter, r *http.Request) {
+	var patch models.RiskTreatmentPatch
+	if err := decodeRiskJSON(w, r, &patch); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	item, err := h.service.UpdateTreatment(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), chi.URLParam(r, "treatmentID"), patch)
+	if err != nil {
+		writeRiskError(w, err, "Failed to update risk treatment")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *RiskHandler) ListAppetite(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.ListAppetite(r.Context(), riskOrgID(r))
+	if err != nil {
+		writeRiskError(w, err, "Failed to list risk appetite")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (h *RiskHandler) UpsertAppetite(w http.ResponseWriter, r *http.Request) {
+	var input models.RiskAppetiteInput
+	if err := decodeRiskJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	item, err := h.service.UpsertAppetite(r.Context(), riskOrgID(r), chi.URLParam(r, "categoryID"), riskUserID(r), input)
+	if err != nil {
+		writeRiskError(w, err, "Failed to update risk appetite")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *RiskHandler) ApproveAppetite(w http.ResponseWriter, r *http.Request) {
+	var input models.RiskAppetiteInput
+	if err := decodeRiskJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	item, err := h.service.ApproveAppetite(r.Context(), riskOrgID(r), chi.URLParam(r, "categoryID"), riskUserID(r), input)
+	if err != nil {
+		writeRiskError(w, err, "Failed to approve risk appetite")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *RiskHandler) CreateIndicator(w http.ResponseWriter, r *http.Request) {
+	var input models.RiskIndicatorInput
+	if err := decodeRiskJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	item, err := h.service.CreateIndicator(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), riskUserID(r), input)
+	if err != nil {
+		writeRiskError(w, err, "Failed to create risk indicator")
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (h *RiskHandler) ListIndicators(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.ListIndicators(r.Context(), riskOrgID(r), chi.URLParam(r, "id"))
+	if err != nil {
+		writeRiskError(w, err, "Failed to list risk indicators")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (h *RiskHandler) RecordIndicatorValue(w http.ResponseWriter, r *http.Request) {
+	var input models.RiskIndicatorValueInput
+	if err := decodeRiskJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	item, err := h.service.RecordIndicatorValue(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), chi.URLParam(r, "indicatorID"), riskUserID(r), input)
+	if err != nil {
+		writeRiskError(w, err, "Failed to record risk indicator value")
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (h *RiskHandler) ListIndicatorValues(w http.ResponseWriter, r *http.Request) {
+	p := parsePagination(r)
+	items, total, err := h.service.ListIndicatorValues(r.Context(), riskOrgID(r), chi.URLParam(r, "id"), chi.URLParam(r, "indicatorID"), p)
+	if err != nil {
+		writeRiskError(w, err, "Failed to list risk indicator values")
+		return
+	}
+	writeRiskPaginated(w, items, total, p)
+}
+
+func riskOrgID(r *http.Request) string  { return middleware.GetOrgIDFromContext(r.Context()) }
+func riskUserID(r *http.Request) string { return middleware.GetUserIDFromContext(r.Context()) }
+
+func decodeRiskJSON(w http.ResponseWriter, r *http.Request, destination any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain one JSON object")
+		}
+		return err
+	}
+	return nil
+}
+
+func writeRiskPaginated(w http.ResponseWriter, data any, total int, p models.PaginationRequest) {
+	if p.Page < 1 {
+		p.Page = 1
+	}
+	if p.PageSize < 1 || p.PageSize > 100 {
+		p.PageSize = 20
+	}
+	writePaginated(w, data, total, p)
+}
+
+func writeRiskError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, service.ErrInvalidRisk), errors.Is(err, service.ErrInvalidRiskID),
+		errors.Is(err, service.ErrInvalidAssessment), errors.Is(err, service.ErrInvalidTreatment),
+		errors.Is(err, service.ErrInvalidRiskAppetite), errors.Is(err, service.ErrInvalidRiskIndicator):
+		writeError(w, http.StatusBadRequest, "Invalid risk request", err.Error())
+	case errors.Is(err, service.ErrRiskNotFound), errors.Is(err, service.ErrRiskTreatmentNotFound), errors.Is(err, service.ErrRiskIndicatorNotFound):
+		writeError(w, http.StatusNotFound, "Risk resource not found", err.Error())
+	case errors.Is(err, service.ErrInvalidRiskReference), errors.Is(err, service.ErrInvalidRiskTransition),
+		errors.Is(err, service.ErrInvalidTreatmentState), errors.Is(err, service.ErrRiskConflict):
+		writeError(w, http.StatusConflict, "Risk request conflicts with current state", err.Error())
+	default:
+		message := strings.TrimSpace(fallback)
+		if message == "" {
+			message = "Risk request failed"
+		}
+		writeError(w, http.StatusInternalServerError, message, fmt.Sprintf("%v", err))
+	}
 }

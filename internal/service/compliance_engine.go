@@ -53,14 +53,9 @@ type ControlMapping struct {
 	MappingConfidence float64        `json:"mapping_confidence"` // 0.0 to 1.0
 }
 
-// RiskRepository defines the data access interface for risks.
+// RiskRepository is the read-only risk analytics contract shared by dashboards
+// and reporting. Risk mutations belong to RiskManagementRepository.
 type RiskRepository interface {
-	Create(ctx context.Context, risk *models.Risk) error
-	GetByID(ctx context.Context, id string) (*models.Risk, error)
-	Update(ctx context.Context, risk *models.Risk) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, orgID string, page, pageSize int) ([]models.Risk, int, error)
-	ListByRiskLevel(ctx context.Context, orgID string, level models.RiskLevel) ([]models.Risk, error)
 	GetTopRisks(ctx context.Context, orgID string, limit int) ([]models.Risk, error)
 	CountByRiskLevel(ctx context.Context, orgID string) (map[models.RiskLevel]int, error)
 }

@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/complianceforge/platform/internal/config"
+	emailpkg "github.com/complianceforge/platform/internal/pkg/email"
 )
 
 // NotificationType categorizes the kind of notification being sent.
@@ -21,40 +23,74 @@ const (
 // EmailMessage holds the data for an outgoing email notification.
 type EmailMessage struct {
 	To      []string `json:"to"`
+	Cc      []string `json:"cc,omitempty"`
+	Bcc     []string `json:"bcc,omitempty"`
+	ReplyTo string   `json:"reply_to,omitempty"`
 	Subject string   `json:"subject"`
 	Body    string   `json:"body"`
 	IsHTML  bool     `json:"is_html"`
 }
 
-// NotificationService handles sending notifications via email, webhooks,
-// and other channels. This is a placeholder implementation that logs
-// notifications; swap in a real SMTP/webhook client for production.
+// NotificationService sends application notifications through injected,
+// independently testable delivery transports.
 type NotificationService struct {
-	smtpConfig config.SMTPConfig
-	logger     zerolog.Logger
+	emailSender emailpkg.Sender
+	logger      zerolog.Logger
 }
 
-// NewNotificationService constructs a new NotificationService.
-func NewNotificationService(smtpCfg config.SMTPConfig, logger zerolog.Logger) *NotificationService {
-	return &NotificationService{
-		smtpConfig: smtpCfg,
-		logger:     logger.With().Str("service", "notification").Logger(),
+// NewNotificationService validates SMTP configuration at startup. Invalid or
+// incomplete delivery configuration is never silently replaced by logging.
+func NewNotificationService(smtpCfg config.SMTPConfig, logger zerolog.Logger) (*NotificationService, error) {
+	sender, err := emailpkg.NewSMTPEmailService(emailpkg.Config{
+		Host:       smtpCfg.Host,
+		Port:       smtpCfg.Port,
+		Username:   smtpCfg.User,
+		Password:   smtpCfg.Password,
+		From:       smtpCfg.From,
+		TLSMode:    smtpCfg.TLSMode,
+		Timeout:    time.Duration(smtpCfg.TimeoutSeconds) * time.Second,
+		HelloName:  smtpCfg.HelloName,
+		ServerName: smtpCfg.ServerName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize notification email transport: %w", err)
 	}
+	return NewNotificationServiceWithSender(sender, logger)
 }
 
-// SendEmail sends an email notification. This is a placeholder that logs the
-// email details; replace with a real SMTP implementation for production.
+// NewNotificationServiceWithSender constructs a service with an explicit
+// sender. It is useful for provider adapters and deterministic tests.
+func NewNotificationServiceWithSender(sender emailpkg.Sender, logger zerolog.Logger) (*NotificationService, error) {
+	if sender == nil {
+		return nil, fmt.Errorf("notification email sender is required")
+	}
+	return &NotificationService{
+		emailSender: sender,
+		logger:      logger.With().Str("service", "notification").Logger(),
+	}, nil
+}
+
+// SendEmail synchronously hands a validated message to the configured sender.
 func (s *NotificationService) SendEmail(ctx context.Context, msg EmailMessage) error {
-	// TODO: Implement real SMTP sending using s.smtpConfig.
-	// Example: connect to s.smtpConfig.Host:s.smtpConfig.Port, authenticate,
-	// and send via net/smtp or a library like gomail.
-
+	message := emailpkg.Message{
+		To:      msg.To,
+		Cc:      msg.Cc,
+		Bcc:     msg.Bcc,
+		ReplyTo: msg.ReplyTo,
+		Subject: msg.Subject,
+	}
+	if msg.IsHTML {
+		message.HTMLBody = msg.Body
+	} else {
+		message.TextBody = msg.Body
+	}
+	if err := s.emailSender.Send(ctx, message); err != nil {
+		return fmt.Errorf("send email notification: %w", err)
+	}
 	s.logger.Info().
-		Strs("to", msg.To).
-		Str("subject", msg.Subject).
+		Int("recipient_count", len(msg.To)+len(msg.Cc)+len(msg.Bcc)).
 		Bool("is_html", msg.IsHTML).
-		Msg("email notification sent (placeholder)")
-
+		Msg("email notification delivered to SMTP server")
 	return nil
 }
 

@@ -1,45 +1,18 @@
 // ComplianceForge Auth Utilities
-// JWT token management, decoding, and session helpers
+// Pure JWT parsing helpers. Browser session credentials are intentionally not
+// exposed here: the same-origin BFF owns them in HttpOnly cookies.
 
-import { ROUTES } from "./routes";
-import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from "./auth-constants";
+import { LEGACY_ACCESS_TOKEN_KEY, LEGACY_REFRESH_TOKEN_KEY } from './auth-constants';
 
-/**
- * Compatibility boundary: these tokens remain browser-readable until the API
- * provides a server/BFF session contract capable of issuing, rotating,
- * validating, and revoking HttpOnly cookies. See ../../SECURITY.md.
- */
-// ---------------------------------------------------------------------------
-// Token storage
-// ---------------------------------------------------------------------------
-
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
-}
-
-export function setToken(token: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(ACCESS_TOKEN_KEY, token);
-  // Also set as cookie so middleware can read it
-  document.cookie = `${ACCESS_TOKEN_KEY}=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
-}
-
-export function getRefreshToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
-}
-
-export function setRefreshToken(token: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(REFRESH_TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
-  document.cookie = `${ACCESS_TOKEN_KEY}=; path=/; max-age=0`;
+/** Remove credentials left in Web Storage by pre-BFF application releases. */
+export function purgeLegacyBrowserCredentials(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY);
+  } catch {
+    // Storage can be unavailable in hardened/private browsing contexts.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -60,11 +33,11 @@ export interface JwtPayload {
 
 export function decodeJwt(token: string): JwtPayload | null {
   try {
-    const parts = token.split(".");
+    const parts = token.split('.');
     if (parts.length !== 3) return null;
     const payload = parts[1];
     // Base64url to Base64
-    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
     const json = atob(base64);
     return JSON.parse(json) as JwtPayload;
   } catch {
@@ -73,16 +46,8 @@ export function decodeJwt(token: string): JwtPayload | null {
 }
 
 // ---------------------------------------------------------------------------
-// Session helpers
+// Token helpers (useful for isolated validation/tests, not browser sessions)
 // ---------------------------------------------------------------------------
-
-/**
- * Returns true if a non-expired access token exists in localStorage.
- */
-export function isAuthenticated(): boolean {
-  const token = getToken();
-  return isTokenAuthenticated(token);
-}
 
 export function isTokenAuthenticated(token: string | null): boolean {
   if (!token) return false;
@@ -91,31 +56,4 @@ export function isTokenAuthenticated(token: string | null): boolean {
   // exp is in seconds, Date.now() is in milliseconds
   const nowSec = Math.floor(Date.now() / 1000);
   return payload.exp > nowSec;
-}
-
-/**
- * Decode and return the user information embedded in the JWT.
- * Returns null if no valid token exists.
- */
-export function getUserFromToken(): JwtPayload | null {
-  const token = getToken();
-  if (!token) return null;
-  return decodeJwt(token);
-}
-
-/**
- * Full logout: clear tokens, wipe the React Query cache, and redirect.
- *
- * Accepts an optional QueryClient so we can call `clear()` on it.
- * If called without one (e.g. from outside React), it still clears storage
- * and redirects.
- */
-export function logout(queryClient?: { clear: () => void }): void {
-  clearToken();
-  if (queryClient) {
-    queryClient.clear();
-  }
-  if (typeof window !== "undefined") {
-    window.location.href = ROUTES.auth.login;
-  }
 }

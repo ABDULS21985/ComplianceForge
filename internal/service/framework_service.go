@@ -4,171 +4,214 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 
 	"github.com/complianceforge/platform/internal/models"
 )
 
 var (
-	ErrFrameworkNotFound     = errors.New("framework not found")
-	ErrUnsupportedFramework  = errors.New("unsupported framework type for import")
+	ErrFrameworkNotFound   = errors.New("framework not found")
+	ErrControlNotFound     = errors.New("control not found or framework not adopted")
+	ErrInvalidComplianceID = errors.New("invalid compliance identifier")
+	ErrInvalidControlPatch = errors.New("invalid control implementation update")
+	ErrInvalidEvidence     = errors.New("invalid evidence metadata")
 )
 
-// FrameworkRepository defines the data access interface for compliance frameworks.
-type FrameworkRepository interface {
-	Create(ctx context.Context, framework *models.ComplianceFramework) error
-	GetByID(ctx context.Context, id string) (*models.ComplianceFramework, error)
-	GetWithControls(ctx context.Context, id string) (*models.ComplianceFramework, error)
-	Update(ctx context.Context, framework *models.ComplianceFramework) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, orgID string, page, pageSize int) ([]models.ComplianceFramework, int, error)
+type FrameworkCatalogRepository interface {
+	List(context.Context, string, models.PaginationRequest) ([]models.ComplianceFramework, int, error)
+	GetByID(context.Context, string, string) (*models.ComplianceFramework, error)
+	Adopt(context.Context, string, string, string) (*models.OrganizationFramework, error)
 }
 
-// ControlRepository defines the data access interface for controls.
-type ControlRepository interface {
-	Create(ctx context.Context, control *models.Control) error
-	GetByID(ctx context.Context, id string) (*models.Control, error)
-	Update(ctx context.Context, control *models.Control) error
-	Delete(ctx context.Context, id string) error
-	List(ctx context.Context, orgID string, page, pageSize int) ([]models.Control, int, error)
-	ListByFrameworkID(ctx context.Context, frameworkID string) ([]models.Control, error)
-	CountByStatus(ctx context.Context, frameworkID string) (map[models.ComplianceStatus]int, error)
+type ControlImplementationRepository interface {
+	ListByFramework(context.Context, string, string, models.PaginationRequest) ([]models.Control, int, error)
+	ListAdopted(context.Context, string, string, models.PaginationRequest) ([]models.Control, int, error)
+	GetAdoptedByID(context.Context, string, string) (*models.Control, error)
+	UpdateImplementation(context.Context, string, string, models.ControlImplementationPatch) (*models.ControlImplementation, error)
+	AttachEvidence(context.Context, string, string, string, models.AttachControlEvidenceInput) (*models.ControlEvidence, error)
+	ListEvidence(context.Context, string, string, models.PaginationRequest) ([]models.ControlEvidence, int, error)
 }
 
-// FrameworkService handles business logic for compliance framework management.
+// FrameworkService coordinates the framework catalog and tenant-owned
+// implementations without allowing a tenant to mutate catalog definitions.
 type FrameworkService struct {
-	frameworkRepo FrameworkRepository
-	controlRepo   ControlRepository
-	logger        zerolog.Logger
+	frameworks FrameworkCatalogRepository
+	controls   ControlImplementationRepository
+	logger     zerolog.Logger
 }
 
-// NewFrameworkService constructs a new FrameworkService.
-func NewFrameworkService(frameworkRepo FrameworkRepository, controlRepo ControlRepository, logger zerolog.Logger) *FrameworkService {
-	return &FrameworkService{
-		frameworkRepo: frameworkRepo,
-		controlRepo:   controlRepo,
-		logger:        logger.With().Str("service", "framework").Logger(),
+func NewFrameworkService(frameworks FrameworkCatalogRepository, controls ControlImplementationRepository, logger zerolog.Logger) *FrameworkService {
+	return &FrameworkService{frameworks: frameworks, controls: controls, logger: logger.With().Str("service", "compliance").Logger()}
+}
+
+func (s *FrameworkService) ListFrameworks(ctx context.Context, orgID string, p models.PaginationRequest) ([]models.ComplianceFramework, int, error) {
+	if !validUUID(orgID) {
+		return nil, 0, ErrInvalidComplianceID
 	}
+	return s.frameworks.List(ctx, orgID, normalizeCompliancePagination(p))
 }
 
-// Create persists a new compliance framework.
-func (s *FrameworkService) Create(ctx context.Context, framework *models.ComplianceFramework) error {
-	framework.IsActive = true
-
-	if err := s.frameworkRepo.Create(ctx, framework); err != nil {
-		s.logger.Error().Err(err).Str("name", framework.Name).Msg("failed to create framework")
-		return err
+func (s *FrameworkService) GetFramework(ctx context.Context, orgID, frameworkID string) (*models.ComplianceFramework, error) {
+	if !validUUID(orgID) || !validUUID(frameworkID) {
+		return nil, ErrInvalidComplianceID
 	}
-
-	s.logger.Info().Str("framework_id", framework.ID).Str("name", framework.Name).Msg("framework created")
-	return nil
-}
-
-// GetByID retrieves a framework by its unique identifier.
-func (s *FrameworkService) GetByID(ctx context.Context, id string) (*models.ComplianceFramework, error) {
-	framework, err := s.frameworkRepo.GetByID(ctx, id)
-	if err != nil {
+	framework, err := s.frameworks.GetByID(ctx, orgID, frameworkID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFrameworkNotFound
 	}
-	return framework, nil
+	return framework, err
 }
 
-// GetWithControls retrieves a framework along with all its associated controls.
-func (s *FrameworkService) GetWithControls(ctx context.Context, id string) (*models.ComplianceFramework, error) {
-	framework, err := s.frameworkRepo.GetWithControls(ctx, id)
-	if err != nil {
+func (s *FrameworkService) AdoptFramework(ctx context.Context, orgID, userID, frameworkID string) (*models.OrganizationFramework, error) {
+	if !validUUID(orgID) || !validUUID(userID) || !validUUID(frameworkID) {
+		return nil, ErrInvalidComplianceID
+	}
+	adoption, err := s.frameworks.Adopt(ctx, orgID, userID, frameworkID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFrameworkNotFound
 	}
-	return framework, nil
+	if err == nil {
+		s.logger.Info().Str("organization_id", orgID).Str("framework_id", frameworkID).Msg("framework adopted")
+	}
+	return adoption, err
 }
 
-// Update modifies an existing compliance framework.
-func (s *FrameworkService) Update(ctx context.Context, framework *models.ComplianceFramework) error {
-	if _, err := s.frameworkRepo.GetByID(ctx, framework.ID); err != nil {
-		return ErrFrameworkNotFound
+func (s *FrameworkService) ListFrameworkControls(ctx context.Context, orgID, frameworkID string, p models.PaginationRequest) ([]models.Control, int, error) {
+	if !validUUID(orgID) || !validUUID(frameworkID) {
+		return nil, 0, ErrInvalidComplianceID
 	}
-
-	if err := s.frameworkRepo.Update(ctx, framework); err != nil {
-		s.logger.Error().Err(err).Str("framework_id", framework.ID).Msg("failed to update framework")
-		return err
-	}
-
-	s.logger.Info().Str("framework_id", framework.ID).Msg("framework updated")
-	return nil
-}
-
-// Delete soft-deletes a framework by ID.
-func (s *FrameworkService) Delete(ctx context.Context, id string) error {
-	if _, err := s.frameworkRepo.GetByID(ctx, id); err != nil {
-		return ErrFrameworkNotFound
-	}
-
-	if err := s.frameworkRepo.Delete(ctx, id); err != nil {
-		s.logger.Error().Err(err).Str("framework_id", id).Msg("failed to delete framework")
-		return err
-	}
-
-	s.logger.Info().Str("framework_id", id).Msg("framework deleted")
-	return nil
-}
-
-// List returns a paginated list of frameworks for an organization.
-func (s *FrameworkService) List(ctx context.Context, orgID string, page, pageSize int) ([]models.ComplianceFramework, int, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
-
-	frameworks, total, err := s.frameworkRepo.List(ctx, orgID, page, pageSize)
-	if err != nil {
-		s.logger.Error().Err(err).Str("org_id", orgID).Msg("failed to list frameworks")
+	if _, err := s.GetFramework(ctx, orgID, frameworkID); err != nil {
 		return nil, 0, err
 	}
-	return frameworks, total, nil
+	return s.controls.ListByFramework(ctx, orgID, frameworkID, normalizeCompliancePagination(p))
 }
 
-// ImportFramework imports a standard framework template (e.g., SOC2, ISO27001, NIST)
-// and creates the framework with its controls for the given organization.
-func (s *FrameworkService) ImportFramework(ctx context.Context, orgID, frameworkType string) error {
-	switch frameworkType {
-	case "SOC2", "ISO27001", "NIST-CSF", "GDPR", "HIPAA", "PCI-DSS":
-		// TODO: Load framework definitions from embedded templates or external catalog.
-		// Each template should include framework metadata and a list of controls.
-		s.logger.Info().
-			Str("org_id", orgID).
-			Str("framework_type", frameworkType).
-			Msg("importing standard framework")
-
-		framework := &models.ComplianceFramework{
-			TenantModel: models.TenantModel{
-				OrganizationID: orgID,
-			},
-			Name:        frameworkType,
-			Version:     "1.0",
-			Description: fmt.Sprintf("Imported %s framework template", frameworkType),
-			Authority:   frameworkType,
-			Category:    "Regulatory",
-			IsActive:    true,
-		}
-
-		if err := s.frameworkRepo.Create(ctx, framework); err != nil {
-			s.logger.Error().Err(err).Str("framework_type", frameworkType).Msg("failed to import framework")
-			return err
-		}
-
-		// TODO: Create controls from template definitions.
-		// Example: iterate over template controls and call s.controlRepo.Create(ctx, &control)
-
-		s.logger.Info().
-			Str("framework_id", framework.ID).
-			Str("framework_type", frameworkType).
-			Msg("framework imported successfully")
-		return nil
-
-	default:
-		return ErrUnsupportedFramework
+func (s *FrameworkService) ListControls(ctx context.Context, orgID, frameworkID string, p models.PaginationRequest) ([]models.Control, int, error) {
+	if !validUUID(orgID) || (frameworkID != "" && !validUUID(frameworkID)) {
+		return nil, 0, ErrInvalidComplianceID
 	}
+	return s.controls.ListAdopted(ctx, orgID, frameworkID, normalizeCompliancePagination(p))
+}
+
+func (s *FrameworkService) GetControl(ctx context.Context, orgID, controlID string) (*models.Control, error) {
+	if !validUUID(orgID) || !validUUID(controlID) {
+		return nil, ErrInvalidComplianceID
+	}
+	control, err := s.controls.GetAdoptedByID(ctx, orgID, controlID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrControlNotFound
+	}
+	return control, err
+}
+
+func (s *FrameworkService) UpdateControlImplementation(ctx context.Context, orgID, controlID string, patch models.ControlImplementationPatch) (*models.ControlImplementation, error) {
+	if !validUUID(orgID) || !validUUID(controlID) {
+		return nil, ErrInvalidComplianceID
+	}
+	if err := validateControlPatch(patch); err != nil {
+		return nil, err
+	}
+	implementation, err := s.controls.UpdateImplementation(ctx, orgID, controlID, patch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrControlNotFound
+	}
+	return implementation, err
+}
+
+func (s *FrameworkService) AttachControlEvidence(ctx context.Context, orgID, userID, controlID string, input models.AttachControlEvidenceInput) (*models.ControlEvidence, error) {
+	if !validUUID(orgID) || !validUUID(userID) || !validUUID(controlID) {
+		return nil, ErrInvalidComplianceID
+	}
+	if err := validateEvidence(input); err != nil {
+		return nil, err
+	}
+	evidence, err := s.controls.AttachEvidence(ctx, orgID, userID, controlID, input)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrControlNotFound
+	}
+	return evidence, err
+}
+
+func (s *FrameworkService) ListControlEvidence(ctx context.Context, orgID, controlID string, p models.PaginationRequest) ([]models.ControlEvidence, int, error) {
+	if !validUUID(orgID) || !validUUID(controlID) {
+		return nil, 0, ErrInvalidComplianceID
+	}
+	if _, err := s.GetControl(ctx, orgID, controlID); err != nil {
+		return nil, 0, err
+	}
+	return s.controls.ListEvidence(ctx, orgID, controlID, normalizeCompliancePagination(p))
+}
+
+func normalizeCompliancePagination(p models.PaginationRequest) models.PaginationRequest {
+	if p.Page < 1 {
+		p.Page = 1
+	}
+	if p.PageSize < 1 || p.PageSize > 100 {
+		p.PageSize = 20
+	}
+	return p
+}
+
+func validUUID(value string) bool { _, err := uuid.Parse(value); return err == nil }
+
+func validateControlPatch(p models.ControlImplementationPatch) error {
+	if p.Status == nil && p.ImplementationStatus == nil && p.MaturityLevel == nil &&
+		p.OwnerUserID == nil && p.ReviewerUserID == nil && p.ImplementationDescription == nil &&
+		p.ImplementationNotes == nil && p.GapDescription == nil && p.RemediationPlan == nil &&
+		p.RemediationDueDate == nil && p.AutomationLevel == nil && p.Tags == nil {
+		return fmt.Errorf("%w: no fields supplied", ErrInvalidControlPatch)
+	}
+	if p.Status != nil && !allowed(string(*p.Status), "not_applicable", "not_implemented", "planned", "partial", "implemented", "effective") {
+		return fmt.Errorf("%w: unsupported status", ErrInvalidControlPatch)
+	}
+	if p.ImplementationStatus != nil && !allowed(string(*p.ImplementationStatus), "not_started", "in_progress", "completed", "failed") {
+		return fmt.Errorf("%w: unsupported implementation_status", ErrInvalidControlPatch)
+	}
+	if p.MaturityLevel != nil && (*p.MaturityLevel < 0 || *p.MaturityLevel > 5) {
+		return fmt.Errorf("%w: maturity_level must be 0-5", ErrInvalidControlPatch)
+	}
+	for _, candidate := range []*string{p.OwnerUserID, p.ReviewerUserID} {
+		if candidate != nil && *candidate != "" && !validUUID(*candidate) {
+			return fmt.Errorf("%w: invalid user id", ErrInvalidControlPatch)
+		}
+	}
+	if p.AutomationLevel != nil && !allowed(*p.AutomationLevel, "fully_automated", "semi_automated", "manual") {
+		return fmt.Errorf("%w: unsupported automation_level", ErrInvalidControlPatch)
+	}
+	return nil
+}
+
+func validateEvidence(input models.AttachControlEvidenceInput) error {
+	if strings.TrimSpace(input.Title) == "" {
+		return fmt.Errorf("%w: title is required", ErrInvalidEvidence)
+	}
+	if !allowed(input.EvidenceType, "document", "screenshot", "log", "configuration", "report", "certificate", "interview_notes", "test_result", "policy", "procedure", "training_record") {
+		return fmt.Errorf("%w: unsupported evidence_type", ErrInvalidEvidence)
+	}
+	if input.CollectionMethod != "" && !allowed(input.CollectionMethod, "manual_upload", "automated", "api_pull", "scan_result", "integration") {
+		return fmt.Errorf("%w: unsupported collection_method", ErrInvalidEvidence)
+	}
+	if input.FileSizeBytes != nil && *input.FileSizeBytes < 0 {
+		return fmt.Errorf("%w: file_size_bytes cannot be negative", ErrInvalidEvidence)
+	}
+	if input.FileHash != nil && len(*input.FileHash) > 128 {
+		return fmt.Errorf("%w: file_hash is too long", ErrInvalidEvidence)
+	}
+	if input.ValidFrom != nil && input.ValidUntil != nil && input.ValidUntil.Before(*input.ValidFrom) {
+		return fmt.Errorf("%w: valid_until precedes valid_from", ErrInvalidEvidence)
+	}
+	return nil
+}
+
+func allowed(value string, values ...string) bool {
+	for _, candidate := range values {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }

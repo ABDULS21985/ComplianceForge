@@ -28,6 +28,7 @@ frontend/coverage/
 frontend/playwright-report/
 frontend/test-results/
 frontend/.playwright/
+*.tsbuildinfo
 
 # ========================
 # Environment & secrets

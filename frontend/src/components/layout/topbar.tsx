@@ -1,90 +1,112 @@
 'use client';
 
-import React from 'react';
-import { Bell, Search } from 'lucide-react';
-
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import {
+  getRoleSlugs,
+  type NavigationContext,
+  type PermissionMap,
+} from '@/lib/navigation';
+import { useEffect, useMemo, useState } from 'react';
 import { Breadcrumbs } from '@/components/layout/breadcrumbs';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { CommandPalette } from '@/components/layout/command-palette';
+import { NotificationMenu } from '@/components/layout/notification-menu';
+import { Search } from 'lucide-react';
+import type { User } from '@/types';
 import { UserMenu } from '@/components/layout/user-menu';
 
 interface TopbarProps {
-  user: {
-    first_name: string;
-    last_name: string;
-    email: string;
-    avatar_url?: string;
-  } | null;
-  notificationCount?: number;
-  onLogout: () => void;
-  /** Override labels for dynamic breadcrumb segments */
-  dynamicLabels?: Record<string, string>;
   className?: string;
+  /** Override labels for dynamic breadcrumb segments. */
+  dynamicLabels?: Record<string, string>;
+  onLogout: () => void;
+  permissions?: PermissionMap;
+  user: User | null;
 }
 
 export function Topbar({
-  user,
-  notificationCount = 0,
-  onLogout,
-  dynamicLabels,
   className,
+  dynamicLabels,
+  onLogout,
+  permissions,
+  user,
 }: TopbarProps) {
+  const [commandOpen, setCommandOpen] = useState(false);
+  const navigationContext = useMemo<NavigationContext>(
+    () => ({
+      isSuperAdmin: user?.is_super_admin,
+      permissions,
+      roleSlugs: getRoleSlugs(user?.roles),
+    }),
+    [permissions, user?.is_super_admin, user?.roles]
+  );
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setCommandOpen((current) => !current);
+      }
+    };
+
+    document.addEventListener('keydown', handleShortcut);
+    return () => document.removeEventListener('keydown', handleShortcut);
+  }, []);
+
   return (
-    <header
-      className={cn(
-        'sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6',
-        className
-      )}
-    >
-      {/* Breadcrumbs -- hidden on mobile for space */}
-      <div className="hidden md:flex flex-1">
-        <Breadcrumbs dynamicLabels={dynamicLabels} />
-      </div>
+    <>
+      <header
+        className={cn(
+          'sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b bg-background/95 pl-14 pr-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-6',
+          className
+        )}
+      >
+        <div className="hidden min-w-0 flex-1 md:block">
+          <Breadcrumbs dynamicLabels={dynamicLabels} />
+        </div>
+        <div className="min-w-0 flex-1 md:hidden">
+          <Breadcrumbs compact dynamicLabels={dynamicLabels} />
+        </div>
 
-      {/* Spacer on mobile */}
-      <div className="flex-1 md:hidden" />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-haspopup="dialog"
+            aria-keyshortcuts="Control+K Meta+K"
+            onClick={() => setCommandOpen(true)}
+            className="hidden min-w-44 items-center justify-start gap-2 text-muted-foreground lg:flex"
+          >
+            <Search aria-hidden="true" className="h-4 w-4" />
+            <span className="flex-1 text-left text-sm">Search</span>
+            <kbd className="pointer-events-none rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+              Ctrl/⌘ K
+            </kbd>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Search and navigate"
+            aria-haspopup="dialog"
+            aria-keyshortcuts="Control+K Meta+K"
+            onClick={() => setCommandOpen(true)}
+            className="lg:hidden"
+          >
+            <Search aria-hidden="true" className="h-5 w-5" />
+          </Button>
 
-      <div className="flex items-center gap-2">
-        {/* Global search trigger */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="hidden md:flex items-center gap-2 text-muted-foreground"
-          onClick={() => {
-            // Placeholder: open command palette
-          }}
-        >
-          <Search className="h-4 w-4" />
-          <span className="text-sm">Search...</span>
-          <kbd className="pointer-events-none ml-2 hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
-            <span className="text-xs">Ctrl</span>K
-          </kbd>
-        </Button>
+          <NotificationMenu />
+          <UserMenu user={user} onLogout={onLogout} />
+        </div>
+      </header>
 
-        {/* Mobile search icon */}
-        <Button variant="ghost" size="icon" className="md:hidden">
-          <Search className="h-5 w-5" />
-          <span className="sr-only">Search</span>
-        </Button>
-
-        {/* Notifications */}
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
-          {notificationCount > 0 && (
-            <Badge
-              variant="destructive"
-              className="absolute -right-1 -top-1 h-5 min-w-[20px] px-1 text-[10px]"
-            >
-              {notificationCount > 99 ? '99+' : notificationCount}
-            </Badge>
-          )}
-          <span className="sr-only">Notifications</span>
-        </Button>
-
-        {/* User menu */}
-        <UserMenu user={user} onLogout={onLogout} />
-      </div>
-    </header>
+      <CommandPalette
+        context={navigationContext}
+        open={commandOpen}
+        onOpenChange={setCommandOpen}
+      />
+    </>
   );
 }

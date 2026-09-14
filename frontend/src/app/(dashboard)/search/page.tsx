@@ -1,35 +1,18 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import {
+  getEntityRoute,
+  type GlobalSearchResult,
+  normalizeGlobalSearchResponse,
+} from '@/lib/navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
+import Link from 'next/link';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface SearchResult {
-  id: string;
-  entity_type: string;
-  entity_ref?: string;
-  title: string;
-  snippet?: string;
-  status?: string;
-  severity?: string;
-  framework?: string;
-  updated_at?: string;
-  score?: number;
-}
-
-interface SearchResponse {
-  items: SearchResult[];
-  total: number;
-  page: number;
-  page_size: number;
-  total_pages: number;
-  query_time_ms?: number;
-  suggestions?: string[];
-}
 
 interface Facets {
   entity_type: string;
@@ -78,7 +61,7 @@ export default function SearchPage() {
   const initialQuery = searchParams.get('q') ?? '';
 
   const [query, setQuery] = useState(initialQuery);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [results, setResults] = useState<GlobalSearchResult[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [page, setPage] = useState(1);
@@ -121,10 +104,12 @@ export default function SearchPage() {
         if (f.date_from) params.date_from = f.date_from;
         if (f.date_to) params.date_to = f.date_to;
 
-        const data = (await api.search.query(params)) as SearchResponse;
-        setResults(data.items ?? []);
-        setTotal(data.total ?? 0);
-        setTotalPages(data.total_pages ?? 0);
+        const data = normalizeGlobalSearchResponse(
+          await api.search.query(params)
+        );
+        setResults(data.items);
+        setTotal(data.total);
+        setTotalPages(data.total_pages);
         setQueryTime(data.query_time_ms ?? null);
         setSuggestions(data.suggestions ?? []);
       } catch {
@@ -364,9 +349,9 @@ export default function SearchPage() {
             <>
               <div className="space-y-3">
                 {results.map((r) => (
-                  <a
+                  <Link
                     key={r.id}
-                    href={`/${r.entity_type === 'control' ? 'frameworks' : r.entity_type + 's'}/${r.id}`}
+                    href={getEntityRoute(r)}
                     className="block bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md hover:border-indigo-200 transition-all"
                   >
                     <div className="flex items-start gap-3">
@@ -399,7 +384,7 @@ export default function SearchPage() {
                         )}
                       </div>
                     </div>
-                  </a>
+                  </Link>
                 ))}
               </div>
 

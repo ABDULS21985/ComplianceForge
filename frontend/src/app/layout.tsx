@@ -4,7 +4,9 @@ import { Inter } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { purgeLegacyBrowserCredentials } from "@/lib/auth";
 
 import "./globals.css";
 
@@ -27,6 +29,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   const [queryClient] = useState(() => makeQueryClient());
+
+  useEffect(() => {
+    purgeLegacyBrowserCredentials();
+  }, []);
 
   return (
     <html lang="en" suppressHydrationWarning>

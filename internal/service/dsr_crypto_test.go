@@ -60,24 +60,22 @@ func TestNewDSRServiceFailsClosedWithoutValidKey(t *testing.T) {
 	pool := new(pgxpool.Pool)
 	bus := NewEventBus()
 
-	t.Setenv("DSR_ENCRYPTION_KEY", "")
-	if _, err := NewDSRService(pool, bus); err == nil || !strings.Contains(err.Error(), "required") {
+	if _, err := NewDSRService(pool, bus, ""); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("NewDSRService() error = %v, want required-key error", err)
 	}
 
-	t.Setenv("DSR_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte("too short")))
-	if _, err := NewDSRService(pool, bus); err == nil || !strings.Contains(err.Error(), "32 bytes") {
+	if _, err := NewDSRService(pool, bus, base64.StdEncoding.EncodeToString([]byte("too short"))); err == nil || !strings.Contains(err.Error(), "32 bytes") {
 		t.Fatalf("NewDSRService() error = %v, want key-length error", err)
 	}
 }
 
 func TestNewDSRServiceRejectsMissingDependencies(t *testing.T) {
-	t.Setenv("DSR_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)))
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
 
-	if _, err := NewDSRService(nil, NewEventBus()); err == nil {
+	if _, err := NewDSRService(nil, NewEventBus(), key); err == nil {
 		t.Fatal("NewDSRService() accepted a nil database")
 	}
-	if _, err := NewDSRService(new(pgxpool.Pool), nil); err == nil {
+	if _, err := NewDSRService(new(pgxpool.Pool), nil, key); err == nil {
 		t.Fatal("NewDSRService() accepted a nil event bus")
 	}
 }

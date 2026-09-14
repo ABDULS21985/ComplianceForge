@@ -73,9 +73,9 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	// explicitly optional in this vertical slice.
 	authHandler := dependencies.Auth
 	organizationHandler := dependencies.Organizations
-	frameworkHandler := dependencies.Domains.Framework
-	controlHandler := dependencies.Domains.Control
-	riskHandler := dependencies.Domains.Risk
+	frameworkHandler := dependencies.Frameworks
+	controlHandler := dependencies.Controls
+	riskHandler := dependencies.Risks
 	policyHandler := dependencies.Domains.Policy
 	auditHandler := dependencies.Domains.Audit
 	incidentHandler := dependencies.Domains.Incident
@@ -115,8 +115,12 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 		r.Post("/refresh", authHandler.Refresh)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.AuthMiddleware(dependencies.AccessTokenValidator))
-			r.Get("/me", authHandler.Me)
-			r.Post("/logout", authHandler.Logout)
+			r.Use(dependencies.TenantMiddleware)
+			r.With(middleware.RequireAuthorization(dependencies.Authorizer, "users", "read", nil)).Get("/me", authHandler.Me)
+			// Logout is a self-service session operation. Requiring users:read
+			// keeps it available to every seeded role while still rejecting
+			// principals whose role assignment has been revoked.
+			r.With(middleware.RequireAuthorization(dependencies.Authorizer, "users", "read", nil)).Post("/logout", authHandler.Logout)
 		})
 	})
 
@@ -159,6 +163,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(middleware.AuthMiddleware(dependencies.AccessTokenValidator))
 		r.Use(dependencies.TenantMiddleware)
+		r.Use(authorizeProtectedRoute(dependencies.Authorizer))
 
 		// Organizations
 		r.Route("/organizations", func(r chi.Router) {
@@ -171,41 +176,46 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Compliance Frameworks
 		r.Route("/frameworks", func(r chi.Router) {
-			if frameworkHandler != nil {
-				r.Post("/", frameworkHandler.Create)
-				r.Get("/", frameworkHandler.List)
-				r.Post("/import", frameworkHandler.Import)
-				r.Get("/{id}", frameworkHandler.GetByID)
-				r.Put("/{id}", frameworkHandler.Update)
-				r.Delete("/{id}", frameworkHandler.Delete)
-				r.Get("/{id}/controls", frameworkHandler.GetControls)
-			}
+			r.Get("/", frameworkHandler.List)
+			r.Get("/{id}", frameworkHandler.GetByID)
+			r.Post("/{id}/adopt", frameworkHandler.Adopt)
+			r.Get("/{id}/controls", frameworkHandler.GetControls)
 		})
 
 		// Controls
 		r.Route("/controls", func(r chi.Router) {
-			if controlHandler != nil {
-				r.Post("/", controlHandler.Create)
-				r.Get("/", controlHandler.List)
-				r.Post("/bulk", controlHandler.BulkCreate)
-				r.Get("/{id}", controlHandler.GetByID)
-				r.Put("/{id}", controlHandler.Update)
-				r.Delete("/{id}", controlHandler.Delete)
-				r.Put("/{id}/status", controlHandler.UpdateStatus)
-			}
+			r.Get("/", controlHandler.List)
+			r.Get("/{id}", controlHandler.GetByID)
+			r.Patch("/{id}/implementation", controlHandler.UpdateImplementation)
+			r.Post("/{id}/evidence", controlHandler.AttachEvidence)
+			r.Get("/{id}/evidence", controlHandler.ListEvidence)
 		})
 
 		// Risks
 		r.Route("/risks", func(r chi.Router) {
-			if riskHandler != nil {
-				r.Post("/", riskHandler.Create)
-				r.Get("/", riskHandler.List)
-				r.Get("/matrix", riskHandler.GetMatrix)
-				r.Get("/heatmap", riskHandler.GetHeatmap)
-				r.Get("/{id}", riskHandler.GetByID)
-				r.Put("/{id}", riskHandler.Update)
-				r.Delete("/{id}", riskHandler.Delete)
-			}
+			r.Post("/", riskHandler.Create)
+			r.Get("/", riskHandler.List)
+			r.Get("/matrix", riskHandler.GetMatrix)
+			r.Get("/heatmap", riskHandler.GetHeatmap)
+			r.Get("/categories", riskHandler.ListCategories)
+			r.Get("/appetite", riskHandler.ListAppetite)
+			r.Put("/appetite/{categoryID}", riskHandler.UpsertAppetite)
+			r.Post("/appetite/{categoryID}/approve", riskHandler.ApproveAppetite)
+			r.Get("/{id}", riskHandler.GetByID)
+			r.Put("/{id}", riskHandler.Update)
+			r.Patch("/{id}", riskHandler.Update)
+			r.Delete("/{id}", riskHandler.Delete)
+			r.Put("/{id}/assign", riskHandler.Assign)
+			r.Post("/{id}/assessments", riskHandler.CreateAssessment)
+			r.Get("/{id}/assessments", riskHandler.ListAssessments)
+			r.Post("/{id}/treatments", riskHandler.CreateTreatment)
+			r.Get("/{id}/treatments", riskHandler.ListTreatments)
+			r.Get("/{id}/treatments/{treatmentID}", riskHandler.GetTreatment)
+			r.Patch("/{id}/treatments/{treatmentID}", riskHandler.UpdateTreatment)
+			r.Post("/{id}/indicators", riskHandler.CreateIndicator)
+			r.Get("/{id}/indicators", riskHandler.ListIndicators)
+			r.Post("/{id}/indicators/{indicatorID}/values", riskHandler.RecordIndicatorValue)
+			r.Get("/{id}/indicators/{indicatorID}/values", riskHandler.ListIndicatorValues)
 		})
 
 		// Policies

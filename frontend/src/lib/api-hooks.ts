@@ -126,7 +126,7 @@ export function useLogin() {
 
 export function useRegister() {
   return useMutation({
-    mutationFn: (data: { email: string; password: string; first_name: string; last_name: string }) =>
+    mutationFn: (data: { email: string; password: string; first_name: string; last_name: string; organization_id: string }) =>
       api.auth.register(data),
     onError: () => {
       toast.error("Registration failed. Please try again.");

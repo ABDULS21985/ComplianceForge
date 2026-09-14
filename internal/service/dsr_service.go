@@ -9,20 +9,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/complianceforge/platform/internal/pkg/queue"
 )
 
 // DSRService manages GDPR Data Subject Requests (Articles 15-22).
 type DSRService struct {
-	pool   *pgxpool.Pool
-	bus    *EventBus
-	encKey []byte // AES-256 key (32 bytes) for PII encryption
+	pool        *pgxpool.Pool
+	bus         *EventBus
+	encKey      []byte // AES-256 key (32 bytes) for PII encryption
+	outbox      queue.OutboxEnqueuer
+	outboxQueue string
 }
 
 // CreateDSRInput holds the input for creating a new DSR.
@@ -96,9 +99,27 @@ type DSRDashboard struct {
 	CompletedLate     int            `json:"completed_late"`
 }
 
-// NewDSRService creates a new DSRService. It reads the PII encryption key
-// from the DSR_ENCRYPTION_KEY environment variable (base64-encoded, 32 bytes).
-func NewDSRService(pool *pgxpool.Pool, bus *EventBus) (*DSRService, error) {
+// NewDSRService creates a DSR service from explicitly supplied key material.
+// keyB64 must contain a base64-encoded 32-byte AES key.
+func NewDSRService(pool *pgxpool.Pool, bus *EventBus, keyB64 string) (*DSRService, error) {
+	return newDSRService(pool, bus, keyB64, nil, "")
+}
+
+// NewDSRServiceWithOutbox enables atomic DSR-created event delivery. The DSR,
+// audit trail, task checklist, and queue envelope are committed in one
+// transaction; the worker publishes the envelope after commit.
+func NewDSRServiceWithOutbox(pool *pgxpool.Pool, bus *EventBus, keyB64 string, outbox queue.OutboxEnqueuer, queueName string) (*DSRService, error) {
+	if outbox == nil {
+		return nil, errors.New("DSR outbox is required")
+	}
+	queueName = strings.TrimSpace(queueName)
+	if queueName == "" || len(queueName) > 240 {
+		return nil, errors.New("DSR outbox queue name is required and must not exceed 240 bytes")
+	}
+	return newDSRService(pool, bus, keyB64, outbox, queueName)
+}
+
+func newDSRService(pool *pgxpool.Pool, bus *EventBus, keyB64 string, outbox queue.OutboxEnqueuer, queueName string) (*DSRService, error) {
 	if pool == nil {
 		return nil, errors.New("DSR database is required")
 	}
@@ -106,7 +127,6 @@ func NewDSRService(pool *pgxpool.Pool, bus *EventBus) (*DSRService, error) {
 		return nil, errors.New("DSR event bus is required")
 	}
 
-	keyB64 := os.Getenv("DSR_ENCRYPTION_KEY")
 	if strings.TrimSpace(keyB64) == "" {
 		return nil, errors.New("DSR_ENCRYPTION_KEY is required")
 	}
@@ -118,7 +138,10 @@ func NewDSRService(pool *pgxpool.Pool, bus *EventBus) (*DSRService, error) {
 		return nil, fmt.Errorf("DSR_ENCRYPTION_KEY must decode to exactly 32 bytes")
 	}
 
-	return &DSRService{pool: pool, bus: bus, encKey: append([]byte(nil), key...)}, nil
+	return &DSRService{
+		pool: pool, bus: bus, encKey: append([]byte(nil), key...),
+		outbox: outbox, outboxQueue: queueName,
+	}, nil
 }
 
 // encryptPII encrypts a plaintext string using AES-256-GCM.
@@ -219,7 +242,10 @@ func (s *DSRService) CreateRequest(ctx context.Context, orgID string, req Create
 	if err != nil {
 		return nil, fmt.Errorf("begin DSR transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.current_tenant', $1, true)`, orgID); err != nil {
+		return nil, fmt.Errorf("set DSR transaction tenant: %w", err)
+	}
 
 	err = tx.QueryRow(ctx, `
 		INSERT INTO dsr_requests (
@@ -250,12 +276,7 @@ func (s *DSRService) CreateRequest(ctx context.Context, orgID string, req Create
 	if err != nil {
 		return nil, fmt.Errorf("create DSR audit trail: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit DSR transaction: %w", err)
-	}
-
-	// Emit event.
-	s.bus.Publish(Event{
+	event := Event{
 		Type:       "dsr.received",
 		Severity:   "medium",
 		OrgID:      orgID,
@@ -267,8 +288,26 @@ func (s *DSRService) CreateRequest(ctx context.Context, orgID string, req Create
 			"priority":     priority,
 			"deadline":     responseDeadline.Format("2006-01-02"),
 		},
-		Timestamp: time.Now(),
-	})
+		Timestamp: time.Now().UTC(),
+	}
+	if s.outbox != nil {
+		envelope, err := queue.NewEnvelope("notification.event", orgID, event)
+		if err != nil {
+			return nil, fmt.Errorf("create DSR event envelope: %w", err)
+		}
+		envelope.CausationID = id
+		envelope.Metadata = map[string]string{"entity_type": event.EntityType, "entity_id": id}
+		if err := s.outbox.Enqueue(ctx, tx, s.outboxQueue, envelope); err != nil {
+			return nil, fmt.Errorf("enqueue DSR event: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit DSR transaction: %w", err)
+	}
+
+	if s.outbox == nil {
+		s.bus.Publish(event)
+	}
 
 	log.Info().
 		Str("dsr_id", id).

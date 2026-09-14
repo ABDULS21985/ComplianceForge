@@ -2,12 +2,11 @@ package service_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 	"golang.org/x/crypto/bcrypt"
@@ -21,6 +20,7 @@ import (
 const (
 	authTestOrgID  = "30000000-0000-0000-0000-000000000001"
 	authTestUserID = "40000000-0000-0000-0000-000000000001"
+	authTestSecret = "test-secret-with-more-than-thirty-two-bytes"
 )
 
 type fakeAuthRepository struct {
@@ -257,9 +257,46 @@ func TestAuthServiceRejectsDuplicateRegistration(t *testing.T) {
 	}
 }
 
+func TestAuthServiceRequiresHS256AndConfiguredIssuer(t *testing.T) {
+	svc := newAuthService(newFakeAuthRepository())
+	now := time.Now()
+	baseClaims := authdomain.Claims{
+		UserID:         authTestUserID,
+		OrganizationID: authTestOrgID,
+		Role:           string(models.UserRoleViewer),
+		Email:          "user@example.com",
+		TokenType:      authdomain.TokenTypeAccess,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Audience:  jwt.ClaimStrings{authdomain.TokenAudience},
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+			ID:        "50000000-0000-0000-0000-000000000001",
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    "complianceforge-test",
+			Subject:   authTestUserID,
+		},
+	}
+
+	wrongAlgorithm, err := jwt.NewWithClaims(jwt.SigningMethodHS384, baseClaims).SignedString([]byte(authTestSecret))
+	if err != nil {
+		t.Fatalf("signing wrong-algorithm token: %v", err)
+	}
+	if _, err := svc.ValidateToken(wrongAlgorithm); !errors.Is(err, service.ErrInvalidToken) {
+		t.Fatalf("ValidateToken(HS384) error = %v, want ErrInvalidToken", err)
+	}
+
+	baseClaims.Issuer = "untrusted-issuer"
+	wrongIssuer, err := jwt.NewWithClaims(jwt.SigningMethodHS256, baseClaims).SignedString([]byte(authTestSecret))
+	if err != nil {
+		t.Fatalf("signing wrong-issuer token: %v", err)
+	}
+	if _, err := svc.ValidateToken(wrongIssuer); !errors.Is(err, service.ErrInvalidToken) {
+		t.Fatalf("ValidateToken(wrong issuer) error = %v, want ErrInvalidToken", err)
+	}
+}
+
 func newAuthService(repository service.UserRepository) *service.AuthService {
 	return service.NewAuthService(repository, config.JWTConfig{
-		Secret:      "test-secret-with-more-than-thirty-two-bytes",
+		Secret:      authTestSecret,
 		Issuer:      "complianceforge-test",
 		ExpiryHours: 1,
 	}, zerolog.Nop())
@@ -267,9 +304,4 @@ func newAuthService(repository service.UserRepository) *service.AuthService {
 
 func userKey(orgID, email string) string {
 	return orgID + ":" + email
-}
-
-func tokenHash(token string) string {
-	digest := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(digest[:])
 }

@@ -1,11 +1,12 @@
 // ComplianceForge API Client
-// Singleton HTTP client with JWT auth, retry logic, and typed endpoint methods
+// Singleton same-origin BFF client with retry logic and typed endpoint methods
 
-import { getToken, clearToken } from "./auth";
-import { ROUTES } from "./routes";
+import type { User } from "@/types";
+import { SESSION_EXPIRED_EVENT } from "./auth-constants";
+import { fetchWithCsrf, resetCsrfToken } from "./csrf-client";
+import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from "./routes";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api/v1";
-const IS_DEV = process.env.NODE_ENV === "development";
+const BFF_BASE_URL = "/api/bff";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 500;
 
@@ -59,6 +60,24 @@ function buildQuery(params?: Record<string, unknown>): string {
   return str ? `?${str}` : "";
 }
 
+function resolveApiUrl(path: string, params?: Record<string, unknown>): string {
+  const base = path.startsWith("/api/") ? path : `${BFF_BASE_URL}${path}`;
+  return `${base}${buildQuery(params)}`;
+}
+
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+
+  resetCsrfToken();
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  const destination = `${window.location.pathname}${window.location.search}`;
+  const login = new URL(ROUTES.auth.login, window.location.origin);
+  if (destination !== ROUTES.auth.login) {
+    login.searchParams.set(AUTH_REDIRECT_QUERY_PARAM, destination);
+  }
+  window.location.assign(`${login.pathname}${login.search}`);
+}
+
 // ---------------------------------------------------------------------------
 // API Client
 // ---------------------------------------------------------------------------
@@ -90,49 +109,52 @@ class ApiClient {
     } = {}
   ): Promise<T> {
     const { body, params, signal, headers: extraHeaders, isFormData, retries = 0 } = options;
-    const url = `${BASE_URL}${path}${buildQuery(params)}`;
+    const url = resolveApiUrl(path, params);
 
     const headers: Record<string, string> = { ...extraHeaders };
-    const token = getToken();
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    if (!isFormData) {
+    if (body !== undefined && !isFormData) {
       headers["Content-Type"] = "application/json";
     }
 
-    const init: RequestInit = { method, headers, signal };
+    const init: RequestInit = {
+      method,
+      headers,
+      signal,
+      credentials: "same-origin",
+    };
     if (body !== undefined) {
       init.body = isFormData ? (body as FormData) : JSON.stringify(body);
     }
 
-    if (IS_DEV) {
-      console.log(`[API] ${method} ${url}`, body ?? "");
-    }
-
     let response: Response;
     try {
-      response = await fetch(url, init);
+      response = await fetchWithCsrf(url, init);
     } catch (err) {
-      // Network error – retry on 5xx-like failures
-      if (retries < MAX_RETRIES) {
+      // Only idempotent reads are safe to replay after an ambiguous failure.
+      if (["GET", "HEAD"].includes(method) && retries < MAX_RETRIES) {
         await sleep(INITIAL_BACKOFF_MS * Math.pow(2, retries));
         return this.request<T>(method, path, { ...options, retries: retries + 1 });
       }
       throw err;
     }
 
-    // 401 → clear session and redirect
+    // A terminal BFF 401 means its server-side cookies have been cleared.
     if (response.status === 401) {
-      clearToken();
-      if (typeof window !== "undefined") {
-        window.location.href = ROUTES.auth.login;
+      if (
+        !path.startsWith("/api/auth/login") &&
+        !path.startsWith("/api/auth/register")
+      ) {
+        redirectToLogin();
       }
       throw { status: 401, message: "Unauthorized" } satisfies ApiError;
     }
 
     // 5xx → retry with backoff
-    if (response.status >= 500 && retries < MAX_RETRIES) {
+    if (
+      response.status >= 500 &&
+      ["GET", "HEAD"].includes(method) &&
+      retries < MAX_RETRIES
+    ) {
       await sleep(INITIAL_BACKOFF_MS * Math.pow(2, retries));
       return this.request<T>(method, path, { ...options, retries: retries + 1 });
     }
@@ -188,17 +210,17 @@ class ApiClient {
 
   auth = {
     login: (data: { email: string; password: string }) =>
-      this.post<{ access_token: string; refresh_token: string; user: unknown }>("/auth/login", data),
+      this.post<{ expires_at: string; user: User }>("/api/auth/login", data),
 
-    register: (data: { email: string; password: string; first_name: string; last_name: string }) =>
-      this.post<{ access_token: string; refresh_token: string; user: unknown }>("/auth/register", data),
+    register: (data: { email: string; password: string; first_name: string; last_name: string; organization_id: string }) =>
+      this.post<{ expires_at: string; user: User }>("/api/auth/register", data),
 
-    refresh: (refreshToken: string) =>
-      this.post<{ access_token: string; refresh_token: string }>("/auth/refresh", { refresh_token: refreshToken }),
+    refresh: () =>
+      this.post<{ expires_at: string; user: User }>("/api/auth/refresh"),
 
-    logout: () => this.post<void>("/auth/logout"),
+    logout: () => this.post<void>("/api/auth/logout"),
 
-    me: () => this.get<unknown>("/auth/me"),
+    me: () => this.get<User>("/api/auth/session"),
   };
 
   // ========================================================================
@@ -954,7 +976,9 @@ class ApiClient {
 
   search = {
     query: (params?: any) => this.get<any>('/search', params),
-    suggest: (params?: any) => this.get<any>('/search/suggest', params),
+    autocomplete: (query: string) =>
+      this.get<unknown[]>('/search/autocomplete', { q: query }),
+    suggest: (params?: any) => this.get<any>('/search/autocomplete', params),
     reindex: () => this.post<any>('/search/reindex'),
   };
 

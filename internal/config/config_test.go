@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -66,9 +67,76 @@ func TestValidateAcceptsHardenedProductionConfig(t *testing.T) {
 	cfg.RabbitMQ.URL = "amqps://app:super-secret@rabbitmq.example.com:5671/grc"
 	cfg.CORS.AllowedOrigins = []string{"https://app.example.com"}
 	cfg.JWT.Secret = "0123456789abcdef0123456789abcdef"
+	cfg.Encryption.DSRKey = base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	cfg.Encryption.IntegrationKey = strings.Repeat("ab", 32)
+	cfg.SMTP.TLSMode = "starttls"
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateRejectsCredentialedCORSWildcardAndNonOrigins(t *testing.T) {
+	tests := []struct {
+		name    string
+		origins []string
+	}{
+		{name: "wildcard", origins: []string{"*"}},
+		{name: "path", origins: []string{"https://app.example.com/login"}},
+		{name: "query", origins: []string{"https://app.example.com?tenant=a"}},
+		{name: "credentials", origins: []string{"https://user:password@app.example.com"}},
+		{name: "duplicates", origins: []string{"https://app.example.com", "https://app.example.com/"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.CORS.AllowedOrigins = test.origins
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("Validate() accepted origins %#v", test.origins)
+			}
+		})
+	}
+}
+
+func TestValidateCanonicalizesCORSOriginTrailingSlash(t *testing.T) {
+	cfg := validConfig()
+	cfg.CORS.AllowedOrigins = []string{"http://localhost:3000/"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got := cfg.CORS.AllowedOrigins[0]; got != "http://localhost:3000" {
+		t.Fatalf("origin = %q", got)
+	}
+}
+
+func TestValidateRejectsUnsafeSMTPConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*SMTPConfig)
+	}{
+		{name: "plaintext production SMTP", mutate: func(c *SMTPConfig) { c.TLSMode = "disabled" }},
+		{name: "partial credentials", mutate: func(c *SMTPConfig) { c.User = "mailer" }},
+		{name: "header injection", mutate: func(c *SMTPConfig) { c.From = "safe@example.com\r\nBcc: stolen@example.com" }},
+		{name: "unbounded timeout", mutate: func(c *SMTPConfig) { c.TimeoutSeconds = 121 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.App.Env = "production"
+			cfg.Database.URL = "postgres://app:super-secret@database.example.com:5432/grc?sslmode=verify-full"
+			cfg.Redis.URL = "rediss://app:super-secret@redis.example.com:6379/0"
+			cfg.RabbitMQ.URL = "amqps://app:super-secret@rabbitmq.example.com:5671/grc"
+			cfg.JWT.Secret = "0123456789abcdef0123456789abcdef"
+			cfg.Encryption.DSRKey = base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+			cfg.Encryption.IntegrationKey = strings.Repeat("ab", 32)
+			cfg.Storage = StorageConfig{Type: "s3", S3Bucket: "test", S3Region: "eu-west-2"}
+			cfg.CORS.AllowedOrigins = []string{"https://app.example.com"}
+			test.mutate(&cfg.SMTP)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate() accepted unsafe SMTP configuration")
+			}
+		})
 	}
 }
 
@@ -96,6 +164,14 @@ func validConfig() *Config {
 			Secret:      "test-only-secret",
 			Issuer:      "complianceforge",
 			ExpiryHours: 24,
+		},
+		Encryption: EncryptionConfig{NotificationKey: strings.Repeat("cd", 32)},
+		SMTP: SMTPConfig{
+			Host:           "localhost",
+			Port:           1025,
+			From:           "ComplianceForge <noreply@complianceforge.local>",
+			TLSMode:        "starttls",
+			TimeoutSeconds: 15,
 		},
 		Storage: StorageConfig{Type: "local", Path: "./storage"},
 		CORS:    CORSConfig{AllowedOrigins: []string{"http://localhost:3000"}},

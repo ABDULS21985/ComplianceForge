@@ -82,7 +82,7 @@ func (si *SearchIndexer) IncrementalIndex(ctx context.Context, entityType, entit
 		Msg("search_indexer: incremental index")
 
 	if action == "delete" {
-		return si.removeFromIndex(ctx, entityType, entityID)
+		return si.removeFromIndex(ctx, entityType, entityID, orgID)
 	}
 
 	entity := si.findEntityDef(entityType)
@@ -93,11 +93,11 @@ func (si *SearchIndexer) IncrementalIndex(ctx context.Context, entityType, entit
 	query := fmt.Sprintf(`
 		SELECT %s, %s, %s, organization_id
 		FROM %s
-		WHERE %s = $1 AND deleted_at IS NULL
+		WHERE %s = $1 AND organization_id = $2 AND deleted_at IS NULL
 	`, entity.IDColumn, entity.TitleCol, entity.ContentCol, entity.Table, entity.IDColumn)
 
 	var id, title, content, entityOrgID string
-	err := si.pool.QueryRow(ctx, query, entityID).Scan(&id, &title, &content, &entityOrgID)
+	err := si.pool.QueryRow(ctx, query, entityID, orgID).Scan(&id, &title, &content, &entityOrgID)
 	if err != nil {
 		return fmt.Errorf("fetching entity %s/%s: %w", entityType, entityID, err)
 	}
@@ -220,10 +220,11 @@ func (si *SearchIndexer) indexAllEntities(ctx context.Context, orgID string) (in
 	return totalIndexed, nil
 }
 
-func (si *SearchIndexer) removeFromIndex(ctx context.Context, entityType, entityID string) error {
+func (si *SearchIndexer) removeFromIndex(ctx context.Context, entityType, entityID, orgID string) error {
 	_, err := si.pool.Exec(ctx, `
-		DELETE FROM search_index WHERE entity_type = $1 AND entity_id = $2
-	`, entityType, entityID)
+		DELETE FROM search_index
+		WHERE entity_type = $1 AND entity_id = $2 AND organization_id = $3
+	`, entityType, entityID, orgID)
 	return err
 }
 

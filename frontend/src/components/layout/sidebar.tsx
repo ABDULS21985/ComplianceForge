@@ -1,111 +1,85 @@
 'use client';
 
-import React from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard,
-  Shield,
-  AlertTriangle,
-  FileText,
-  ClipboardCheck,
-  AlertOctagon,
-  Building2,
-  Server,
-  BarChart3,
-  Settings,
-  PanelLeftClose,
-  PanelLeft,
+  ChevronDown,
+  History,
   Menu,
-  type LucideIcon,
+  PanelLeft,
+  PanelLeftClose,
+  Shield,
+  Star,
 } from 'lucide-react';
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-
-import { cn } from '@/lib/utils';
-import { NAV_ITEMS } from '@/lib/constants';
-import { Button } from '@/components/ui/button';
+import {
+  getNavigationItemForPath,
+  getRoleSlugs,
+  getVisibleNavigationGroups,
+  type NavigationContext,
+  type NavigationItem,
+  type PermissionMap,
+} from '@/lib/navigation';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { Badge } from '@/components/ui/badge';
+import { useEffect, useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import Link from 'next/link';
+import { NAVIGATION_ICONS } from '@/components/layout/navigation-icons';
+import { useNavigationStore } from '@/store/navigation-store';
+import { usePathname } from 'next/navigation';
+import type { User } from '@/types';
 
-// ---- Sidebar Store ----
-interface SidebarState {
+interface NavigationLinkProps {
+  active: boolean;
   collapsed: boolean;
-  toggleCollapsed: () => void;
-  setCollapsed: (v: boolean) => void;
+  favorite: boolean;
+  item: NavigationItem;
+  onNavigate?: () => void;
+  onRecordRecent: (itemId: string) => void;
+  onToggleFavorite: (itemId: string) => void;
 }
 
-export const useSidebarStore = create<SidebarState>()(
-  persist(
-    (set) => ({
-      collapsed: false,
-      toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
-      setCollapsed: (collapsed) => set({ collapsed }),
-    }),
-    { name: 'sidebar-collapsed' }
-  )
-);
-
-// ---- Icon map ----
-const ICON_MAP: Record<string, LucideIcon> = {
-  LayoutDashboard,
-  Shield,
-  AlertTriangle,
-  FileText,
-  ClipboardCheck,
-  AlertOctagon,
-  Building2,
-  Server,
-  BarChart3,
-  Settings,
-};
-
-// ---- Nav Item ----
-interface NavItemProps {
-  item: (typeof NAV_ITEMS)[number];
-  collapsed: boolean;
-  badgeCounts?: Record<string, number>;
-}
-
-function NavItem({ item, collapsed, badgeCounts }: NavItemProps) {
-  const pathname = usePathname();
-  const Icon = ICON_MAP[item.icon] || LayoutDashboard;
-  const isActive =
-    pathname === item.href || pathname.startsWith(`${item.href}/`);
-  const badgeCount =
-    'badgeKey' in item && item.badgeKey
-      ? badgeCounts?.[item.badgeKey as string]
-      : undefined;
+function NavigationLink({
+  active,
+  collapsed,
+  favorite,
+  item,
+  onNavigate,
+  onRecordRecent,
+  onToggleFavorite,
+}: NavigationLinkProps) {
+  const Icon = NAVIGATION_ICONS[item.icon];
+  const activate = () => {
+    onRecordRecent(item.id);
+    onNavigate?.();
+  };
 
   const link = (
     <Link
       href={item.href}
+      aria-current={active ? 'page' : undefined}
+      onClick={activate}
       className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-        'hover:bg-accent hover:text-accent-foreground',
-        isActive
+        'flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium outline-none transition-colors',
+        'hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+        active
           ? 'bg-accent text-accent-foreground'
           : 'text-muted-foreground',
         collapsed && 'justify-center px-2'
       )}
     >
-      <Icon className="h-5 w-5 shrink-0" />
-      {!collapsed && (
-        <>
-          <span className="flex-1">{item.label}</span>
-          {badgeCount != null && badgeCount > 0 && (
-            <Badge variant="destructive" className="ml-auto h-5 min-w-[20px] px-1.5 text-[10px]">
-              {badgeCount}
-            </Badge>
-          )}
-        </>
-      )}
+      <Icon aria-hidden="true" className="h-[18px] w-[18px] shrink-0" />
+      {!collapsed && <span className="truncate">{item.label}</span>}
     </Link>
   );
 
@@ -113,75 +87,216 @@ function NavItem({ item, collapsed, badgeCounts }: NavItemProps) {
     return (
       <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>{link}</TooltipTrigger>
-        <TooltipContent side="right" className="flex items-center gap-2">
-          {item.label}
-          {badgeCount != null && badgeCount > 0 && (
-            <Badge variant="destructive" className="h-5 min-w-[20px] px-1.5 text-[10px]">
-              {badgeCount}
-            </Badge>
-          )}
-        </TooltipContent>
+        <TooltipContent side="right">{item.label}</TooltipContent>
       </Tooltip>
     );
   }
 
-  return link;
+  return (
+    <div className="group flex items-center gap-1">
+      {link}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={`${favorite ? 'Remove' : 'Add'} ${item.label} ${
+          favorite ? 'from' : 'to'
+        } favorites`}
+        aria-pressed={favorite}
+        onClick={() => onToggleFavorite(item.id)}
+        className={cn(
+          'h-8 w-8 shrink-0 focus-visible:opacity-100',
+          favorite
+            ? 'text-amber-500 opacity-100'
+            : 'text-muted-foreground opacity-100 md:opacity-0 md:group-hover:opacity-100'
+        )}
+      >
+        <Star aria-hidden="true" className={cn('h-4 w-4', favorite && 'fill-current')} />
+      </Button>
+    </div>
+  );
 }
 
-// ---- Sidebar Content ----
 interface SidebarContentProps {
   collapsed: boolean;
-  badgeCounts?: Record<string, number>;
+  context: NavigationContext;
+  onNavigate?: () => void;
   onToggle?: () => void;
+  pathname: string;
 }
 
-function SidebarContent({ collapsed, badgeCounts, onToggle }: SidebarContentProps) {
+export function SidebarContent({
+  collapsed,
+  context,
+  onNavigate,
+  onToggle,
+  pathname,
+}: SidebarContentProps) {
+  const {
+    expandedGroups,
+    favoriteIds,
+    recentIds,
+    recordRecent,
+    setGroupExpanded,
+    toggleFavorite,
+    toggleGroup,
+  } = useNavigationStore();
+  const groups = useMemo(() => getVisibleNavigationGroups(context), [context]);
+  const visibleItems = useMemo(
+    () => groups.flatMap((group) => group.items),
+    [groups]
+  );
+  const activeItem = getNavigationItemForPath(pathname, visibleItems);
+  const activeGroup = groups.find((group) =>
+    group.items.some((item) => item.id === activeItem?.id)
+  );
+  const activeGroupId = activeGroup?.id;
+
+  useEffect(() => {
+    if (activeGroupId) {
+      setGroupExpanded(activeGroupId, true);
+    }
+  }, [activeGroupId, setGroupExpanded]);
+
+  const favorites = favoriteIds
+    .map((id) => visibleItems.find((item) => item.id === id))
+    .filter((item): item is NavigationItem => Boolean(item));
+  const recent = recentIds
+    .map((id) => visibleItems.find((item) => item.id === id))
+    .filter((item): item is NavigationItem => Boolean(item))
+    .slice(0, 3);
+
+  const renderLink = (item: NavigationItem, showActive = true) => (
+    <NavigationLink
+      key={item.id}
+      active={showActive && activeItem?.id === item.id}
+      collapsed={collapsed}
+      favorite={favoriteIds.includes(item.id)}
+      item={item}
+      onNavigate={onNavigate}
+      onRecordRecent={recordRecent}
+      onToggleFavorite={toggleFavorite}
+    />
+  );
+
   return (
     <div className="flex h-full flex-col">
-      {/* Logo */}
       <div
         className={cn(
-          'flex h-16 items-center border-b px-4',
+          'flex h-16 shrink-0 items-center border-b px-4',
           collapsed && 'justify-center px-2'
         )}
       >
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <Shield className="h-7 w-7 text-primary" />
+        <Link
+          href="/dashboard"
+          onClick={onNavigate}
+          aria-label="ComplianceForge dashboard"
+          className="flex min-w-0 items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Shield aria-hidden="true" className="h-7 w-7 shrink-0 text-primary" />
           {!collapsed && (
-            <span className="text-lg font-bold tracking-tight">
+            <span className="truncate text-lg font-bold tracking-tight">
               ComplianceForge
             </span>
           )}
         </Link>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {NAV_ITEMS.map((item) => (
-          <NavItem
-            key={item.href}
-            item={item}
-            collapsed={collapsed}
-            badgeCounts={badgeCounts}
-          />
-        ))}
+      <nav
+        aria-label="Primary navigation"
+        className="flex-1 overflow-y-auto overscroll-contain px-2 py-3"
+      >
+        {!collapsed && favorites.length > 0 && (
+          <section aria-labelledby="navigation-favorites" className="mb-3">
+            <div className="flex items-center px-3 pb-1.5">
+              <Star aria-hidden="true" className="mr-2 h-3.5 w-3.5 text-amber-500" />
+              <h2
+                id="navigation-favorites"
+                className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Favorites
+              </h2>
+            </div>
+            <div className="space-y-0.5">
+              {favorites.map((item) => renderLink(item, false))}
+            </div>
+          </section>
+        )}
+
+        {!collapsed && recent.length > 0 && (
+          <section aria-labelledby="navigation-recent" className="mb-3">
+            <div className="flex items-center px-3 pb-1.5">
+              <History aria-hidden="true" className="mr-2 h-3.5 w-3.5" />
+              <h2
+                id="navigation-recent"
+                className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                Recent
+              </h2>
+            </div>
+            <div className="space-y-0.5">
+              {recent.map((item) => renderLink(item, false))}
+            </div>
+          </section>
+        )}
+
+        <div className="space-y-2">
+          {groups.map((group) => {
+            const expanded = collapsed || Boolean(expandedGroups[group.id]);
+            const regionId = `navigation-group-${group.id}`;
+
+            return (
+              <section key={group.id} aria-labelledby={`${regionId}-label`}>
+                {collapsed ? (
+                  <div aria-hidden="true" className="mx-2 my-2 border-t" />
+                ) : (
+                  <button
+                    id={`${regionId}-label`}
+                    type="button"
+                    aria-controls={regionId}
+                    aria-expanded={expanded}
+                    onClick={() => toggleGroup(group.id)}
+                    className="flex w-full items-center rounded-md px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground outline-none hover:bg-accent/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="flex-1">{group.label}</span>
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={cn(
+                        'h-3.5 w-3.5 transition-transform',
+                        !expanded && '-rotate-90'
+                      )}
+                    />
+                  </button>
+                )}
+                <div
+                  id={regionId}
+                  hidden={!expanded}
+                  className="mt-0.5 space-y-0.5"
+                >
+                  {group.items.map((item) => renderLink(item))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       </nav>
 
-      {/* Collapse toggle */}
       {onToggle && (
-        <div className={cn('border-t p-3', collapsed && 'flex justify-center')}>
+        <div className={cn('shrink-0 border-t p-2', collapsed && 'flex justify-center')}>
           <Button
+            type="button"
             variant="ghost"
             size={collapsed ? 'icon' : 'sm'}
             onClick={onToggle}
+            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
             className={cn(!collapsed && 'w-full justify-start gap-2')}
           >
             {collapsed ? (
-              <PanelLeft className="h-5 w-5" />
+              <PanelLeft aria-hidden="true" className="h-5 w-5" />
             ) : (
               <>
-                <PanelLeftClose className="h-5 w-5" />
-                <span>Collapse</span>
+                <PanelLeftClose aria-hidden="true" className="h-5 w-5" />
+                <span>Collapse navigation</span>
               </>
             )}
           </Button>
@@ -191,46 +306,63 @@ function SidebarContent({ collapsed, badgeCounts, onToggle }: SidebarContentProp
   );
 }
 
-// ---- Main Sidebar ----
 interface SidebarProps {
-  badgeCounts?: Record<string, number>;
+  permissions?: PermissionMap;
+  user: User | null;
 }
 
-export function Sidebar({ badgeCounts }: SidebarProps) {
-  const { collapsed, toggleCollapsed } = useSidebarStore();
+export function Sidebar({ permissions, user }: SidebarProps) {
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const { collapsed, toggleCollapsed } = useNavigationStore();
+  const context = useMemo<NavigationContext>(
+    () => ({
+      isSuperAdmin: user?.is_super_admin,
+      permissions,
+      roleSlugs: getRoleSlugs(user?.roles),
+    }),
+    [permissions, user?.is_super_admin, user?.roles]
+  );
 
   return (
     <TooltipProvider>
-      {/* Desktop / Tablet sidebar */}
       <aside
+        aria-label="Application sidebar"
         className={cn(
-          'hidden border-r bg-background transition-all duration-300 md:block',
-          collapsed ? 'w-[68px]' : 'w-64'
+          'hidden h-screen shrink-0 border-r bg-background transition-[width] duration-200 md:block',
+          collapsed ? 'w-[68px]' : 'w-72'
         )}
       >
         <SidebarContent
           collapsed={collapsed}
-          badgeCounts={badgeCounts}
+          context={context}
           onToggle={toggleCollapsed}
+          pathname={pathname}
         />
       </aside>
 
-      {/* Mobile drawer */}
-      <Sheet>
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetTrigger asChild>
           <Button
+            type="button"
             variant="ghost"
             size="icon"
-            className="md:hidden fixed left-4 top-3 z-40"
+            aria-label="Open primary navigation"
+            className="fixed left-3 top-3 z-40 md:hidden"
           >
-            <Menu className="h-5 w-5" />
-            <span className="sr-only">Toggle navigation</span>
+            <Menu aria-hidden="true" className="h-5 w-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-64 p-0">
+        <SheetContent side="left" className="w-[min(90vw,20rem)] p-0">
+          <SheetTitle className="sr-only">Primary navigation</SheetTitle>
+          <SheetDescription className="sr-only">
+            Navigate between ComplianceForge workspaces and domains.
+          </SheetDescription>
           <SidebarContent
             collapsed={false}
-            badgeCounts={badgeCounts}
+            context={context}
+            onNavigate={() => setMobileOpen(false)}
+            pathname={pathname}
           />
         </SheetContent>
       </Sheet>

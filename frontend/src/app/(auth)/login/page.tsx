@@ -16,7 +16,6 @@ import {
 } from "@/lib/routes";
 import { useAuthStore } from "@/store/auth-store";
 import api, { type ApiError } from "@/lib/api";
-import type { User } from "@/types";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -36,7 +35,7 @@ export default function LoginPage() {
     setApiError(null);
     try {
       const res = await api.auth.login(values);
-      setAuth(res.access_token, res.refresh_token, res.user as User);
+      setAuth(res.user);
       const params = new URLSearchParams(window.location.search);
       router.replace(
         getSafePostAuthRedirect(params.get(AUTH_REDIRECT_QUERY_PARAM))

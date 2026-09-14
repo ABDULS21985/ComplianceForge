@@ -41,7 +41,8 @@ export type AssetCriticality = 'critical' | 'high' | 'medium' | 'low';
 
 // === Auth ===
 export interface LoginRequest { email: string; password: string; }
-export interface LoginResponse { access_token: string; refresh_token: string; expires_at: string; user: User; }
+/** Browser-safe session response. Bearer credentials are HttpOnly cookies. */
+export interface LoginResponse { expires_at: string; user: User; }
 export interface User {
   id: string; organization_id: string; email: string; first_name: string; last_name: string;
   job_title?: string; department?: string; phone?: string; avatar_url?: string;

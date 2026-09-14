@@ -8,6 +8,7 @@ import {
   buildPortalApiUrl,
   PORTAL_API_ROUTES,
 } from '@/lib/portal-routes';
+import { fetchWithCsrf } from '@/lib/csrf-client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -265,7 +266,7 @@ function VendorPortalInner() {
     if (!token || !questionnaire || Object.keys(answers).length === 0) return;
     setSaving(true);
     try {
-      await fetch(
+      const response = await fetchWithCsrf(
         buildPortalApiUrl(PORTAL_API_ROUTES.vendorSave, token),
         {
           method: 'POST',
@@ -273,6 +274,7 @@ function VendorPortalInner() {
           body: JSON.stringify({ answers }),
         }
       );
+      if (!response.ok) throw new Error('Unable to save responses');
       setLastSaved(new Date().toLocaleTimeString());
     } catch {
       // Silently fail auto-save
@@ -301,7 +303,7 @@ function VendorPortalInner() {
     if (!token || !questionnaire) return;
     setSubmitting(true);
     try {
-      const res = await fetch(
+      const res = await fetchWithCsrf(
         buildPortalApiUrl(PORTAL_API_ROUTES.vendorSubmit, token),
         {
           method: 'POST',
