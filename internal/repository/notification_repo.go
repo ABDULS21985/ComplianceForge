@@ -51,7 +51,7 @@ func (repository *PostgresNotificationRepository) RecordBounce(
 ) error {
 	result, err := database.QuerierFromContext(ctx, repository.pool).Exec(ctx, `
 		UPDATE notifications
-		SET status='bounced',failure_code=$1,error_message='notification bounced (' || $1 || ')',
+		SET status='bounced',failure_code=$1::varchar,error_message='notification bounced (' || $1::text || ')',
 		    dead_at=NOW(),next_retry_at=NULL,lease_owner=NULL,lease_token=NULL,leased_until=NULL
 		WHERE id=$2 AND organization_id=$3`, providerCode, notificationID, organizationID)
 	if err != nil {

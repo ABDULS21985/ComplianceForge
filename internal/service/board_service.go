@@ -16,10 +16,10 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	ErrBoardMemberNotFound  = fmt.Errorf("board member not found")
-	ErrBoardMeetingNotFound = fmt.Errorf("board meeting not found")
+	ErrBoardMemberNotFound   = fmt.Errorf("board member not found")
+	ErrBoardMeetingNotFound  = fmt.Errorf("board meeting not found")
 	ErrBoardDecisionNotFound = fmt.Errorf("board decision not found")
-	ErrInvalidBoardToken    = fmt.Errorf("invalid or expired board portal token")
+	ErrInvalidBoardToken     = fmt.Errorf("invalid or expired board portal token")
 )
 
 // ---------------------------------------------------------------------------
@@ -28,22 +28,22 @@ var (
 
 // BoardMember represents a governance board member.
 type BoardMember struct {
-	ID              string  `json:"id"`
-	OrgID           string  `json:"organization_id"`
-	Name            string  `json:"name"`
-	Email           string  `json:"email"`
-	Role            string  `json:"role"` // chairperson, member, secretary, observer
-	Title           string  `json:"title"`
-	Department      string  `json:"department"`
-	Expertise       string  `json:"expertise"`
-	IsExternal      bool    `json:"is_external"`
-	Status          string  `json:"status"` // active, inactive, removed
-	AppointedDate   string  `json:"appointed_date"`
-	TermEndDate     *string `json:"term_end_date"`
-	TrainingStatus  string  `json:"training_status"` // compliant, overdue, pending
+	ID               string  `json:"id"`
+	OrgID            string  `json:"organization_id"`
+	Name             string  `json:"name"`
+	Email            string  `json:"email"`
+	Role             string  `json:"role"` // chairperson, member, secretary, observer
+	Title            string  `json:"title"`
+	Department       string  `json:"department"`
+	Expertise        string  `json:"expertise"`
+	IsExternal       bool    `json:"is_external"`
+	Status           string  `json:"status"` // active, inactive, removed
+	AppointedDate    string  `json:"appointed_date"`
+	TermEndDate      *string `json:"term_end_date"`
+	TrainingStatus   string  `json:"training_status"` // compliant, overdue, pending
 	LastTrainingDate *string `json:"last_training_date"`
-	PortalTokenHash *string `json:"-"`
-	CreatedAt       string  `json:"created_at"`
+	PortalTokenHash  *string `json:"-"`
+	CreatedAt        string  `json:"created_at"`
 }
 
 // CreateBoardMemberRequest holds input for adding a board member.
@@ -95,24 +95,24 @@ type CreateBoardMeetingRequest struct {
 
 // BoardDecision records a decision made during a board meeting.
 type BoardDecision struct {
-	ID              string                 `json:"id"`
-	OrgID           string                 `json:"organization_id"`
-	MeetingID       string                 `json:"meeting_id"`
-	DecisionRef     string                 `json:"decision_ref"`
-	Title           string                 `json:"title"`
-	Description     string                 `json:"description"`
-	DecisionType    string                 `json:"decision_type"` // approval, directive, resolution, action_item
-	Status          string                 `json:"status"`        // pending, approved, rejected, deferred, implemented
-	VotesFor        int                    `json:"votes_for"`
-	VotesAgainst    int                    `json:"votes_against"`
-	VotesAbstain    int                    `json:"votes_abstain"`
-	EntityType      *string                `json:"entity_type"` // risk, policy, incident, exception, budget
-	EntityID        *string                `json:"entity_id"`
-	AssignedTo      *string                `json:"assigned_to"`
-	DueDate         *string                `json:"due_date"`
+	ID              string                   `json:"id"`
+	OrgID           string                   `json:"organization_id"`
+	MeetingID       string                   `json:"meeting_id"`
+	DecisionRef     string                   `json:"decision_ref"`
+	Title           string                   `json:"title"`
+	Description     string                   `json:"description"`
+	DecisionType    string                   `json:"decision_type"` // approval, directive, resolution, action_item
+	Status          string                   `json:"status"`        // pending, approved, rejected, deferred, implemented
+	VotesFor        int                      `json:"votes_for"`
+	VotesAgainst    int                      `json:"votes_against"`
+	VotesAbstain    int                      `json:"votes_abstain"`
+	EntityType      *string                  `json:"entity_type"` // risk, policy, incident, exception, budget
+	EntityID        *string                  `json:"entity_id"`
+	AssignedTo      *string                  `json:"assigned_to"`
+	DueDate         *string                  `json:"due_date"`
 	FollowUpActions []map[string]interface{} `json:"follow_up_actions"`
-	RecordedBy      string                 `json:"recorded_by"`
-	CreatedAt       string                 `json:"created_at"`
+	RecordedBy      string                   `json:"recorded_by"`
+	CreatedAt       string                   `json:"created_at"`
 }
 
 // RecordDecisionRequest holds input for recording a board decision.
@@ -134,54 +134,54 @@ type RecordDecisionRequest struct {
 
 // BoardPack is the compiled materials for a board meeting.
 type BoardPack struct {
-	MeetingID        string                 `json:"meeting_id"`
-	MeetingRef       string                 `json:"meeting_ref"`
-	Title            string                 `json:"title"`
-	GeneratedAt      string                 `json:"generated_at"`
-	ComplianceSummary map[string]interface{} `json:"compliance_summary"`
-	RiskDashboard    map[string]interface{} `json:"risk_dashboard"`
-	IncidentSummary  map[string]interface{} `json:"incident_summary"`
+	MeetingID         string                   `json:"meeting_id"`
+	MeetingRef        string                   `json:"meeting_ref"`
+	Title             string                   `json:"title"`
+	GeneratedAt       string                   `json:"generated_at"`
+	ComplianceSummary map[string]interface{}   `json:"compliance_summary"`
+	RiskDashboard     map[string]interface{}   `json:"risk_dashboard"`
+	IncidentSummary   map[string]interface{}   `json:"incident_summary"`
 	RegulatoryUpdates []map[string]interface{} `json:"regulatory_updates"`
-	DecisionsPending []BoardDecision        `json:"decisions_pending"`
-	PreviousDecisions []BoardDecision       `json:"previous_decisions"`
-	Agenda           []map[string]interface{} `json:"agenda"`
-	Attendees        []BoardMember          `json:"attendees"`
+	DecisionsPending  []BoardDecision          `json:"decisions_pending"`
+	PreviousDecisions []BoardDecision          `json:"previous_decisions"`
+	Agenda            []map[string]interface{} `json:"agenda"`
+	Attendees         []BoardMember            `json:"attendees"`
 }
 
 // BoardDashboard provides governance-level KPIs.
 type BoardDashboard struct {
-	ComplianceGauge    float64            `json:"compliance_gauge"`      // 0-100 overall compliance score
-	RiskAppetite       map[string]interface{} `json:"risk_appetite"`
-	IncidentSummary    map[string]int     `json:"incident_summary"`
-	DecisionsPending   int                `json:"decisions_pending"`
-	DecisionsOverdue   int                `json:"decisions_overdue"`
-	RegulatoryHorizon  []map[string]interface{} `json:"regulatory_horizon"`
-	TotalMembers       int                `json:"total_members"`
-	TrainingCompliant  int                `json:"training_compliant"`
-	MeetingsThisQuarter int              `json:"meetings_this_quarter"`
+	ComplianceGauge     float64                  `json:"compliance_gauge"` // 0-100 overall compliance score
+	RiskAppetite        map[string]interface{}   `json:"risk_appetite"`
+	IncidentSummary     map[string]int           `json:"incident_summary"`
+	DecisionsPending    int                      `json:"decisions_pending"`
+	DecisionsOverdue    int                      `json:"decisions_overdue"`
+	RegulatoryHorizon   []map[string]interface{} `json:"regulatory_horizon"`
+	TotalMembers        int                      `json:"total_members"`
+	TrainingCompliant   int                      `json:"training_compliant"`
+	MeetingsThisQuarter int                      `json:"meetings_this_quarter"`
 }
 
 // NIS2GovernanceReport holds NIS2-specific board governance evidence.
 type NIS2GovernanceReport struct {
-	GeneratedAt        string                   `json:"generated_at"`
-	Organization       string                   `json:"organization"`
-	TrainingStatus     []BoardMemberTraining    `json:"training_status"`
-	RiskMeasures       []map[string]interface{} `json:"risk_measures_approved"`
-	BoardOversight     []map[string]interface{} `json:"board_oversight_evidence"`
-	ComplianceScore    float64                  `json:"compliance_score"`
-	MeetingFrequency   int                      `json:"meetings_last_12_months"`
-	DecisionsRecorded  int                      `json:"decisions_recorded"`
+	GeneratedAt       string                   `json:"generated_at"`
+	Organization      string                   `json:"organization"`
+	TrainingStatus    []BoardMemberTraining    `json:"training_status"`
+	RiskMeasures      []map[string]interface{} `json:"risk_measures_approved"`
+	BoardOversight    []map[string]interface{} `json:"board_oversight_evidence"`
+	ComplianceScore   float64                  `json:"compliance_score"`
+	MeetingFrequency  int                      `json:"meetings_last_12_months"`
+	DecisionsRecorded int                      `json:"decisions_recorded"`
 }
 
 // BoardMemberTraining tracks training completion for a member.
 type BoardMemberTraining struct {
-	MemberID        string  `json:"member_id"`
-	MemberName      string  `json:"member_name"`
-	Role            string  `json:"role"`
-	TrainingStatus  string  `json:"training_status"`
-	LastTrainingDate *string `json:"last_training_date"`
-	DaysSinceTraining int   `json:"days_since_training"`
-	IsCompliant     bool    `json:"is_compliant"`
+	MemberID          string  `json:"member_id"`
+	MemberName        string  `json:"member_name"`
+	Role              string  `json:"role"`
+	TrainingStatus    string  `json:"training_status"`
+	LastTrainingDate  *string `json:"last_training_date"`
+	DaysSinceTraining int     `json:"days_since_training"`
+	IsCompliant       bool    `json:"is_compliant"`
 }
 
 // BoardReport represents a generated board report.
@@ -567,16 +567,23 @@ func (s *BoardService) GenerateBoardPack(ctx context.Context, orgID, meetingID s
 		for rRows.Next() {
 			var lvl string
 			var cnt int
-			rRows.Scan(&lvl, &cnt)
+			if err := rRows.Scan(&lvl, &cnt); err != nil {
+				rRows.Close()
+				return nil, fmt.Errorf("scan board-pack risk aggregate: %w", err)
+			}
 			riskByLevel[lvl] = cnt
+		}
+		if err := rRows.Err(); err != nil {
+			rRows.Close()
+			return nil, fmt.Errorf("iterate board-pack risk aggregates: %w", err)
 		}
 		rRows.Close()
 	}
 	var totalRisks int
 	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM risks WHERE organization_id = $1`, orgID).Scan(&totalRisks)
 	pack.RiskDashboard = map[string]interface{}{
-		"total_risks":  totalRisks,
-		"by_level":     riskByLevel,
+		"total_risks": totalRisks,
+		"by_level":    riskByLevel,
 	}
 
 	// Incident summary.
@@ -584,9 +591,9 @@ func (s *BoardService) GenerateBoardPack(ctx context.Context, orgID, meetingID s
 	var openIncidents, closedIncidents int
 	_ = s.pool.QueryRow(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE status IN ('open', 'investigating', 'containing')),
+			COUNT(*) FILTER (WHERE status IN ('reported', 'triaged', 'investigating', 'contained')),
 			COUNT(*) FILTER (WHERE status = 'closed')
-		FROM incidents WHERE organization_id = $1`, orgID).Scan(&openIncidents, &closedIncidents)
+		FROM incidents WHERE organization_id = $1 AND deleted_at IS NULL`, orgID).Scan(&openIncidents, &closedIncidents)
 	incidentSummary["open"] = openIncidents
 	incidentSummary["closed"] = closedIncidents
 	pack.IncidentSummary = incidentSummary
@@ -600,13 +607,20 @@ func (s *BoardService) GenerateBoardPack(ctx context.Context, orgID, meetingID s
 	if regRows != nil {
 		for regRows.Next() {
 			var title, desc, effectiveDate, impactLevel string
-			regRows.Scan(&title, &desc, &effectiveDate, &impactLevel)
+			if err := regRows.Scan(&title, &desc, &effectiveDate, &impactLevel); err != nil {
+				regRows.Close()
+				return nil, fmt.Errorf("scan board-pack regulatory update: %w", err)
+			}
 			pack.RegulatoryUpdates = append(pack.RegulatoryUpdates, map[string]interface{}{
 				"title":          title,
 				"description":    desc,
 				"effective_date": effectiveDate,
 				"impact_level":   impactLevel,
 			})
+		}
+		if err := regRows.Err(); err != nil {
+			regRows.Close()
+			return nil, fmt.Errorf("iterate board-pack regulatory updates: %w", err)
 		}
 		regRows.Close()
 	}
@@ -683,8 +697,15 @@ func (s *BoardService) GetBoardDashboard(ctx context.Context, orgID string) (*Bo
 		for iRows.Next() {
 			var sev string
 			var cnt int
-			iRows.Scan(&sev, &cnt)
+			if err := iRows.Scan(&sev, &cnt); err != nil {
+				iRows.Close()
+				return nil, fmt.Errorf("scan board incident aggregate: %w", err)
+			}
 			dash.IncidentSummary[sev] = cnt
+		}
+		if err := iRows.Err(); err != nil {
+			iRows.Close()
+			return nil, fmt.Errorf("iterate board incident aggregates: %w", err)
 		}
 		iRows.Close()
 	}
@@ -707,10 +728,17 @@ func (s *BoardService) GetBoardDashboard(ctx context.Context, orgID string) (*Bo
 	if regRows != nil {
 		for regRows.Next() {
 			var title, effectiveDate, impactLevel string
-			regRows.Scan(&title, &effectiveDate, &impactLevel)
+			if err := regRows.Scan(&title, &effectiveDate, &impactLevel); err != nil {
+				regRows.Close()
+				return nil, fmt.Errorf("scan regulatory horizon entry: %w", err)
+			}
 			dash.RegulatoryHorizon = append(dash.RegulatoryHorizon, map[string]interface{}{
 				"title": title, "effective_date": effectiveDate, "impact_level": impactLevel,
 			})
+		}
+		if err := regRows.Err(); err != nil {
+			regRows.Close()
+			return nil, fmt.Errorf("iterate regulatory horizon: %w", err)
 		}
 		regRows.Close()
 	}
@@ -774,10 +802,17 @@ func (s *BoardService) GenerateNIS2GovernanceReport(ctx context.Context, orgID s
 	if rmRows != nil {
 		for rmRows.Next() {
 			var title, ref, status, createdAt string
-			rmRows.Scan(&title, &ref, &status, &createdAt)
+			if err := rmRows.Scan(&title, &ref, &status, &createdAt); err != nil {
+				rmRows.Close()
+				return nil, fmt.Errorf("scan NIS2 risk measure: %w", err)
+			}
 			report.RiskMeasures = append(report.RiskMeasures, map[string]interface{}{
 				"title": title, "decision_ref": ref, "status": status, "date": createdAt,
 			})
+		}
+		if err := rmRows.Err(); err != nil {
+			rmRows.Close()
+			return nil, fmt.Errorf("iterate NIS2 risk measures: %w", err)
 		}
 		rmRows.Close()
 	}
@@ -803,11 +838,18 @@ func (s *BoardService) GenerateNIS2GovernanceReport(ctx context.Context, orgID s
 		for ovRows.Next() {
 			var ref, title, date, status string
 			var decCount int
-			ovRows.Scan(&ref, &title, &date, &status, &decCount)
+			if err := ovRows.Scan(&ref, &title, &date, &status, &decCount); err != nil {
+				ovRows.Close()
+				return nil, fmt.Errorf("scan NIS2 board-oversight entry: %w", err)
+			}
 			report.BoardOversight = append(report.BoardOversight, map[string]interface{}{
 				"meeting_ref": ref, "title": title, "date": date,
 				"status": status, "decisions_count": decCount,
 			})
+		}
+		if err := ovRows.Err(); err != nil {
+			ovRows.Close()
+			return nil, fmt.Errorf("iterate NIS2 board-oversight entries: %w", err)
 		}
 		ovRows.Close()
 	}

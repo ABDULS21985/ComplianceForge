@@ -110,6 +110,40 @@ func TestValidateCanonicalizesCORSOriginTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestValidateObservabilityRequiresSeparateBoundedListener(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*ObservabilityConfig)
+	}{
+		{name: "public port reuse", mutate: func(c *ObservabilityConfig) { c.MetricsAddress = "0.0.0.0:8080" }},
+		{name: "invalid address", mutate: func(c *ObservabilityConfig) { c.MetricsAddress = "all-interfaces" }},
+		{name: "invalid sample ratio", mutate: func(c *ObservabilityConfig) { c.TraceSampleRatio = 1.1 }},
+		{name: "missing trace endpoint", mutate: func(c *ObservabilityConfig) { c.TracingEnabled = true; c.OTLPTraceEndpoint = "" }},
+		{name: "credentialed trace endpoint", mutate: func(c *ObservabilityConfig) {
+			c.TracingEnabled = true
+			c.OTLPTraceEndpoint = "https://user:secret@collector.example.com/v1/traces"
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			test.mutate(&cfg.Observability)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("Validate() accepted unsafe observability configuration")
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsOTLPTraceEndpoint(t *testing.T) {
+	cfg := validConfig()
+	cfg.Observability.TracingEnabled = true
+	cfg.Observability.OTLPTraceEndpoint = "http://otel-collector:4318/v1/traces"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestValidateRejectsUnsafeSMTPConfiguration(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -174,7 +208,15 @@ func validConfig() *Config {
 			TimeoutSeconds: 15,
 		},
 		Storage: StorageConfig{Type: "local", Path: "./storage"},
-		CORS:    CORSConfig{AllowedOrigins: []string{"http://localhost:3000"}},
+		Observability: ObservabilityConfig{
+			MetricsEnabled:         true,
+			MetricsAddress:         "127.0.0.1:9091",
+			MetricsTokenFile:       "/run/secrets/metrics_token",
+			TraceSampleRatio:       0.1,
+			ServiceVersion:         "test",
+			ShutdownTimeoutSeconds: 10,
+		},
+		CORS: CORSConfig{AllowedOrigins: []string{"http://localhost:3000"}},
 		RateLimit: RateLimitConfig{
 			RPS: 100,
 		},

@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -81,11 +80,7 @@ func (h *ReportHandler) DownloadReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", file.ContentType)
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+file.FileName+"\"")
-	w.Header().Set("Content-Length", strconv.Itoa(len(file.Data)))
-	w.WriteHeader(http.StatusOK)
-	w.Write(file.Data)
+	writeAttachment(w, file.FileName, file.ContentType, file.Data)
 }
 
 // ListDefinitions handles GET /reports/definitions.

@@ -78,7 +78,9 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	riskHandler := dependencies.Risks
 	policyHandler := dependencies.Policies
 	auditHandler := dependencies.Audits
-	incidentHandler := dependencies.Domains.Incident
+	permissionHandler := dependencies.Permissions
+	incidentHandler := dependencies.Incidents
+	assetHandler := dependencies.Assets
 	vendorHandler := dependencies.Domains.Vendor
 	dashboardHandler := dependencies.Domains.Dashboard
 	reportHandler := dependencies.Domains.Report
@@ -193,6 +195,27 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/{id}", policyHandler.GetByID)
 			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/{id}/versions", policyHandler.ListVersions)
 			r.With(middleware.RequireAPIKeyPermission("read", "policies")).Get("/{id}/reviews", policyHandler.ListReviews)
+		})
+		r.Route("/audits", func(r chi.Router) {
+			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/", auditHandler.List)
+			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/{id}", auditHandler.GetByID)
+			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/{id}/findings", auditHandler.ListFindings)
+			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/{id}/findings/stats", auditHandler.FindingStats)
+			r.With(middleware.RequireAPIKeyPermission("read", "audits")).Get("/{id}/findings/{findingID}", auditHandler.GetFinding)
+		})
+		r.Route("/incidents", func(r chi.Router) {
+			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/", incidentHandler.List)
+			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/statistics", incidentHandler.Statistics)
+			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/breaches/upcoming", incidentHandler.GetBreachNotifiable)
+			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/{id}", incidentHandler.GetByID)
+			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/{id}/timeline", incidentHandler.ListEvents)
+			r.With(middleware.RequireAPIKeyPermission("read", "incidents")).Get("/{id}/assignments", incidentHandler.ListAssignments)
+		})
+		r.Route("/assets", func(r chi.Router) {
+			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/", assetHandler.List)
+			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/stats", assetHandler.Stats)
+			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/{id}", assetHandler.GetByID)
+			r.With(middleware.RequireAPIKeyPermission("read", "assets")).Get("/{id}/events", assetHandler.ListEvents)
 		})
 	})
 
@@ -311,16 +334,40 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Incidents
 		r.Route("/incidents", func(r chi.Router) {
-			if incidentHandler != nil {
-				r.Post("/", incidentHandler.Create)
-				r.Get("/", incidentHandler.List)
-				r.Get("/breach-notifiable", incidentHandler.GetBreachNotifiable)
-				r.Get("/{id}", incidentHandler.GetByID)
-				r.Put("/{id}", incidentHandler.Update)
-				r.Delete("/{id}", incidentHandler.Delete)
-				r.Put("/{id}/status", incidentHandler.UpdateStatus)
-				r.Put("/{id}/escalate", incidentHandler.Escalate)
-			}
+			r.Post("/", incidentHandler.Create)
+			r.Get("/", incidentHandler.List)
+			r.Get("/statistics", incidentHandler.Statistics)
+			r.Get("/breaches/upcoming", incidentHandler.GetBreachNotifiable)
+			// Backward-compatible deadline alias.
+			r.Get("/breach-notifiable", incidentHandler.GetBreachNotifiable)
+			r.Get("/{id}", incidentHandler.GetByID)
+			r.Put("/{id}", incidentHandler.Update)
+			r.Patch("/{id}", incidentHandler.Update)
+			r.Delete("/{id}", incidentHandler.Delete)
+			r.Put("/{id}/status", incidentHandler.UpdateStatus)
+			r.Post("/{id}/transitions", incidentHandler.Transition)
+			r.Post("/{id}/cancel", incidentHandler.Cancel)
+			r.Post("/{id}/reopen", incidentHandler.Reopen)
+			r.Post("/{id}/close", incidentHandler.Close)
+			r.Put("/{id}/escalate", incidentHandler.Escalate)
+			r.Post("/{id}/breach-assessment", incidentHandler.AssessBreach)
+			r.Post("/{id}/notify-dpa", incidentHandler.NotifyDPA)
+			r.Get("/{id}/timeline", incidentHandler.ListEvents)
+			r.Post("/{id}/assignments", incidentHandler.CreateAssignment)
+			r.Get("/{id}/assignments", incidentHandler.ListAssignments)
+			r.Post("/{id}/assignments/{assignmentID}/unassign", incidentHandler.Unassign)
+		})
+
+		// Asset inventory
+		r.Route("/assets", func(r chi.Router) {
+			r.Post("/", assetHandler.Create)
+			r.Get("/", assetHandler.List)
+			r.Get("/stats", assetHandler.Stats)
+			r.Get("/{id}", assetHandler.GetByID)
+			r.Put("/{id}", assetHandler.Update)
+			r.Patch("/{id}", assetHandler.Update)
+			r.Delete("/{id}", assetHandler.Delete)
+			r.Get("/{id}/events", assetHandler.ListEvents)
 		})
 
 		// Vendors
@@ -367,6 +414,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 		r.Route("/notifications", func(r chi.Router) {
 			r.Get("/", notificationHandler.ListNotifications)
 			r.Put("/{id}/read", notificationHandler.MarkAsRead)
+			r.Put("/{id}/acknowledge", notificationHandler.Acknowledge)
 			r.Put("/read-all", notificationHandler.MarkAllAsRead)
 			r.Get("/unread-count", notificationHandler.GetUnreadCount)
 			r.Get("/preferences", notificationHandler.GetPreferences)
@@ -504,6 +552,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Access Policies (ABAC)
 		r.Route("/access", func(r chi.Router) {
+			r.Get("/my-permissions", permissionHandler.GetMyPermissions)
 			if accessHandler != nil {
 				r.Get("/policies", accessHandler.ListPolicies)
 				r.Post("/policies", accessHandler.CreatePolicy)
@@ -513,7 +562,6 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 				r.Delete("/policies/{id}/assignments/{assignmentId}", accessHandler.RemoveAssignment)
 				r.Post("/evaluate", accessHandler.TestEvaluate)
 				r.Get("/audit-log", accessHandler.GetAuditLog)
-				r.Get("/my-permissions", accessHandler.GetMyPermissions)
 				r.Get("/field-permissions", accessHandler.GetFieldPermissions)
 			}
 		})

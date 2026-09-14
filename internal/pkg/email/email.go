@@ -151,7 +151,10 @@ func (s *SMTPEmailService) Send(ctx context.Context, message Message) error {
 	}
 	defer conn.Close()
 
-	deadline := s.now().Add(s.config.Timeout)
+	// The injected clock keeps RFC 5322 Date headers deterministic in tests;
+	// socket deadlines must always use the process clock or a fixed historical
+	// message date would make every network operation expire immediately.
+	deadline := time.Now().Add(s.config.Timeout)
 	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
 		deadline = contextDeadline
 	}
@@ -245,6 +248,15 @@ func (s *SMTPEmailService) tlsConfig() *tls.Config {
 func smtpOperationError(ctx context.Context, operation string, err error) error {
 	if contextErr := ctx.Err(); contextErr != nil {
 		return fmt.Errorf("%s: %w", operation, contextErr)
+	}
+	// A socket deadline derived from the context can fire a few microseconds
+	// before the context timer publishes its own error. Preserve cancellation
+	// semantics for callers instead of leaking an implementation-level timeout.
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		var networkError net.Error
+		if errors.As(err, &networkError) && networkError.Timeout() {
+			return fmt.Errorf("%s: %w", operation, context.DeadlineExceeded)
+		}
 	}
 	return fmt.Errorf("%s: %w", operation, err)
 }

@@ -2,3 +2,4 @@
 # the exact historical finding fingerprint so new matches remain blocking.
 3ead0a92a8bf1f66ff24b0cf9a961f205507830f:internal/config/config_test.go:generic-api-key:130
 ad60a944fd47a49bbdcf4e9acc07f7d9c5eb15c5:internal/config/config_test.go:generic-api-key:68
+1a54d54f1193147033950df57b05e98839a94ab1:internal/service/notification_delivery_test.go:generic-api-key:102

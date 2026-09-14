@@ -50,7 +50,7 @@ for command_name in pg_dump pg_restore psql; do
   command -v "$command_name" >/dev/null 2>&1 || fail "$command_name is required"
 done
 
-export PGCONNECT_TIMEOUT=${PGCONNECT_TIMEOUT:-15}
+export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-15}"
 
 umask 077
 mkdir -p "$backup_dir"
@@ -63,9 +63,18 @@ lock_dir="$backup_dir/.backup.lock"
 lock_acquired=false
 raw_archive=''
 encrypted_tmp=''
+final_file=''
+metadata_file=''
+checksum_file=''
+backup_complete=false
 cleanup() {
   [ -z "$raw_archive" ] || [ ! -f "$raw_archive" ] || rm -f -- "$raw_archive"
   [ -z "$encrypted_tmp" ] || [ ! -f "$encrypted_tmp" ] || rm -f -- "$encrypted_tmp"
+  if [ "$backup_complete" = false ]; then
+    [ -z "$final_file" ] || [ ! -f "$final_file" ] || rm -f -- "$final_file"
+    [ -z "$metadata_file" ] || [ ! -f "$metadata_file" ] || rm -f -- "$metadata_file"
+    [ -z "$checksum_file" ] || [ ! -f "$checksum_file" ] || rm -f -- "$checksum_file"
+  fi
   if [ "$lock_acquired" = true ] && [ -d "$lock_dir" ]; then
     find "$lock_dir" -mindepth 1 -delete
     rmdir "$lock_dir"
@@ -88,6 +97,7 @@ if ! mkdir "$lock_dir" 2>/dev/null; then
 fi
 lock_acquired=true
 backup_started_epoch=$(date +%s)
+backup_started_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 printf '%s\n' "$backup_started_epoch" > "$lock_dir/started_at_epoch"
 printf '%s\n' "$$" > "$lock_dir/pid"
 
@@ -165,15 +175,17 @@ file_size() {
 
 checksum=$(sha256_file "$final_file")
 size_bytes=$(file_size "$final_file")
-created_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-created_at_epoch=$(date +%s)
+completed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 metadata_file="${final_file}.metadata"
 checksum_file="${final_file}.sha256"
 
 {
   printf 'FORMAT_VERSION=1\n'
-  printf 'CREATED_AT=%s\n' "$created_at"
-  printf 'CREATED_AT_EPOCH=%s\n' "$created_at_epoch"
+  # RPO is measured from the conservative start of the logical snapshot, not
+  # dump completion, so a long-running backup cannot make its data look newer.
+  printf 'CREATED_AT=%s\n' "$backup_started_at"
+  printf 'CREATED_AT_EPOCH=%s\n' "$backup_started_epoch"
+  printf 'COMPLETED_AT=%s\n' "$completed_at"
   printf 'SCHEMA_VERSION=%s\n' "$schema_version"
   printf 'ENCRYPTION=%s\n' "$encryption_mode"
   printf 'SIZE_BYTES=%s\n' "$size_bytes"
@@ -196,5 +208,6 @@ while IFS= read -r expired_file; do
   log "expired local backup artifact: $(basename -- "$expired_file")"
 done
 
+backup_complete=true
 log "backup complete: $(basename -- "$final_file") (${size_bytes} bytes, sha256 ${checksum})"
 printf '%s\n' "$final_file"

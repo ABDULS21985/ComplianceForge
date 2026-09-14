@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -75,5 +76,20 @@ func TestResolveMigrationSourceUsesEnvironment(t *testing.T) {
 	t.Setenv("MIGRATIONS_PATH", dir)
 	if _, err := resolveMigrationSource(""); err != nil {
 		t.Fatalf("resolveMigrationSource() error = %v", err)
+	}
+}
+
+func TestResolveMigrationSourceCanonicalizesSymlink(t *testing.T) {
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "migrations")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	source, err := resolveMigrationSource(link)
+	if err != nil {
+		t.Fatalf("resolveMigrationSource() error = %v", err)
+	}
+	if strings.Contains(source, filepath.ToSlash(link)) || !strings.Contains(source, filepath.ToSlash(target)) {
+		t.Fatalf("resolveMigrationSource() = %q, want canonical target %q", source, target)
 	}
 }

@@ -81,26 +81,34 @@ func (as *AnalyticsScheduler) takeOrgSnapshot(ctx context.Context, orgID, snapsh
 
 	// Compliance
 	var compScore float64
-	as.pool.QueryRow(ctx, `SELECT COALESCE(AVG(compliance_score), 0) FROM organization_frameworks WHERE organization_id = $1`, orgID).Scan(&compScore)
+	if err := as.pool.QueryRow(ctx, `SELECT COALESCE(AVG(compliance_score), 0) FROM organization_frameworks WHERE organization_id = $1`, orgID).Scan(&compScore); err != nil {
+		return fmt.Errorf("collect compliance score: %w", err)
+	}
 	metrics["compliance_score"] = compScore
 
 	// Risks
 	var totalRisks, critical, high int
-	as.pool.QueryRow(ctx, `
+	if err := as.pool.QueryRow(ctx, `
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE residual_risk_level='critical'), COUNT(*) FILTER (WHERE residual_risk_level='high')
 		FROM risks WHERE organization_id=$1 AND deleted_at IS NULL AND status!='closed'
-	`, orgID).Scan(&totalRisks, &critical, &high)
+	`, orgID).Scan(&totalRisks, &critical, &high); err != nil {
+		return fmt.Errorf("collect risk counts: %w", err)
+	}
 	metrics["risks_total"] = totalRisks
 	metrics["risks_critical"] = critical
 
 	// Incidents
 	var openIncidents int
-	as.pool.QueryRow(ctx, `SELECT COUNT(*) FROM incidents WHERE organization_id=$1 AND deleted_at IS NULL AND status NOT IN ('closed','resolved')`, orgID).Scan(&openIncidents)
+	if err := as.pool.QueryRow(ctx, `SELECT COUNT(*) FROM incidents WHERE organization_id=$1 AND deleted_at IS NULL AND status NOT IN ('closed','resolved','cancelled')`, orgID).Scan(&openIncidents); err != nil {
+		return fmt.Errorf("collect incident count: %w", err)
+	}
 	metrics["incidents_open"] = openIncidents
 
 	// Findings
 	var openFindings int
-	as.pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_findings WHERE organization_id=$1 AND deleted_at IS NULL AND status NOT IN ('resolved','closed')`, orgID).Scan(&openFindings)
+	if err := as.pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_findings WHERE organization_id=$1 AND deleted_at IS NULL AND status NOT IN ('resolved','closed')`, orgID).Scan(&openFindings); err != nil {
+		return fmt.Errorf("collect finding count: %w", err)
+	}
 	metrics["findings_open"] = openFindings
 
 	// Insert/upsert

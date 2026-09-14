@@ -208,7 +208,8 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 		body := `{"name":"Critical risk","event_type":"risk.escalated","severity_filter":["critical"],` +
 			`"conditions":{"requires_review":true},"channel_ids":["` + channelID + `"],` +
 			`"recipient_type":"user","recipient_ids":["` + userA + `"],` +
-			`"template_id":"` + templateID + `","is_active":true,"cooldown_minutes":60}`
+			`"template_id":"` + templateID + `","is_active":true,"cooldown_minutes":60,` +
+			`"escalation_after_minutes":15,"escalation_channel_ids":["` + channelID + `"]}`
 		req, response := request(tenantCtx, http.MethodPost, "/settings/notification-rules", body)
 		handler.CreateRule(response, req)
 		if response.Code != http.StatusCreated {
@@ -222,7 +223,8 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 
 		req, response = request(tenantCtx, http.MethodGet, "/settings/notification-rules", "")
 		handler.ListRules(response, req)
-		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), channelID) {
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), channelID) ||
+			!strings.Contains(response.Body.String(), `"escalation_after_minutes":15`) {
 			t.Fatalf("ListRules status=%d body=%s", response.Code, response.Body.String())
 		}
 
@@ -271,8 +273,8 @@ func TestNotificationHandlerAgainstMigratedPostgres(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO notifications
 		(id,organization_id,event_id,event_type,event_payload,recipient_user_id,channel_type,
 		 subject,body,body_text,status,delivery_key,scheduled_for)
-		VALUES ($1,$2,$4,'system.test','{}',$3,'in_app','Test','Body','Body','delivered',
-		        encode(digest($1::text,'sha256'),'hex'),NOW())`,
+		VALUES ($1::uuid,$2,$4,'system.test','{}',$3,'in_app','Test','Body','Body','delivered',
+		        encode(digest(($1::uuid)::text,'sha256'),'hex'),NOW())`,
 		notificationID, orgA, userA, eventID); err != nil {
 		t.Fatal(err)
 	}

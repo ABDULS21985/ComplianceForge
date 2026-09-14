@@ -4,8 +4,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/mail"
 	"net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -97,6 +100,20 @@ type LogConfig struct {
 	Format string `mapstructure:"format"`
 }
 
+// ObservabilityConfig controls the internal Prometheus endpoint and OTLP
+// trace exporter. Metrics use a dedicated listener and are never registered
+// on the public API router.
+type ObservabilityConfig struct {
+	MetricsEnabled         bool    `mapstructure:"metrics_enabled"`
+	MetricsAddress         string  `mapstructure:"metrics_address"`
+	MetricsTokenFile       string  `mapstructure:"metrics_token_file"`
+	TracingEnabled         bool    `mapstructure:"tracing_enabled"`
+	OTLPTraceEndpoint      string  `mapstructure:"otlp_trace_endpoint"`
+	TraceSampleRatio       float64 `mapstructure:"trace_sample_ratio"`
+	ServiceVersion         string  `mapstructure:"service_version"`
+	ShutdownTimeoutSeconds int     `mapstructure:"shutdown_timeout_seconds"`
+}
+
 // CORSConfig holds CORS settings.
 type CORSConfig struct {
 	AllowedOrigins []string `mapstructure:"allowed_origins"`
@@ -109,18 +126,19 @@ type RateLimitConfig struct {
 
 // Config is the root configuration struct for ComplianceForge.
 type Config struct {
-	App        AppConfig        `mapstructure:"app"`
-	Database   DatabaseConfig   `mapstructure:"database"`
-	Redis      RedisConfig      `mapstructure:"redis"`
-	RabbitMQ   RabbitMQConfig   `mapstructure:"rabbitmq"`
-	JWT        JWTConfig        `mapstructure:"jwt"`
-	Encryption EncryptionConfig `mapstructure:"encryption"`
-	OAuth      OAuthConfig      `mapstructure:"oauth"`
-	SMTP       SMTPConfig       `mapstructure:"smtp"`
-	Storage    StorageConfig    `mapstructure:"storage"`
-	Log        LogConfig        `mapstructure:"log"`
-	CORS       CORSConfig       `mapstructure:"cors"`
-	RateLimit  RateLimitConfig  `mapstructure:"rate_limit"`
+	App           AppConfig           `mapstructure:"app"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	Redis         RedisConfig         `mapstructure:"redis"`
+	RabbitMQ      RabbitMQConfig      `mapstructure:"rabbitmq"`
+	JWT           JWTConfig           `mapstructure:"jwt"`
+	Encryption    EncryptionConfig    `mapstructure:"encryption"`
+	OAuth         OAuthConfig         `mapstructure:"oauth"`
+	SMTP          SMTPConfig          `mapstructure:"smtp"`
+	Storage       StorageConfig       `mapstructure:"storage"`
+	Log           LogConfig           `mapstructure:"log"`
+	Observability ObservabilityConfig `mapstructure:"observability"`
+	CORS          CORSConfig          `mapstructure:"cors"`
+	RateLimit     RateLimitConfig     `mapstructure:"rate_limit"`
 }
 
 // DatabaseDSN returns the PostgreSQL connection string derived from the database config.
@@ -211,6 +229,14 @@ func Load() (*Config, error) {
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
+	v.SetDefault("observability.metrics_enabled", true)
+	v.SetDefault("observability.metrics_address", "127.0.0.1:9091")
+	v.SetDefault("observability.metrics_token_file", "")
+	v.SetDefault("observability.tracing_enabled", false)
+	v.SetDefault("observability.otlp_trace_endpoint", "")
+	v.SetDefault("observability.trace_sample_ratio", 0.1)
+	v.SetDefault("observability.service_version", "development")
+	v.SetDefault("observability.shutdown_timeout_seconds", 10)
 
 	v.SetDefault("cors.allowed_origins", []string{"http://localhost:3000"})
 
@@ -240,52 +266,60 @@ func Load() (*Config, error) {
 // aliases and should not be introduced into new deployments.
 func bindEnvironment(v *viper.Viper) error {
 	bindings := map[string][]string{
-		"app.name":                    {"APP_NAME", "CF_APP_NAME"},
-		"app.env":                     {"APP_ENV", "CF_APP_ENV"},
-		"app.port":                    {"APP_PORT", "PORT", "CF_APP_PORT"},
-		"app.grpc_port":               {"APP_GRPC_PORT", "CF_APP_GRPC_PORT"},
-		"app.trust_proxy_headers":     {"API_TRUST_PROXY_HEADERS", "CF_API_TRUST_PROXY_HEADERS"},
-		"database.url":                {"DATABASE_URL", "CF_DATABASE_URL"},
-		"database.host":               {"DB_HOST", "CF_DATABASE_HOST"},
-		"database.port":               {"DB_PORT", "CF_DATABASE_PORT"},
-		"database.user":               {"DB_USER", "CF_DATABASE_USER"},
-		"database.password":           {"DB_PASSWORD", "CF_DATABASE_PASSWORD"},
-		"database.dbname":             {"DB_NAME", "CF_DATABASE_DBNAME"},
-		"database.sslmode":            {"DB_SSL_MODE", "CF_DATABASE_SSLMODE"},
-		"database.max_conns":          {"DB_MAX_CONNS", "CF_DATABASE_MAX_CONNS"},
-		"database.min_conns":          {"DB_MIN_CONNS", "CF_DATABASE_MIN_CONNS"},
-		"redis.url":                   {"REDIS_URL", "CF_REDIS_URL"},
-		"redis.host":                  {"REDIS_HOST", "CF_REDIS_HOST"},
-		"redis.port":                  {"REDIS_PORT", "CF_REDIS_PORT"},
-		"redis.password":              {"REDIS_PASSWORD", "CF_REDIS_PASSWORD"},
-		"redis.db":                    {"REDIS_DB", "CF_REDIS_DB"},
-		"rabbitmq.url":                {"RABBITMQ_URL", "CF_RABBITMQ_URL"},
-		"jwt.secret":                  {"JWT_SECRET", "CF_JWT_SECRET"},
-		"jwt.issuer":                  {"JWT_ISSUER", "CF_JWT_ISSUER"},
-		"jwt.expiry_hours":            {"JWT_EXPIRY_HOURS", "CF_JWT_EXPIRY_HOURS"},
-		"encryption.dsr_key":          {"DSR_ENCRYPTION_KEY", "CF_DSR_ENCRYPTION_KEY"},
-		"encryption.integration_key":  {"INTEGRATION_ENCRYPTION_KEY", "CF_INTEGRATION_ENCRYPTION_KEY"},
-		"encryption.notification_key": {"NOTIFICATION_ENCRYPTION_KEY", "CF_NOTIFICATION_ENCRYPTION_KEY"},
-		"oauth.client_id":             {"OAUTH_CLIENT_ID", "CF_OAUTH_CLIENT_ID"},
-		"oauth.client_secret":         {"OAUTH_CLIENT_SECRET", "CF_OAUTH_CLIENT_SECRET"},
-		"oauth.redirect_url":          {"OAUTH_REDIRECT_URL", "CF_OAUTH_REDIRECT_URL"},
-		"smtp.host":                   {"SMTP_HOST", "CF_SMTP_HOST"},
-		"smtp.port":                   {"SMTP_PORT", "CF_SMTP_PORT"},
-		"smtp.user":                   {"SMTP_USER", "CF_SMTP_USER"},
-		"smtp.password":               {"SMTP_PASSWORD", "CF_SMTP_PASSWORD"},
-		"smtp.from":                   {"SMTP_FROM", "CF_SMTP_FROM"},
-		"smtp.tls_mode":               {"SMTP_TLS_MODE", "CF_SMTP_TLS_MODE"},
-		"smtp.timeout_seconds":        {"SMTP_TIMEOUT_SECONDS", "CF_SMTP_TIMEOUT_SECONDS"},
-		"smtp.hello_name":             {"SMTP_HELLO_NAME", "CF_SMTP_HELLO_NAME"},
-		"smtp.server_name":            {"SMTP_SERVER_NAME", "CF_SMTP_SERVER_NAME"},
-		"storage.type":                {"STORAGE_TYPE", "CF_STORAGE_TYPE"},
-		"storage.path":                {"STORAGE_PATH", "CF_STORAGE_PATH"},
-		"storage.s3_bucket":           {"S3_BUCKET", "CF_STORAGE_S3_BUCKET"},
-		"storage.s3_region":           {"S3_REGION", "CF_STORAGE_S3_REGION"},
-		"log.level":                   {"LOG_LEVEL", "CF_LOG_LEVEL"},
-		"log.format":                  {"LOG_FORMAT", "CF_LOG_FORMAT"},
-		"cors.allowed_origins":        {"CORS_ALLOWED_ORIGINS", "CF_CORS_ALLOWED_ORIGINS"},
-		"rate_limit.rps":              {"RATE_LIMIT_RPS", "CF_RATE_LIMIT_RPS"},
+		"app.name":                               {"APP_NAME", "CF_APP_NAME"},
+		"app.env":                                {"APP_ENV", "CF_APP_ENV"},
+		"app.port":                               {"APP_PORT", "PORT", "CF_APP_PORT"},
+		"app.grpc_port":                          {"APP_GRPC_PORT", "CF_APP_GRPC_PORT"},
+		"app.trust_proxy_headers":                {"API_TRUST_PROXY_HEADERS", "CF_API_TRUST_PROXY_HEADERS"},
+		"database.url":                           {"DATABASE_URL", "CF_DATABASE_URL"},
+		"database.host":                          {"DB_HOST", "CF_DATABASE_HOST"},
+		"database.port":                          {"DB_PORT", "CF_DATABASE_PORT"},
+		"database.user":                          {"DB_USER", "CF_DATABASE_USER"},
+		"database.password":                      {"DB_PASSWORD", "CF_DATABASE_PASSWORD"},
+		"database.dbname":                        {"DB_NAME", "CF_DATABASE_DBNAME"},
+		"database.sslmode":                       {"DB_SSL_MODE", "CF_DATABASE_SSLMODE"},
+		"database.max_conns":                     {"DB_MAX_CONNS", "CF_DATABASE_MAX_CONNS"},
+		"database.min_conns":                     {"DB_MIN_CONNS", "CF_DATABASE_MIN_CONNS"},
+		"redis.url":                              {"REDIS_URL", "CF_REDIS_URL"},
+		"redis.host":                             {"REDIS_HOST", "CF_REDIS_HOST"},
+		"redis.port":                             {"REDIS_PORT", "CF_REDIS_PORT"},
+		"redis.password":                         {"REDIS_PASSWORD", "CF_REDIS_PASSWORD"},
+		"redis.db":                               {"REDIS_DB", "CF_REDIS_DB"},
+		"rabbitmq.url":                           {"RABBITMQ_URL", "CF_RABBITMQ_URL"},
+		"jwt.secret":                             {"JWT_SECRET", "CF_JWT_SECRET"},
+		"jwt.issuer":                             {"JWT_ISSUER", "CF_JWT_ISSUER"},
+		"jwt.expiry_hours":                       {"JWT_EXPIRY_HOURS", "CF_JWT_EXPIRY_HOURS"},
+		"encryption.dsr_key":                     {"DSR_ENCRYPTION_KEY", "CF_DSR_ENCRYPTION_KEY"},
+		"encryption.integration_key":             {"INTEGRATION_ENCRYPTION_KEY", "CF_INTEGRATION_ENCRYPTION_KEY"},
+		"encryption.notification_key":            {"NOTIFICATION_ENCRYPTION_KEY", "CF_NOTIFICATION_ENCRYPTION_KEY"},
+		"oauth.client_id":                        {"OAUTH_CLIENT_ID", "CF_OAUTH_CLIENT_ID"},
+		"oauth.client_secret":                    {"OAUTH_CLIENT_SECRET", "CF_OAUTH_CLIENT_SECRET"},
+		"oauth.redirect_url":                     {"OAUTH_REDIRECT_URL", "CF_OAUTH_REDIRECT_URL"},
+		"smtp.host":                              {"SMTP_HOST", "CF_SMTP_HOST"},
+		"smtp.port":                              {"SMTP_PORT", "CF_SMTP_PORT"},
+		"smtp.user":                              {"SMTP_USER", "CF_SMTP_USER"},
+		"smtp.password":                          {"SMTP_PASSWORD", "CF_SMTP_PASSWORD"},
+		"smtp.from":                              {"SMTP_FROM", "CF_SMTP_FROM"},
+		"smtp.tls_mode":                          {"SMTP_TLS_MODE", "CF_SMTP_TLS_MODE"},
+		"smtp.timeout_seconds":                   {"SMTP_TIMEOUT_SECONDS", "CF_SMTP_TIMEOUT_SECONDS"},
+		"smtp.hello_name":                        {"SMTP_HELLO_NAME", "CF_SMTP_HELLO_NAME"},
+		"smtp.server_name":                       {"SMTP_SERVER_NAME", "CF_SMTP_SERVER_NAME"},
+		"storage.type":                           {"STORAGE_TYPE", "CF_STORAGE_TYPE"},
+		"storage.path":                           {"STORAGE_PATH", "CF_STORAGE_PATH"},
+		"storage.s3_bucket":                      {"S3_BUCKET", "CF_STORAGE_S3_BUCKET"},
+		"storage.s3_region":                      {"S3_REGION", "CF_STORAGE_S3_REGION"},
+		"log.level":                              {"LOG_LEVEL", "CF_LOG_LEVEL"},
+		"log.format":                             {"LOG_FORMAT", "CF_LOG_FORMAT"},
+		"observability.metrics_enabled":          {"OBSERVABILITY_METRICS_ENABLED"},
+		"observability.metrics_address":          {"OBSERVABILITY_METRICS_ADDRESS"},
+		"observability.metrics_token_file":       {"OBSERVABILITY_METRICS_TOKEN_FILE"},
+		"observability.tracing_enabled":          {"OBSERVABILITY_TRACING_ENABLED"},
+		"observability.otlp_trace_endpoint":      {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"},
+		"observability.trace_sample_ratio":       {"OBSERVABILITY_TRACE_SAMPLE_RATIO"},
+		"observability.service_version":          {"SERVICE_VERSION"},
+		"observability.shutdown_timeout_seconds": {"OBSERVABILITY_SHUTDOWN_TIMEOUT_SECONDS"},
+		"cors.allowed_origins":                   {"CORS_ALLOWED_ORIGINS", "CF_CORS_ALLOWED_ORIGINS"},
+		"rate_limit.rps":                         {"RATE_LIMIT_RPS", "CF_RATE_LIMIT_RPS"},
 	}
 
 	for key, names := range bindings {
@@ -363,6 +397,9 @@ func (c *Config) Validate() error {
 	}
 	if c.RateLimit.RPS < 1 {
 		return fmt.Errorf("RATE_LIMIT_RPS must be greater than zero")
+	}
+	if err := validateObservabilityConfig(&c.Observability, c.App.Port); err != nil {
+		return err
 	}
 	if err := validateSMTPConfig(&c.SMTP, c.App.Env == "staging" || c.App.Env == "production"); err != nil {
 		return err
@@ -453,6 +490,45 @@ func (c *Config) Validate() error {
 	}
 
 	return validateEncryptionKeys(c.Encryption, false)
+}
+
+func validateObservabilityConfig(cfg *ObservabilityConfig, publicPort int) error {
+	cfg.MetricsAddress = strings.TrimSpace(cfg.MetricsAddress)
+	cfg.MetricsTokenFile = strings.TrimSpace(cfg.MetricsTokenFile)
+	cfg.OTLPTraceEndpoint = strings.TrimSpace(cfg.OTLPTraceEndpoint)
+	cfg.ServiceVersion = strings.TrimSpace(cfg.ServiceVersion)
+	if cfg.ServiceVersion == "" || len(cfg.ServiceVersion) > 128 {
+		return fmt.Errorf("SERVICE_VERSION is required and must not exceed 128 bytes")
+	}
+	if cfg.ShutdownTimeoutSeconds < 1 || cfg.ShutdownTimeoutSeconds > 60 {
+		return fmt.Errorf("OBSERVABILITY_SHUTDOWN_TIMEOUT_SECONDS must be between 1 and 60")
+	}
+	if cfg.TraceSampleRatio < 0 || cfg.TraceSampleRatio > 1 {
+		return fmt.Errorf("OBSERVABILITY_TRACE_SAMPLE_RATIO must be between 0 and 1")
+	}
+	if cfg.MetricsEnabled {
+		_, portText, err := net.SplitHostPort(cfg.MetricsAddress)
+		if err != nil {
+			return fmt.Errorf("OBSERVABILITY_METRICS_ADDRESS must be a host:port address: %w", err)
+		}
+		port, err := strconv.Atoi(portText)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("OBSERVABILITY_METRICS_ADDRESS must use a port between 1 and 65535")
+		}
+		if port == publicPort {
+			return fmt.Errorf("observability metrics must use a listener separate from APP_PORT")
+		}
+		if cfg.MetricsTokenFile != "" && !filepath.IsAbs(cfg.MetricsTokenFile) {
+			return fmt.Errorf("OBSERVABILITY_METRICS_TOKEN_FILE must be an absolute path")
+		}
+	}
+	if cfg.TracingEnabled {
+		endpoint, err := url.Parse(cfg.OTLPTraceEndpoint)
+		if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+			return fmt.Errorf("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT must be an HTTP(S) URL without credentials, query, or fragment when tracing is enabled")
+		}
+	}
+	return nil
 }
 
 func validateEncryptionKeys(keys EncryptionConfig, required bool) error {

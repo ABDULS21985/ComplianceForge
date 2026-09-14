@@ -85,15 +85,23 @@ func (s *LocalStorageService) Upload(ctx context.Context, filename string, data 
 		return "", err
 	}
 
-	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	root, err := os.OpenRoot(s.basePath)
+	if err != nil {
+		return "", fmt.Errorf("open storage root: %w", err)
+	}
+	defer root.Close()
+
+	if err := root.MkdirAll(filepath.Dir(relativePath), 0o750); err != nil {
 		return "", fmt.Errorf("create storage directory: %w", err)
 	}
 	if err := s.rejectSymlinks(relativePath, true); err != nil {
 		return "", err
 	}
 
-	temporary, err := os.CreateTemp(dir, ".upload-*")
+	// The temporary object is created directly under the canonical root. Root's
+	// rename operation then proves both names remain contained even if a parent
+	// path is changed concurrently.
+	temporary, err := os.CreateTemp(s.basePath, ".upload-*")
 	if err != nil {
 		return "", fmt.Errorf("create temporary storage object: %w", err)
 	}
@@ -124,7 +132,7 @@ func (s *LocalStorageService) Upload(ctx context.Context, filename string, data 
 	if err := s.rejectSymlinks(relativePath, false); err != nil {
 		return "", err
 	}
-	if err := os.Rename(temporaryPath, fullPath); err != nil {
+	if err := root.Rename(filepath.Base(temporaryPath), relativePath); err != nil {
 		return "", fmt.Errorf("commit storage object: %w", err)
 	}
 	keepTemporary = true
@@ -138,7 +146,7 @@ func (s *LocalStorageService) Download(ctx context.Context, path string) (io.Rea
 		return nil, err
 	}
 
-	fullPath, relativePath, err := s.resolve(path)
+	_, relativePath, err := s.resolve(path)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +154,20 @@ func (s *LocalStorageService) Download(ctx context.Context, path string) (io.Rea
 		return nil, err
 	}
 
-	file, err := os.Open(fullPath)
+	// os.Root makes the containment check part of the open operation, closing
+	// the TOCTOU escape possible with a string-only path validation.
+	root, err := os.OpenRoot(s.basePath)
 	if err != nil {
+		return nil, fmt.Errorf("open storage root: %w", err)
+	}
+	file, err := root.Open(relativePath)
+	if err != nil {
+		_ = root.Close()
 		return nil, fmt.Errorf("open storage object: %w", err)
+	}
+	if err := root.Close(); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("close storage root: %w", err)
 	}
 	info, err := file.Stat()
 	if err != nil {
@@ -170,7 +189,7 @@ func (s *LocalStorageService) Delete(ctx context.Context, path string) error {
 		return err
 	}
 
-	fullPath, relativePath, err := s.resolve(path)
+	_, relativePath, err := s.resolve(path)
 	if err != nil {
 		return err
 	}
@@ -178,14 +197,20 @@ func (s *LocalStorageService) Delete(ctx context.Context, path string) error {
 		return err
 	}
 
-	info, err := os.Lstat(fullPath)
+	root, err := os.OpenRoot(s.basePath)
+	if err != nil {
+		return fmt.Errorf("open storage root: %w", err)
+	}
+	defer root.Close()
+
+	info, err := root.Lstat(relativePath)
 	if err != nil {
 		return fmt.Errorf("inspect storage object: %w", err)
 	}
 	if info.IsDir() {
 		return ErrNotRegularFile
 	}
-	if err := os.Remove(fullPath); err != nil {
+	if err := root.Remove(relativePath); err != nil {
 		return fmt.Errorf("delete storage object: %w", err)
 	}
 	return nil

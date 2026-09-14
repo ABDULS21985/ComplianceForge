@@ -172,7 +172,7 @@ func (o *PostgresOutbox) Enqueue(ctx context.Context, executor database.Querier,
 	if err := validateBrokerName(queueName, 240); err != nil {
 		return fmt.Errorf("invalid outbox queue name: %w", err)
 	}
-	envelope = envelope.normalized()
+	envelope = InjectTraceContext(ctx, envelope.normalized())
 	if err := envelope.Validate(); err != nil {
 		return fmt.Errorf("validate outbox envelope: %w", err)
 	}

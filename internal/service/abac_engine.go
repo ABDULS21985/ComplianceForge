@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -362,7 +363,7 @@ func (e *ABACEngine) MaskFields(data map[string]interface{}, permissions []Field
 			if _, exists := result[fp.FieldName]; exists {
 				result[fp.FieldName] = applyMask(result[fp.FieldName], fp.MaskPattern)
 			}
-		// "visible" — no action needed.
+			// "visible" — no action needed.
 		}
 	}
 	return result
@@ -702,11 +703,16 @@ func toFloat(v interface{}) float64 {
 	case int64:
 		return float64(n)
 	case json.Number:
-		f, _ := n.Float64()
+		f, err := n.Float64()
+		if err != nil {
+			return 0
+		}
 		return f
 	case string:
-		var f float64
-		fmt.Sscanf(n, "%f", &f)
+		f, err := strconv.ParseFloat(n, 64)
+		if err != nil {
+			return 0
+		}
 		return f
 	}
 	return 0

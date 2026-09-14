@@ -2,682 +2,136 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import {
-  AlertOctagon,
-  AlertTriangle,
-  Plus,
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  ShieldAlert,
-  Clock,
-  Loader2,
-  Bell,
-  Database,
-} from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { AlertOctagon, AlertTriangle, BellRing, ChevronLeft, ChevronRight, Clock3, FilterX, Loader2, LockKeyhole, Plus, Search, ShieldAlert } from 'lucide-react';
 
-import { cn, formatDate, getStatusColor, getRiskLevelColor } from '@/lib/utils';
-import {
-  useIncidents,
-  useIncidentStats,
-  useUrgentBreaches,
-  useCreateIncident,
-  useNotifyDPA,
-} from '@/lib/api-hooks';
-
-import { Button } from '@/components/ui/button';
+import { IncidentEditorDialog } from '@/components/incidents/incident-editor-dialog';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Separator } from '@/components/ui/separator';
+import { useIncidentPermissions } from '@/hooks/use-incident-permissions';
+import { useIncidents, useIncidentStats, useUrgentBreaches } from '@/lib/api-hooks';
+import { formatIncidentError, humanizeIncidentToken, incidentDeadline } from '@/lib/incident';
 import { useQuickCreate } from '@/lib/use-quick-create';
+import { cn, formatDateTime, getRiskLevelColor, getStatusColor } from '@/lib/utils';
+import type { Incident, IncidentSeverity, IncidentStatus } from '@/types/incident';
 
-// ---------------------------------------------------------------------------
-// Validation schema
-// ---------------------------------------------------------------------------
-
-const reportIncidentSchema = z
-  .object({
-    title: z.string().min(1, 'Title is required').max(200),
-    description: z.string().min(1, 'Description is required'),
-    incident_type: z.string().min(1, 'Incident type is required'),
-    severity: z.enum(['critical', 'high', 'medium', 'low'], {
-      required_error: 'Select severity',
-    }),
-    category: z.string().min(1, 'Category is required'),
-    is_data_breach: z.boolean().default(false),
-    data_subjects_affected: z.number().optional(),
-    data_categories: z.array(z.string()).optional(),
-  })
-  .refine(
-    (data) => {
-      if (data.is_data_breach && (!data.data_subjects_affected || data.data_subjects_affected < 1)) {
-        return false;
-      }
-      return true;
-    },
-    {
-      message: 'Number of affected data subjects is required for data breaches',
-      path: ['data_subjects_affected'],
-    }
-  );
-
-type ReportIncidentValues = z.infer<typeof reportIncidentSchema>;
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const DATA_CATEGORIES = [
-  'Names',
-  'Email addresses',
-  'Phone numbers',
-  'Financial data',
-  'Health data',
-  'Biometric data',
-  'Location data',
-  'National ID numbers',
-  'Login credentials',
-  'IP addresses',
-  'Genetic data',
-  'Political opinions',
-  'Religious beliefs',
-  'Trade union membership',
-];
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function hoursRemaining(deadline: string | undefined | null): number | null {
-  if (!deadline) return null;
-  const diff = new Date(deadline).getTime() - Date.now();
-  return Math.max(0, diff / (1000 * 60 * 60));
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+const STATUSES: IncidentStatus[] = ['reported', 'triaged', 'investigating', 'contained', 'resolved', 'closed', 'cancelled'];
+const SEVERITIES: IncidentSeverity[] = ['critical', 'high', 'medium', 'low'];
+const PAGE_SIZES = [10, 20, 50] as const;
 
 export default function IncidentsPage() {
+  const router = useRouter();
+  const access = useIncidentPermissions();
   const [page, setPage] = React.useState(1);
-  const [pageSize] = React.useState(20);
+  const [pageSize, setPageSize] = React.useState<number>(20);
+  const [searchDraft, setSearchDraft] = React.useState('');
   const [search, setSearch] = React.useState('');
-  const [sheetOpen, setSheetOpen] = useQuickCreate('incident');
+  const [category, setCategory] = React.useState('');
+  const [status, setStatus] = React.useState<IncidentStatus | 'all'>('all');
+  const [severity, setSeverity] = React.useState<IncidentSeverity | 'all'>('all');
+  const [breach, setBreach] = React.useState<'all' | 'true' | 'false'>('all');
+  const [sort, setSort] = React.useState<'reported_at' | 'updated_at' | 'severity' | 'notification_deadline'>('reported_at');
+  const [direction, setDirection] = React.useState<'asc' | 'desc'>('desc');
+  const [createOpen, setCreateOpen] = useQuickCreate('incident');
 
-  // Urgent breaches polling
-  const { data: urgentBreachesData } = useUrgentBreaches();
-  const urgentBreaches: Record<string, unknown>[] =
-    (Array.isArray(urgentBreachesData)
-      ? urgentBreachesData
-      : (urgentBreachesData as Record<string, unknown>)?.items) as Record<string, unknown>[] ?? [];
+  const listQuery = useIncidents({
+    page, page_size: pageSize, search: search || undefined, category: category || undefined,
+    status: status === 'all' ? undefined : status,
+    severity: severity === 'all' ? undefined : severity,
+    breach_notifiable: breach === 'all' ? undefined : breach === 'true', sort, direction,
+  }, { enabled: access.canRead });
+  const statsQuery = useIncidentStats({ enabled: access.canRead });
+  const breachesQuery = useUrgentBreaches({ horizon_hours: 168, limit: 20 }, { enabled: access.canRead, retry: 1 });
+  const incidents = listQuery.data?.items ?? [];
+  const totalPages = Math.max(listQuery.data?.total_pages ?? 0, 1);
 
-  // Stats
-  const { data: statsData } = useIncidentStats();
-  const stats = (statsData ?? {}) as Record<string, number>;
+  React.useEffect(() => {
+    if (!listQuery.data || page <= totalPages) return;
+    const timer = window.setTimeout(() => setPage(totalPages), 0);
+    return () => window.clearTimeout(timer);
+  }, [listQuery.data, page, totalPages]);
 
-  // Incident list
-  const { data, isLoading, isError, error } = useIncidents({
-    page,
-    page_size: pageSize,
-    search: search || undefined,
-  } as Record<string, unknown>);
+  if (access.isLoading || !access.user) return <IncidentListSkeleton />;
+  if (access.isError) return <AccessState title="Incident access could not be verified" description="The permission service is unavailable, so incident data was not loaded." action={<Button onClick={() => void access.retry()}>Try again</Button>} />;
+  if (!access.canRead) return <AccessState title="Incident management unavailable" description="Your role does not grant read access to incident records." />;
 
-  const incidents: Record<string, unknown>[] =
-    (data as Record<string, unknown>)?.items as Record<string, unknown>[] ?? [];
-  const total = ((data as Record<string, unknown>)?.total as number) ?? 0;
-  const totalPages = ((data as Record<string, unknown>)?.total_pages as number) ?? 1;
-
-  const notifyDPA = useNotifyDPA();
+  const filtersActive = Boolean(search || category || status !== 'all' || severity !== 'all' || breach !== 'all');
+  function applySearch(event: React.FormEvent) { event.preventDefault(); setSearch(searchDraft.trim()); setPage(1); }
+  function resetFilters() { setSearchDraft(''); setSearch(''); setCategory(''); setStatus('all'); setSeverity('all'); setBreach('all'); setPage(1); }
 
   return (
     <div className="space-y-6">
-      {/* GDPR Breach Alert Banner */}
-      {urgentBreaches.length > 0 && (
-        <div className="rounded-lg border-2 border-red-500 bg-red-50 p-4 dark:border-red-700 dark:bg-red-950/30">
-          <div className="flex items-center gap-2 mb-3">
-            <ShieldAlert className="h-5 w-5 text-red-600 dark:text-red-400" />
-            <h2 className="text-lg font-bold text-red-700 dark:text-red-400">
-              GDPR Breach Alert — Urgent DPA Notification Required
-            </h2>
-          </div>
-          <p className="text-sm text-red-600 dark:text-red-400 mb-4">
-            The following data breaches require notification to the Data Protection Authority within 72 hours (GDPR Article 33).
-          </p>
-          <div className="space-y-3">
-            {urgentBreaches.map((breach) => {
-              const hours = hoursRemaining(breach.notification_deadline as string);
-              const isUrgent = hours !== null && hours < 24;
-              const isExpired = hours !== null && hours === 0;
-              return (
-                <div
-                  key={breach.id as string}
-                  className={cn(
-                    'flex items-center justify-between rounded-md border p-3',
-                    isExpired
-                      ? 'border-red-700 bg-red-100 dark:bg-red-950'
-                      : isUrgent
-                        ? 'border-red-400 bg-red-50 dark:bg-red-950/50'
-                        : 'border-red-300 bg-white dark:bg-red-950/20'
-                  )}
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {breach.incident_ref as string}
-                      </span>
-                      <Link
-                        href={`/incidents/${breach.id}`}
-                        className="font-semibold text-red-800 hover:underline dark:text-red-300"
-                      >
-                        {breach.title as string}
-                      </Link>
-                    </div>
-                    <div className="mt-1 flex items-center gap-4 text-sm">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3.5 w-3.5" />
-                        {isExpired ? (
-                          <span className="font-bold text-red-700 dark:text-red-400">DEADLINE PASSED</span>
-                        ) : (
-                          <span className={cn('font-semibold', isUrgent && 'text-red-700 dark:text-red-400')}>
-                            {hours?.toFixed(1)}h remaining
-                          </span>
-                        )}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Database className="h-3.5 w-3.5" />
-                        {(breach.data_subjects_affected as number) ?? '—'} data subjects
-                      </span>
-                    </div>
-                  </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={notifyDPA.isPending}
-                    onClick={() =>
-                      notifyDPA.mutate({ id: breach.id as string })
-                    }
-                  >
-                    {notifyDPA.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Bell className="mr-2 h-4 w-4" />
-                    )}
-                    Notify DPA
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Incident Management</h1>
-          <p className="text-muted-foreground">
-            Track, investigate, and resolve security incidents. GDPR/NIS2 compliant breach management.
-          </p>
-        </div>
-        <Button onClick={() => setSheetOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Report Incident
-        </Button>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div><h1 className="text-3xl font-bold tracking-tight">Incident management</h1><p className="mt-1 text-muted-foreground">Coordinate response, preserve the investigation trail, and manage GDPR Article 33 deadlines.</p></div>
+        {access.canCreate && <Button className="w-full sm:w-auto" onClick={() => setCreateOpen(true)}><Plus aria-hidden="true" className="mr-2 h-4 w-4" />Report incident</Button>}
       </div>
 
-      {/* Summary cards */}
-      <div className="grid gap-4 md:grid-cols-6">
-        <SummaryCard label="Open" value={stats.open ?? 0} icon={<AlertOctagon className="h-4 w-4 text-red-500" />} />
-        <SummaryCard label="Investigating" value={stats.investigating ?? 0} icon={<Search className="h-4 w-4 text-yellow-500" />} />
-        <SummaryCard label="Contained" value={stats.contained ?? 0} icon={<ShieldAlert className="h-4 w-4 text-blue-500" />} />
-        <SummaryCard label="Resolved" value={stats.resolved ?? 0} icon={<AlertOctagon className="h-4 w-4 text-green-500" />} />
-        <SummaryCard
-          label="Data Breaches"
-          value={stats.data_breaches ?? 0}
-          icon={<Database className="h-4 w-4 text-red-500" />}
-          highlight={(stats.data_breaches ?? 0) > 0}
-        />
-        <SummaryCard
-          label="NIS2 Reportable"
-          value={stats.nis2_reportable ?? 0}
-          icon={<ShieldAlert className="h-4 w-4 text-purple-500" />}
-          highlight={(stats.nis2_reportable ?? 0) > 0}
-        />
-      </div>
+      {breachesQuery.isError && <InlineState role="alert" icon={<AlertTriangle aria-hidden="true" className="h-4 w-4" />} text="Breach deadlines could not be refreshed. Incident records remain available below." />}
+      {(breachesQuery.data?.length ?? 0) > 0 && <BreachDeadlinePanel incidents={breachesQuery.data ?? []} />}
 
-      {/* Search */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search incidents..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            className="pl-10"
-          />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="Incident portfolio metrics">
+        <SummaryCard label="Total" value={statsQuery.data?.total} loading={statsQuery.isLoading} icon={<AlertOctagon aria-hidden="true" className="h-4 w-4 text-blue-600" />} />
+        <SummaryCard label="Active" value={statsQuery.data?.active} loading={statsQuery.isLoading} icon={<Loader2 aria-hidden="true" className="h-4 w-4 text-amber-600" />} />
+        <SummaryCard label="Urgent breaches" value={statsQuery.data?.urgent_breaches} loading={statsQuery.isLoading} highlight={Boolean(statsQuery.data?.urgent_breaches)} icon={<Clock3 aria-hidden="true" className="h-4 w-4 text-orange-600" />} />
+        <SummaryCard label="Overdue breaches" value={statsQuery.data?.overdue_breaches} loading={statsQuery.isLoading} highlight={Boolean(statsQuery.data?.overdue_breaches)} icon={<ShieldAlert aria-hidden="true" className="h-4 w-4 text-red-600" />} />
+        <SummaryCard label="Avg. resolution" value={statsQuery.data ? `${statsQuery.data.average_resolution_hours.toFixed(1)}h` : undefined} loading={statsQuery.isLoading} icon={<BellRing aria-hidden="true" className="h-4 w-4 text-emerald-600" />} />
+      </div>
+      {statsQuery.isError && <InlineState role="alert" icon={<AlertTriangle aria-hidden="true" className="h-4 w-4" />} text="Portfolio statistics are temporarily unavailable." />}
+
+      <Card><CardHeader className="pb-4"><CardTitle className="text-base">Find incidents</CardTitle></CardHeader><CardContent>
+        <form role="search" className="grid gap-3 md:grid-cols-2 xl:grid-cols-7" onSubmit={applySearch}>
+          <div className="space-y-2 md:col-span-2"><Label htmlFor="incident-search">Reference, title, or description</Label><div className="relative"><Search aria-hidden="true" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="incident-search" className="pl-9" maxLength={500} value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} /></div></div>
+          <FilterSelect id="incident-status" label="Status" value={status} onValueChange={(value) => { setStatus(value as IncidentStatus | 'all'); setPage(1); }} options={STATUSES} />
+          <FilterSelect id="incident-severity" label="Severity" value={severity} onValueChange={(value) => { setSeverity(value as IncidentSeverity | 'all'); setPage(1); }} options={SEVERITIES} />
+          <FilterSelect id="incident-breach" label="DPA decision" value={breach} onValueChange={(value) => { setBreach(value as typeof breach); setPage(1); }} options={['true', 'false']} labels={{ true: 'Notifiable', false: 'Not notifiable' }} />
+          <div className="space-y-2"><Label htmlFor="incident-category">Category</Label><Input id="incident-category" maxLength={100} value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }} /></div>
+          <div className="flex items-end gap-2"><Button type="submit">Search</Button>{filtersActive && <Button type="button" variant="outline" onClick={resetFilters}><FilterX aria-hidden="true" className="mr-2 h-4 w-4" />Reset</Button>}</div>
+        </form>
+        <div className="mt-4 flex flex-wrap items-end gap-3 border-t pt-4">
+          <FilterSelect id="incident-sort" label="Sort by" value={sort} onValueChange={(value) => { setSort(value as typeof sort); setPage(1); }} options={['reported_at', 'updated_at', 'severity', 'notification_deadline']} includeAll={false} />
+          <FilterSelect id="incident-direction" label="Direction" value={direction} onValueChange={(value) => { setDirection(value as 'asc' | 'desc'); setPage(1); }} options={['desc', 'asc']} labels={{ desc: 'Newest / highest', asc: 'Oldest / lowest' }} includeAll={false} />
         </div>
-      </div>
+      </CardContent></Card>
 
-      {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : isError ? (
-            <div className="p-6 text-center text-destructive">
-              Failed to load incidents: {(error as Error)?.message ?? 'Unknown error'}
-            </div>
-          ) : incidents.length === 0 ? (
-            <div className="p-12 text-center text-muted-foreground">
-              <AlertOctagon className="mx-auto mb-3 h-10 w-10" />
-              <p className="text-lg font-medium">No incidents found</p>
-              <p className="text-sm">No incidents have been reported yet.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="px-4 py-3 text-left font-medium">Ref</th>
-                    <th className="px-4 py-3 text-left font-medium">Title</th>
-                    <th className="px-4 py-3 text-left font-medium">Severity</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-left font-medium">Breach</th>
-                    <th className="px-4 py-3 text-left font-medium">Reported Date</th>
-                    <th className="px-4 py-3 text-left font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {incidents.map((inc) => {
-                    const isBreach = inc.is_data_breach as boolean;
-                    const notNotified = isBreach && !inc.dpa_notified_at;
-                    return (
-                      <tr
-                        key={inc.id as string}
-                        className={cn(
-                          'border-b transition-colors hover:bg-muted/50',
-                          notNotified && 'border-l-4 border-l-red-500'
-                        )}
-                      >
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                          {inc.incident_ref as string}
-                        </td>
-                        <td className="px-4 py-3 font-medium">
-                          <Link
-                            href={`/incidents/${inc.id}`}
-                            className="text-primary hover:underline"
-                          >
-                            {inc.title as string}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge className={getRiskLevelColor(inc.severity as string)}>
-                            {inc.severity as string}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge className={getStatusColor(inc.status as string)}>
-                            {(inc.status as string)?.replace('_', ' ')}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          {isBreach ? (
-                            <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
-                              <ShieldAlert className="h-4 w-4" />
-                              <span className="text-xs font-medium">
-                                {(inc.data_subjects_affected as number) ?? '?'} subjects
-                              </span>
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground text-xs">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">{formatDate(inc.reported_at as string ?? inc.created_at as string)}</td>
-                        <td className="px-4 py-3">
-                          <Link href={`/incidents/${inc.id}`}>
-                            <Button variant="ghost" size="sm">
-                              View
-                            </Button>
-                          </Link>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+      <Card><CardContent className="p-0">
+        {listQuery.isLoading ? <div className="space-y-3 p-6" aria-label="Loading incidents">{Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-14 w-full" />)}</div>
+          : listQuery.isError ? <ListError message={formatIncidentError(listQuery.error, 'Incidents could not be loaded.')} retry={() => void listQuery.refetch()} />
+            : incidents.length === 0 ? <EmptyState filtered={filtersActive} create={access.canCreate ? () => setCreateOpen(true) : undefined} />
+              : <><IncidentTable incidents={incidents} /><IncidentCards incidents={incidents} /></>}
+        {listQuery.data && listQuery.data.total > 0 && <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><Label htmlFor="incident-page-size" className="text-sm text-muted-foreground">Rows</Label><Select value={String(pageSize)} onValueChange={(value) => { setPageSize(Number(value)); setPage(1); }}><SelectTrigger id="incident-page-size" className="w-20"><SelectValue /></SelectTrigger><SelectContent>{PAGE_SIZES.map((value) => <SelectItem key={value} value={String(value)}>{value}</SelectItem>)}</SelectContent></Select><p className="text-sm text-muted-foreground">Page {page} of {totalPages} · {listQuery.data.total} total</p></div><div className="flex gap-2"><Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft aria-hidden="true" className="mr-1 h-4 w-4" />Previous</Button><Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>Next<ChevronRight aria-hidden="true" className="ml-1 h-4 w-4" /></Button></div></div>}
+      </CardContent></Card>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <>
-              <Separator />
-              <div className="flex items-center justify-between px-4 py-3">
-                <p className="text-sm text-muted-foreground">
-                  Showing page {page} of {totalPages} ({total} total)
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => p - 1)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => p + 1)}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Report Incident Sheet/Dialog */}
-      <ReportIncidentSheet open={sheetOpen} onOpenChange={setSheetOpen} />
+      {access.canCreate && <IncidentEditorDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={(incident) => router.push(`/incidents/${incident.id}`)} />}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Summary card
-// ---------------------------------------------------------------------------
-
-function SummaryCard({
-  label,
-  value,
-  icon,
-  highlight,
-}: {
-  label: string;
-  value: number;
-  icon: React.ReactNode;
-  highlight?: boolean;
-}) {
-  return (
-    <Card className={cn(highlight && 'border-red-300 dark:border-red-700')}>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{label}</CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        <div className={cn('text-2xl font-bold', highlight && 'text-red-600 dark:text-red-400')}>
-          {value}
-        </div>
-      </CardContent>
-    </Card>
-  );
+function BreachDeadlinePanel({ incidents }: { incidents: Incident[] }) {
+  return <section aria-labelledby="breach-deadlines-heading" className="rounded-lg border-2 border-red-500 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950/30"><div className="flex gap-3"><ShieldAlert aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-red-700 dark:text-red-300" /><div className="min-w-0 flex-1"><h2 id="breach-deadlines-heading" className="font-semibold text-red-950 dark:text-red-100">GDPR notification deadlines require attention</h2><p className="mt-1 text-sm text-red-800 dark:text-red-200">These assessed, notifiable breaches fall within the next seven days or are overdue. Open a record to enter the authority reference and notification evidence.</p><ul className="mt-3 grid gap-2 lg:grid-cols-2">{incidents.map((incident) => { const deadline = incidentDeadline(incident); return <li key={incident.id}><Link href={`/incidents/${incident.id}`} className="flex min-h-12 items-center justify-between gap-3 rounded-md border border-red-300 bg-background px-3 py-2 text-sm hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-red-800 dark:hover:bg-red-950"><span className="min-w-0"><span className="block truncate font-medium">{incident.incident_ref} · {incident.title}</span><span className="block text-xs text-muted-foreground">Deadline {formatDateTime(incident.notification_deadline)}</span></span><DeadlineBadge state={deadline.state} hours={deadline.hoursRemaining} /></Link></li>; })}</ul></div></div></section>;
 }
 
-// ---------------------------------------------------------------------------
-// Report Incident Sheet
-// ---------------------------------------------------------------------------
-
-function ReportIncidentSheet({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
-  const createIncident = useCreateIncident();
-
-  const form = useForm<ReportIncidentValues>({
-    resolver: zodResolver(reportIncidentSchema),
-    defaultValues: {
-      title: '',
-      description: '',
-      incident_type: '',
-      severity: undefined,
-      category: '',
-      is_data_breach: false,
-      data_subjects_affected: undefined,
-      data_categories: [],
-    },
-  });
-
-  const isDataBreach = form.watch('is_data_breach');
-  const selectedCategories = form.watch('data_categories') ?? [];
-
-  const toggleCategory = (cat: string) => {
-    const current = form.getValues('data_categories') ?? [];
-    if (current.includes(cat)) {
-      form.setValue(
-        'data_categories',
-        current.filter((c) => c !== cat)
-      );
-    } else {
-      form.setValue('data_categories', [...current, cat]);
-    }
-  };
-
-  const onSubmit = async (values: ReportIncidentValues) => {
-    const payload = {
-      ...values,
-      data_subjects_affected: values.is_data_breach ? values.data_subjects_affected : undefined,
-      data_categories: values.is_data_breach ? values.data_categories : undefined,
-    };
-    await createIncident.mutateAsync(payload);
-    form.reset();
-    onOpenChange(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Report Incident</DialogTitle>
-          <DialogDescription>
-            Report a new security incident. Data breach incidents trigger GDPR notification workflows.
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          {/* Title */}
-          <div className="space-y-2">
-            <Label htmlFor="inc-title">Title *</Label>
-            <Input id="inc-title" {...form.register('title')} placeholder="Brief incident title" />
-            {form.formState.errors.title && (
-              <p className="text-sm text-destructive">{form.formState.errors.title.message}</p>
-            )}
-          </div>
-
-          {/* Description */}
-          <div className="space-y-2">
-            <Label htmlFor="inc-desc">Description *</Label>
-            <Textarea id="inc-desc" {...form.register('description')} placeholder="Describe the incident..." rows={3} />
-            {form.formState.errors.description && (
-              <p className="text-sm text-destructive">{form.formState.errors.description.message}</p>
-            )}
-          </div>
-
-          {/* Type & Severity & Category */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="inc-type">Incident Type *</Label>
-              <Input id="inc-type" {...form.register('incident_type')} placeholder="e.g. Ransomware" />
-              {form.formState.errors.incident_type && (
-                <p className="text-sm text-destructive">{form.formState.errors.incident_type.message}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>Severity *</Label>
-              <Select
-                value={form.watch('severity')}
-                onValueChange={(v) =>
-                  form.setValue('severity', v as ReportIncidentValues['severity'], { shouldValidate: true })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="critical">Critical</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
-                </SelectContent>
-              </Select>
-              {form.formState.errors.severity && (
-                <p className="text-sm text-destructive">{form.formState.errors.severity.message}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="inc-cat">Category *</Label>
-              <Input id="inc-cat" {...form.register('category')} placeholder="e.g. Data Loss" />
-              {form.formState.errors.category && (
-                <p className="text-sm text-destructive">{form.formState.errors.category.message}</p>
-              )}
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* Data Breach toggle */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="text-base font-semibold">Data Breach</Label>
-                <p className="text-sm text-muted-foreground">
-                  Does this incident involve a personal data breach?
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={isDataBreach}
-                onClick={() => form.setValue('is_data_breach', !isDataBreach)}
-                className={cn(
-                  'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                  isDataBreach ? 'bg-red-600' : 'bg-input'
-                )}
-              >
-                <span
-                  className={cn(
-                    'pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform',
-                    isDataBreach ? 'translate-x-5' : 'translate-x-0'
-                  )}
-                />
-              </button>
-            </div>
-
-            {isDataBreach && (
-              <div className="space-y-4 rounded-lg border-2 border-red-300 bg-red-50 p-4 dark:border-red-700 dark:bg-red-950/20">
-                {/* GDPR Warning */}
-                <div className="flex items-start gap-2 rounded-md bg-red-100 p-3 dark:bg-red-900/30">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-700 dark:text-red-400" />
-                  <div>
-                    <p className="text-sm font-bold text-red-800 dark:text-red-300">
-                      GDPR Article 33 — 72-Hour Notification Requirement
-                    </p>
-                    <p className="text-sm text-red-700 dark:text-red-400">
-                      Personal data breaches must be reported to the supervisory authority (DPA) within
-                      72 hours of becoming aware of the breach, unless the breach is unlikely to result
-                      in a risk to the rights and freedoms of natural persons.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Data subjects affected */}
-                <div className="space-y-2">
-                  <Label htmlFor="inc-subjects">Data Subjects Affected *</Label>
-                  <Input
-                    id="inc-subjects"
-                    type="number"
-                    min={1}
-                    {...form.register('data_subjects_affected', { valueAsNumber: true })}
-                    placeholder="Number of individuals affected"
-                  />
-                  {form.formState.errors.data_subjects_affected && (
-                    <p className="text-sm text-destructive">
-                      {form.formState.errors.data_subjects_affected.message}
-                    </p>
-                  )}
-                </div>
-
-                {/* Data categories */}
-                <div className="space-y-2">
-                  <Label>Data Categories Affected</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {DATA_CATEGORIES.map((cat) => {
-                      const checked = selectedCategories.includes(cat);
-                      return (
-                        <label
-                          key={cat}
-                          className={cn(
-                            'flex items-center gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer transition-colors',
-                            checked
-                              ? 'border-red-400 bg-red-100 dark:border-red-600 dark:bg-red-950/40'
-                              : 'hover:bg-muted'
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleCategory(cat)}
-                            className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                          />
-                          {cat}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={createIncident.isPending}
-              variant={isDataBreach ? 'destructive' : 'default'}
-            >
-              {createIncident.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isDataBreach ? 'Report Data Breach' : 'Report Incident'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
+function IncidentTable({ incidents }: { incidents: Incident[] }) {
+  return <div className="hidden overflow-x-auto md:block"><table className="w-full text-sm"><caption className="sr-only">Incident search results</caption><thead><tr className="border-b bg-muted/50"><th scope="col" className="px-4 py-3 text-left font-medium">Incident</th><th scope="col" className="px-4 py-3 text-left font-medium">Severity</th><th scope="col" className="px-4 py-3 text-left font-medium">Status</th><th scope="col" className="px-4 py-3 text-left font-medium">Breach assessment</th><th scope="col" className="px-4 py-3 text-left font-medium">Reported</th></tr></thead><tbody>{incidents.map((incident) => { const deadline = incidentDeadline(incident); return <tr key={incident.id} className="border-b last:border-0 hover:bg-muted/40"><td className="max-w-md px-4 py-3"><Link className="font-medium text-primary hover:underline" href={`/incidents/${incident.id}`}>{incident.title}</Link><span className="mt-1 block font-mono text-xs text-muted-foreground">{incident.incident_ref}</span></td><td className="px-4 py-3"><Badge className={getRiskLevelColor(incident.severity)}>{humanizeIncidentToken(incident.severity)}</Badge></td><td className="px-4 py-3"><Badge className={getStatusColor(incident.status)}>{humanizeIncidentToken(incident.status)}</Badge></td><td className="px-4 py-3">{incident.is_breach_notifiable ? <DeadlineBadge state={deadline.state} hours={deadline.hoursRemaining} /> : humanizeIncidentToken(incident.breach_assessment_status)}</td><td className="whitespace-nowrap px-4 py-3">{formatDateTime(incident.reported_at)}</td></tr>; })}</tbody></table></div>;
 }
+
+function IncidentCards({ incidents }: { incidents: Incident[] }) {
+  return <ul className="divide-y md:hidden">{incidents.map((incident) => { const deadline = incidentDeadline(incident); return <li key={incident.id}><Link href={`/incidents/${incident.id}`} className="block space-y-3 p-4 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"><div><p className="font-medium">{incident.title}</p><p className="font-mono text-xs text-muted-foreground">{incident.incident_ref}</p></div><div className="flex flex-wrap gap-2"><Badge className={getRiskLevelColor(incident.severity)}>{humanizeIncidentToken(incident.severity)}</Badge><Badge className={getStatusColor(incident.status)}>{humanizeIncidentToken(incident.status)}</Badge>{incident.is_breach_notifiable && <DeadlineBadge state={deadline.state} hours={deadline.hoursRemaining} />}</div><p className="text-xs text-muted-foreground">Reported {formatDateTime(incident.reported_at)}</p></Link></li>; })}</ul>;
+}
+
+function DeadlineBadge({ state, hours }: { state: string; hours?: number }) {
+  const label = state === 'notified' ? 'DPA notified' : state === 'overdue' ? 'DPA overdue' : state === 'urgent' || state === 'upcoming' ? `${Math.max(0, hours ?? 0).toFixed(1)}h left` : 'Assessment pending';
+  return <Badge className={cn(state === 'notified' && 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200', state === 'overdue' && 'bg-red-700 text-white', state === 'urgent' && 'bg-orange-600 text-white')} variant={['notified', 'overdue', 'urgent'].includes(state) ? 'default' : 'outline'}>{label}</Badge>;
+}
+
+function FilterSelect({ id, label, value, options, labels = {}, includeAll = true, onValueChange }: { id: string; label: string; value: string; options: readonly string[]; labels?: Record<string, string>; includeAll?: boolean; onValueChange: (value: string) => void }) { return <div className="space-y-2"><Label htmlFor={id}>{label}</Label><Select value={value} onValueChange={onValueChange}><SelectTrigger id={id}><SelectValue /></SelectTrigger><SelectContent>{includeAll && <SelectItem value="all">All</SelectItem>}{options.map((option) => <SelectItem key={option} value={option}>{labels[option] ?? humanizeIncidentToken(option)}</SelectItem>)}</SelectContent></Select></div>; }
+function SummaryCard({ label, value, loading, highlight, icon }: { label: string; value?: number | string; loading: boolean; highlight?: boolean; icon: React.ReactNode }) { return <Card className={cn(highlight && 'border-red-400')}><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">{label}</CardTitle>{icon}</CardHeader><CardContent>{loading ? <Skeleton className="h-8 w-16" /> : <p className={cn('text-2xl font-bold', highlight && 'text-red-700 dark:text-red-300')}>{value ?? '—'}</p>}</CardContent></Card>; }
+function InlineState({ role, icon, text }: { role: 'alert' | 'status'; icon: React.ReactNode; text: string }) { return <div role={role} className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{icon}{text}</div>; }
+function ListError({ message, retry }: { message: string; retry: () => void }) { return <div role="alert" className="flex flex-col items-center gap-3 p-10 text-center"><AlertTriangle aria-hidden="true" className="h-9 w-9 text-destructive" /><p>{message}</p><Button variant="outline" onClick={retry}>Retry</Button></div>; }
+function EmptyState({ filtered, create }: { filtered: boolean; create?: () => void }) { return <div className="flex flex-col items-center gap-3 p-12 text-center"><AlertOctagon aria-hidden="true" className="h-10 w-10 text-muted-foreground" /><h2 className="text-lg font-medium">{filtered ? 'No incidents match these filters' : 'No incidents reported'}</h2><p className="text-sm text-muted-foreground">{filtered ? 'Adjust or reset the filters to broaden the result set.' : 'Report an incident to begin the response workflow.'}</p>{create && !filtered && <Button onClick={create}><Plus aria-hidden="true" className="mr-2 h-4 w-4" />Report incident</Button>}</div>; }
+function AccessState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <Card><CardContent role="alert" className="flex flex-col items-center gap-3 py-12 text-center"><LockKeyhole aria-hidden="true" className="h-9 w-9" /><h1 className="text-xl font-semibold">{title}</h1><p className="max-w-lg text-sm text-muted-foreground">{description}</p>{action}</CardContent></Card>; }
+function IncidentListSkeleton() { return <div className="space-y-5" aria-label="Checking incident permissions"><Skeleton className="h-10 w-72" /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-28" />)}</div><Skeleton className="h-80" /></div>; }

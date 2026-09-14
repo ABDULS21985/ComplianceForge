@@ -141,7 +141,7 @@ func TestNotificationDeliveryWithNonSuperuserRLS(t *testing.T) {
 	engineB := NewNotificationEngine(appPool, NewEventBus(), sender)
 	configFor := func(owner string) NotificationDeliveryConfig {
 		return NotificationDeliveryConfig{
-			OwnerID: owner, TenantBatch: 10, ClaimBatch: 1, LeaseDuration: time.Minute,
+			OwnerID: owner, TenantBatch: 10, ClaimBatch: 1, LeaseDuration: 3 * time.Minute,
 			RetryBaseDelay: time.Second, RetryMaxDelay: time.Minute, PollInterval: time.Second,
 		}
 	}
@@ -264,5 +264,71 @@ func TestNotificationDeliveryWithNonSuperuserRLS(t *testing.T) {
 	}
 	if strings.Contains(storedError, "secret") || strings.Contains(storedError, "example.test") {
 		t.Fatalf("stored failure leaked provider detail: %q", storedError)
+	}
+
+	// Two notifications in one digest bucket are claimed independently but sent
+	// as one provider message with a stable digest idempotency key.
+	digestScheduledFor := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	for index := 0; index < 2; index++ {
+		digestID, digestEventID := uuid.NewString(), uuid.NewString()
+		if _, err := admin.Exec(ctx, `INSERT INTO notifications
+			(id,organization_id,event_id,event_type,event_payload,recipient_user_id,channel_type,channel_id,
+			 subject,body,body_text,status,delivery_key,digest_frequency,scheduled_for,created_at)
+			VALUES ($1,$2,$3,'risk.digest','{}',$4,'email',$5,$6,$7,$7,'pending',$8,'hourly',$9,NOW())`,
+			digestID, orgA, digestEventID, userA, channelA, fmt.Sprintf("Digest %d", index),
+			fmt.Sprintf("Digest body %d", index), notificationDeliveryKey(digestEventID, "digest-rule", userA, channelA),
+			digestScheduledFor); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messageCountBeforeDigest := len(sender.snapshot())
+	digestConfig := configFor(uuid.NewString())
+	digestConfig.ClaimBatch = 10
+	if err := engineA.RunDeliveryCycle(ctx, digestConfig); err != nil {
+		t.Fatalf("digest delivery cycle: %v", err)
+	}
+	digestMessages := sender.snapshot()
+	if len(digestMessages) != messageCountBeforeDigest+1 ||
+		!strings.Contains(digestMessages[len(digestMessages)-1].Subject, "2 notifications") {
+		t.Fatalf("digest messages before=%d after=%d final=%#v", messageCountBeforeDigest, len(digestMessages), digestMessages[len(digestMessages)-1])
+	}
+
+	// A delivered notification whose acknowledgement SLA expires creates one
+	// idempotent child per escalation channel and delivers it in the same cycle.
+	escalationRuleID, escalationParentID, escalationEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := admin.Exec(ctx, `INSERT INTO notification_rules
+		(id,organization_id,name,event_type,channel_ids,recipient_type,recipient_ids,
+		 escalation_after_minutes,escalation_channel_ids)
+		VALUES ($1,$2,'Acknowledgement SLA','risk.ack',ARRAY[$3::uuid],'user',ARRAY[$4::uuid],1,ARRAY[$3::uuid])`,
+		escalationRuleID, orgA, channelA, userA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, `INSERT INTO notifications
+		(id,organization_id,rule_id,event_id,event_type,event_payload,recipient_user_id,channel_type,channel_id,
+		 subject,body,body_text,status,sent_at,delivery_key,scheduled_for,acknowledgement_due_at,created_at)
+		VALUES ($1,$2,$3,$4,'risk.ack','{}',$5,'email',$6,'Acknowledge risk','Please acknowledge',
+		        'Please acknowledge','sent',NOW()-INTERVAL '2 minutes',$7,NOW()-INTERVAL '3 minutes',
+		        NOW()-INTERVAL '1 minute',NOW()-INTERVAL '3 minutes')`,
+		escalationParentID, orgA, escalationRuleID, escalationEventID, userA, channelA,
+		notificationDeliveryKey(escalationEventID, escalationRuleID, userA, channelA)); err != nil {
+		t.Fatal(err)
+	}
+	messageCountBeforeEscalation := len(sender.snapshot())
+	if err := engineA.RunDeliveryCycle(ctx, configFor(uuid.NewString())); err != nil {
+		t.Fatalf("escalation delivery cycle: %v", err)
+	}
+	if got := len(sender.snapshot()); got != messageCountBeforeEscalation+1 {
+		t.Fatalf("escalation provider messages=%d want=%d", got, messageCountBeforeEscalation+1)
+	}
+	var escalatedAt *time.Time
+	var escalationChildren int
+	if err := admin.QueryRow(ctx, `SELECT escalated_at FROM notifications WHERE id=$1`, escalationParentID).Scan(&escalatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.QueryRow(ctx, `SELECT COUNT(*) FROM notifications WHERE parent_notification_id=$1 AND status='sent'`, escalationParentID).Scan(&escalationChildren); err != nil {
+		t.Fatal(err)
+	}
+	if escalatedAt == nil || escalationChildren != 1 {
+		t.Fatalf("escalated_at=%v delivered_children=%d", escalatedAt, escalationChildren)
 	}
 }

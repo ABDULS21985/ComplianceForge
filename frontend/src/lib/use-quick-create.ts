@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 
 import {
   isQuickCreateRequest,
@@ -10,18 +10,17 @@ import {
 
 /** Opens an existing create dialog when its canonical quick-create URL loads. */
 export function useQuickCreate(resource: QuickCreateResource) {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (isQuickCreateRequest(params, resource)) {
-      setOpen(true);
-    }
-  }, [resource]);
+  const requestedByUrl = useSyncExternalStore(
+    () => () => undefined,
+    () => isQuickCreateRequest(new URLSearchParams(window.location.search), resource),
+    () => false,
+  );
+  const [openOverride, setOpenOverride] = useState<boolean | null>(null);
+  const open = openOverride ?? requestedByUrl;
 
   const onOpenChange = useCallback(
     (nextOpen: boolean) => {
-      setOpen(nextOpen);
+      setOpenOverride(nextOpen);
 
       if (!nextOpen) {
         const url = new URL(window.location.href);

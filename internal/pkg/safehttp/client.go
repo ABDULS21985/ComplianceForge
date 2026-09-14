@@ -101,6 +101,8 @@ func (c *Client) Do(request *http.Request) (*http.Response, error) {
 	if err := ValidateURL(request.URL, c.policy); err != nil {
 		return nil, err
 	}
+	// #nosec G704 -- ValidateURL rejects unsafe schemes/hosts immediately above,
+	// and this client's private transport resolves and pins only public IPs.
 	return c.client.Do(request)
 }
 

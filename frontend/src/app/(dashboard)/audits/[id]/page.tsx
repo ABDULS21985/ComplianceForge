@@ -1,35 +1,48 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import {
-  ArrowLeft,
-  Plus,
   AlertTriangle,
-  Loader2,
-  Calendar,
-  User,
+  ArrowLeft,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardCheck,
   FileText,
+  Flag,
+  LockKeyhole,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+  UserRound,
+  XCircle,
 } from 'lucide-react';
-
-import { cn, formatDate, getStatusColor, getRiskLevelColor } from '@/lib/utils';
+import type {
+  Audit,
+  AuditFinding,
+  AuditFindingStats,
+  AuditLifecycleAction,
+  FindingStatus,
+} from '@/types/audit';
 import {
-  useAudit,
-  useAuditFindings,
-  useCreateFinding,
-  useUsers,
-} from '@/lib/api-hooks';
-
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+  auditLifecycleActions,
+  auditPersonName,
+  findingNextStatuses,
+  formatAuditError,
+  humanizeAuditToken,
+  isFindingOverdue,
+} from '@/lib/audit';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { cn, formatDate, formatDateTime, getRiskLevelColor, getStatusColor } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -38,499 +51,860 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import { Skeleton } from '@/components/ui/skeleton';
+  useAudit,
+  useAuditFindings,
+  useAuditFindingsStats,
+  useAuditTransition,
+  useDeleteAudit,
+  useDeleteAuditFinding,
+} from '@/lib/api-hooks';
+import { useParams, useRouter } from 'next/navigation';
+import { AuditConfirmationDialog } from '@/components/audits/audit-confirmation-dialog';
+import { AuditEditorDialog } from '@/components/audits/audit-editor-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { FindingEditorDialog } from '@/components/audits/finding-editor-dialog';
+import { FindingTransitionDialog } from '@/components/audits/finding-transition-dialog';
+import Link from 'next/link';
 import { Separator } from '@/components/ui/separator';
-
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
-
-const createFindingSchema = z.object({
-  title: z.string().min(1, 'Title is required').max(200),
-  description: z.string().min(1, 'Description is required'),
-  severity: z.enum(['critical', 'high', 'medium', 'low', 'informational'], {
-    required_error: 'Select severity',
-  }),
-  finding_type: z.string().min(1, 'Finding type is required'),
-  control_id: z.string().optional(),
-  root_cause: z.string().optional(),
-  recommendation: z.string().min(1, 'Recommendation is required'),
-  responsible_user_id: z.string().min(1, 'Responsible person is required'),
-  due_date: z.string().min(1, 'Due date is required'),
-});
-
-type CreateFindingValues = z.infer<typeof createFindingSchema>;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function auditTypeBadge(type: string) {
-  const map: Record<string, string> = {
-    internal: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-    external: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-    certification: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
-  };
-  return map[type] ?? 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
-}
-
-function isOverdue(dateStr: string | undefined | null): boolean {
-  if (!dateStr) return false;
-  return new Date(dateStr) < new Date();
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAuditPermissions } from '@/hooks/use-audit-permissions';
 
 export default function AuditDetailPage() {
-  const params = useParams();
-  const id = params.id as string;
-
-  const { data: audit, isLoading, isError, error } = useAudit(id);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const a = audit as any;
-
-  const [findingDialogOpen, setFindingDialogOpen] = React.useState(false);
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const access = useAuditPermissions();
+  const auditQuery = useAudit(id, { enabled: access.canRead && Boolean(id) });
   const [findingsPage, setFindingsPage] = React.useState(1);
-
-  const { data: findingsData, isLoading: findingsLoading } = useAuditFindings(id, {
-    page: findingsPage,
-    page_size: 20,
+  const findingsQuery = useAuditFindings(
+    id,
+    { page: findingsPage, page_size: 20 },
+    { enabled: access.canRead && Boolean(id) },
+  );
+  const statsQuery = useAuditFindingsStats(id, {
+    enabled: access.canRead && Boolean(id),
   });
+  const transitionAudit = useAuditTransition(id);
+  const deleteAudit = useDeleteAudit();
+  const deleteFinding = useDeleteAuditFinding(id);
 
-  const findings: Record<string, unknown>[] =
-    (findingsData as Record<string, unknown>)?.items as Record<string, unknown>[] ?? [];
-  const findingsTotalPages =
-    ((findingsData as Record<string, unknown>)?.total_pages as number) ?? 1;
+  const [editAuditOpen, setEditAuditOpen] = React.useState(false);
+  const [createFindingOpen, setCreateFindingOpen] = React.useState(false);
+  const [viewingFinding, setViewingFinding] = React.useState<AuditFinding | null>(null);
+  const [editingFinding, setEditingFinding] = React.useState<AuditFinding | null>(null);
+  const [deletingFinding, setDeletingFinding] = React.useState<AuditFinding | null>(null);
+  const [transitioningFinding, setTransitioningFinding] = React.useState<{
+    finding: AuditFinding;
+    status: FindingStatus;
+  } | null>(null);
+  const [lifecycleAction, setLifecycleAction] = React.useState<AuditLifecycleAction | null>(null);
+  const [deleteAuditOpen, setDeleteAuditOpen] = React.useState(false);
 
-  // Loading state
-  if (isLoading) {
+  const findingsData = findingsQuery.data;
+  const findings = findingsData?.items ?? [];
+  const findingsTotalPages = Math.max(findingsData?.total_pages ?? 0, 1);
+
+  React.useEffect(() => {
+    if (!findingsData || findingsPage <= findingsTotalPages) return;
+    const timer = window.setTimeout(() => setFindingsPage(findingsTotalPages), 0);
+    return () => window.clearTimeout(timer);
+  }, [findingsData, findingsPage, findingsTotalPages]);
+
+  if (access.isLoading || !access.user)
+    return <AuditDetailSkeleton label="Checking audit permissions" />;
+  if (access.isError) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-4 w-96" />
-        <div className="grid gap-4 md:grid-cols-2">
-          <Skeleton className="h-48" />
-          <Skeleton className="h-48" />
-        </div>
+      <AccessState
+        alert
+        title="Audit access could not be verified"
+        description="The permissions service is temporarily unavailable. No audit data was loaded."
+        action={<Button onClick={() => void access.retry()}>Try again</Button>}
+      />
+    );
+  }
+  if (!access.canRead) {
+    return (
+      <AccessState
+        title="Audit unavailable"
+        description="Your role does not grant read access to audit records."
+      />
+    );
+  }
+  if (auditQuery.isLoading) return <AuditDetailSkeleton label="Loading audit" />;
+  if (auditQuery.isError || !auditQuery.data) {
+    return (
+      <div className="space-y-5">
+        <BackLink />
+        <Card>
+          <CardContent role="alert" className="flex flex-col items-center gap-3 py-12 text-center">
+            <AlertTriangle aria-hidden="true" className="h-9 w-9 text-destructive" />
+            <h1 className="text-xl font-semibold">Audit could not be loaded</h1>
+            <p className="max-w-xl text-sm text-muted-foreground">
+              {formatAuditError(
+                auditQuery.error,
+                'The audit was not found or is temporarily unavailable.',
+              )}
+            </p>
+            <Button variant="outline" onClick={() => void auditQuery.refetch()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  // Error state
-  if (isError || !a) {
-    return (
-      <div className="space-y-4">
-        <Link href="/audits" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="mr-1 h-4 w-4" /> Back to Audits
-        </Link>
-        <div className="text-center py-12 text-destructive">
-          {isError ? `Failed to load audit: ${(error as Error)?.message ?? 'Unknown error'}` : 'Audit not found'}
-        </div>
-      </div>
-    );
+  const audit = auditQuery.data;
+  const mutableAudit = !['closed', 'cancelled'].includes(audit.status);
+  const mayCreateFinding = access.canCreate && ['planned', 'in_progress'].includes(audit.status);
+  const mayDeleteFinding = access.canDelete && ['planned', 'in_progress'].includes(audit.status);
+  const mayDeleteAudit = access.canDelete && ['planned', 'cancelled'].includes(audit.status);
+  const stats = statsQuery.data;
+  const closeBlockers = (stats?.open ?? 0) + (stats?.in_progress ?? 0);
+  const lifecycleActions = access.canUpdate ? auditLifecycleActions(audit.status) : [];
+
+  async function confirmAuditDeletion() {
+    await deleteAudit.mutateAsync(audit.id);
+    router.push('/audits');
+    router.refresh();
   }
 
   return (
     <div className="space-y-6">
-      {/* Back link */}
-      <Link href="/audits" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="mr-1 h-4 w-4" /> Back to Audits
-      </Link>
+      <BackLink />
 
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-sm text-muted-foreground">
-              {a.audit_ref as string}
-            </span>
-            <Badge className={auditTypeBadge(a.audit_type as string)}>
-              {(a.audit_type as string)?.replace('_', ' ')}
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm text-muted-foreground">{audit.audit_ref}</span>
+            <Badge className={getStatusColor(audit.status)}>
+              {humanizeAuditToken(audit.status)}
             </Badge>
-            <Badge className={getStatusColor(a.status as string)}>
-              {(a.status as string)?.replace('_', ' ')}
-            </Badge>
+            <Badge variant="outline">{humanizeAuditToken(audit.audit_type)}</Badge>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">{a.title as string}</h1>
+          <h1 className="break-words text-3xl font-bold tracking-tight">{audit.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            Last updated {formatDateTime(audit.updated_at)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {access.canUpdate && mutableAudit && (
+            <Button variant="outline" onClick={() => setEditAuditOpen(true)}>
+              <Pencil aria-hidden="true" className="mr-2 h-4 w-4" />
+              Edit plan
+            </Button>
+          )}
+          {lifecycleActions.map((action) => {
+            const closeUnavailable =
+              action === 'close' &&
+              (statsQuery.isLoading || statsQuery.isError || closeBlockers > 0);
+            return (
+              <Button
+                key={action}
+                variant={action === 'cancel' ? 'destructive' : 'default'}
+                disabled={closeUnavailable}
+                title={
+                  closeUnavailable ? closeReason(statsQuery.isError, closeBlockers) : undefined
+                }
+                onClick={() => setLifecycleAction(action)}
+              >
+                {lifecycleIcon(action)}
+                {humanizeAuditToken(action)} audit
+              </Button>
+            );
+          })}
+          {mayDeleteAudit && (
+            <Button variant="destructive" onClick={() => setDeleteAuditOpen(true)}>
+              <Trash2 aria-hidden="true" className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Details section */}
-      <div className="grid gap-6 md:grid-cols-2">
+      {audit.status === 'completed' && (statsQuery.isError || closeBlockers > 0) && (
+        <div
+          role={statsQuery.isError ? 'alert' : 'status'}
+          className="flex gap-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+        >
+          <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+          {statsQuery.isError
+            ? 'Finding status could not be verified, so closure is unavailable.'
+            : `${closeBlockers} open or in-progress finding${closeBlockers === 1 ? '' : 's'} must be resolved or risk-accepted before closure.`}
+        </div>
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Audit Details</CardTitle>
+            <CardTitle className="text-lg">Engagement brief</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Description</p>
-              <p className="mt-1 text-sm whitespace-pre-wrap">{(a.description as string) || 'No description provided.'}</p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Scope</p>
-              <p className="mt-1 text-sm whitespace-pre-wrap">{(a.scope as string) || '—'}</p>
-            </div>
+          <CardContent className="space-y-5">
+            <Detail label="Description" value={audit.description} />
+            <Detail label="Scope" value={audit.scope} />
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Schedule & Team</CardTitle>
+            <CardTitle className="text-lg">Schedule and ownership</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-3">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium">
-                  {formatDate(a.scheduled_start_date as string)} — {formatDate(a.scheduled_end_date as string)}
-                </p>
-                <p className="text-xs text-muted-foreground">Scheduled Period</p>
-              </div>
-            </div>
-            {a.actual_start_date && (
-              <div className="flex items-center gap-3">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">
-                    {formatDate(a.actual_start_date as string)} — {formatDate(a.actual_end_date as string) || 'Ongoing'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Actual Period</p>
-                </div>
-              </div>
-            )}
-            <div className="flex items-center gap-3">
-              <User className="h-4 w-4 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium">
-                  {(a.lead_auditor as Record<string, string>)?.first_name}{' '}
-                  {(a.lead_auditor as Record<string, string>)?.last_name ?? '—'}
-                </p>
-                <p className="text-xs text-muted-foreground">Lead Auditor</p>
-              </div>
-            </div>
-            {a.framework && (
-              <div className="flex items-center gap-3">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">{(a.framework as Record<string, string>)?.name}</p>
-                  <p className="text-xs text-muted-foreground">Framework</p>
-                </div>
-              </div>
-            )}
+          <CardContent>
+            <dl className="space-y-4">
+              <IconDetail
+                icon={<CalendarDays aria-hidden="true" className="h-4 w-4" />}
+                label="Scheduled period"
+                value={`${formatDate(audit.scheduled_start_date)} – ${formatDate(audit.scheduled_end_date)}`}
+              />
+              <IconDetail
+                icon={<CalendarDays aria-hidden="true" className="h-4 w-4" />}
+                label="Actual period"
+                value={
+                  audit.actual_start_date
+                    ? `${formatDate(audit.actual_start_date)} – ${audit.actual_end_date ? formatDate(audit.actual_end_date) : 'Ongoing'}`
+                    : 'Not started'
+                }
+              />
+              <IconDetail
+                icon={<UserRound aria-hidden="true" className="h-4 w-4" />}
+                label="Lead auditor"
+                value={auditPersonName(audit.lead_auditor, audit.lead_auditor_id)}
+              />
+              <IconDetail
+                icon={<FileText aria-hidden="true" className="h-4 w-4" />}
+                label="Framework"
+                value={
+                  audit.framework
+                    ? `${audit.framework.code} — ${audit.framework.name}`
+                    : 'No framework linked'
+                }
+              />
+            </dl>
           </CardContent>
         </Card>
       </div>
 
       <Separator />
 
-      {/* Findings section */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Findings</h2>
-          <Button onClick={() => setFindingDialogOpen(true)} size="sm">
-            <Plus className="mr-2 h-4 w-4" />
-            Add Finding
-          </Button>
+      <section aria-labelledby="finding-heading" className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="finding-heading" className="text-2xl font-semibold">
+              Findings
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Track observations through remediation, acceptance, and closure.
+            </p>
+          </div>
+          {mayCreateFinding && (
+            <Button onClick={() => setCreateFindingOpen(true)}>
+              <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+              Add finding
+            </Button>
+          )}
         </div>
+
+        <FindingStatsCards
+          queryLoading={statsQuery.isLoading}
+          queryError={statsQuery.isError}
+          stats={stats}
+          onRetry={() => void statsQuery.refetch()}
+        />
 
         <Card>
           <CardContent className="p-0">
-            {findingsLoading ? (
-              <div className="p-6 space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-10 w-full" />
+            {findingsQuery.isLoading ? (
+              <div role="status" aria-label="Loading findings" className="space-y-3 p-6">
+                {Array.from({ length: 4 }, (_, index) => (
+                  <Skeleton key={index} className="h-14 w-full" />
                 ))}
               </div>
+            ) : findingsQuery.isError ? (
+              <div role="alert" className="flex flex-col items-center gap-3 p-10 text-center">
+                <AlertTriangle aria-hidden="true" className="h-8 w-8 text-destructive" />
+                <p className="font-semibold">Findings could not be loaded</p>
+                <p className="text-sm text-muted-foreground">Retry without leaving this audit.</p>
+                <Button variant="outline" onClick={() => void findingsQuery.refetch()}>
+                  Retry
+                </Button>
+              </div>
             ) : findings.length === 0 ? (
-              <div className="p-12 text-center text-muted-foreground">
-                <AlertTriangle className="mx-auto mb-3 h-8 w-8" />
-                <p className="text-lg font-medium">No findings yet</p>
-                <p className="text-sm">Add findings discovered during the audit.</p>
+              <div className="flex flex-col items-center gap-3 p-12 text-center">
+                <ClipboardCheck aria-hidden="true" className="h-10 w-10 text-muted-foreground" />
+                <p className="text-lg font-semibold">No findings recorded</p>
+                <p className="text-sm text-muted-foreground">
+                  {mayCreateFinding
+                    ? 'Record the first observation for this engagement.'
+                    : 'This audit has no findings.'}
+                </p>
+                {mayCreateFinding && (
+                  <Button onClick={() => setCreateFindingOpen(true)}>Add first finding</Button>
+                )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-3 text-left font-medium">Ref</th>
-                      <th className="px-4 py-3 text-left font-medium">Title</th>
-                      <th className="px-4 py-3 text-left font-medium">Severity</th>
-                      <th className="px-4 py-3 text-left font-medium">Status</th>
-                      <th className="px-4 py-3 text-left font-medium">Responsible</th>
-                      <th className="px-4 py-3 text-left font-medium">Due Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {findings.map((f) => {
-                      const overdue =
-                        f.status !== 'closed' &&
-                        f.status !== 'resolved' &&
-                        isOverdue(f.due_date as string);
-                      return (
-                        <tr
-                          key={f.id as string}
-                          className="border-b transition-colors hover:bg-muted/50"
-                        >
-                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                            {f.finding_ref as string}
-                          </td>
-                          <td className="px-4 py-3 font-medium">{f.title as string}</td>
-                          <td className="px-4 py-3">
-                            <Badge className={getRiskLevelColor(f.severity as string)}>
-                              {f.severity as string}
-                            </Badge>
-                          </td>
-                          <td className="px-4 py-3">
-                            <Badge className={getStatusColor(f.status as string)}>
-                              {(f.status as string)?.replace('_', ' ')}
-                            </Badge>
-                          </td>
-                          <td className="px-4 py-3">
-                            {(f.responsible_user as Record<string, string>)?.first_name}{' '}
-                            {(f.responsible_user as Record<string, string>)?.last_name ?? '—'}
-                          </td>
-                          <td
-                            className={cn(
-                              'px-4 py-3',
-                              overdue && 'text-red-600 font-semibold dark:text-red-400'
-                            )}
-                          >
-                            {formatDate(f.due_date as string)}
-                            {overdue && (
-                              <span className="ml-1 text-xs">(overdue)</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Findings pagination */}
-            {findingsTotalPages > 1 && (
               <>
-                <Separator />
-                <div className="flex items-center justify-end gap-2 px-4 py-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={findingsPage <= 1}
-                    onClick={() => setFindingsPage((p) => p - 1)}
-                  >
-                    Previous
-                  </Button>
-                  <span className="text-sm text-muted-foreground">
-                    Page {findingsPage} of {findingsTotalPages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={findingsPage >= findingsTotalPages}
-                    onClick={() => setFindingsPage((p) => p + 1)}
-                  >
-                    Next
-                  </Button>
+                <div className="hidden overflow-x-auto lg:block">
+                  <table className="w-full text-sm">
+                    <caption className="sr-only">Findings for {audit.audit_ref}</caption>
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th scope="col" className="px-4 py-3 text-left font-medium">
+                          Finding
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">
+                          Severity
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">
+                          Status
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">
+                          Responsible
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">
+                          Due
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right font-medium">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {findings.map((finding) => (
+                        <FindingTableRow
+                          key={finding.id}
+                          finding={finding}
+                          audit={audit}
+                          canUpdate={access.canUpdate}
+                          canDelete={mayDeleteFinding}
+                          onView={setViewingFinding}
+                          onEdit={setEditingFinding}
+                          onDelete={setDeletingFinding}
+                          onTransition={(status) => setTransitioningFinding({ finding, status })}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="divide-y lg:hidden">
+                  {findings.map((finding) => (
+                    <FindingCard
+                      key={finding.id}
+                      finding={finding}
+                      audit={audit}
+                      canUpdate={access.canUpdate}
+                      canDelete={mayDeleteFinding}
+                      onView={setViewingFinding}
+                      onEdit={setEditingFinding}
+                      onDelete={setDeletingFinding}
+                      onTransition={(status) => setTransitioningFinding({ finding, status })}
+                    />
+                  ))}
                 </div>
               </>
             )}
+
+            {findingsData && findingsData.total > 0 && (
+              <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p aria-live="polite" className="text-sm text-muted-foreground">
+                  Page {findingsPage} of {findingsTotalPages} · {findingsData.total} finding
+                  {findingsData.total === 1 ? '' : 's'}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    aria-label="Previous findings page"
+                    disabled={findingsPage <= 1 || findingsQuery.isFetching}
+                    onClick={() => setFindingsPage((value) => value - 1)}
+                  >
+                    <ChevronLeft aria-hidden="true" className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    aria-label="Next findings page"
+                    disabled={findingsPage >= findingsTotalPages || findingsQuery.isFetching}
+                    onClick={() => setFindingsPage((value) => value + 1)}
+                  >
+                    <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
-      </div>
+      </section>
 
-      {/* Add Finding Dialog */}
-      <AddFindingDialog
-        auditId={id}
-        open={findingDialogOpen}
-        onOpenChange={setFindingDialogOpen}
+      {access.canUpdate && mutableAudit && (
+        <AuditEditorDialog
+          audit={audit}
+          open={editAuditOpen}
+          onOpenChange={setEditAuditOpen}
+          defaultLeadAuditorId={access.user.id}
+        />
+      )}
+      {mayCreateFinding && (
+        <FindingEditorDialog
+          auditId={id}
+          open={createFindingOpen}
+          onOpenChange={setCreateFindingOpen}
+          defaultResponsibleUserId={access.user.id}
+        />
+      )}
+      {access.canUpdate && editingFinding && (
+        <FindingEditorDialog
+          auditId={id}
+          finding={editingFinding}
+          open={Boolean(editingFinding)}
+          onOpenChange={(open) => !open && setEditingFinding(null)}
+          defaultResponsibleUserId={access.user.id}
+        />
+      )}
+      <FindingDetailDialog
+        finding={viewingFinding}
+        open={Boolean(viewingFinding)}
+        onOpenChange={(open) => !open && setViewingFinding(null)}
       />
+      {access.canUpdate && transitioningFinding && (
+        <FindingTransitionDialog
+          auditId={id}
+          finding={transitioningFinding.finding}
+          targetStatus={transitioningFinding.status}
+          open={Boolean(transitioningFinding)}
+          onOpenChange={(open) => !open && setTransitioningFinding(null)}
+        />
+      )}
+      {access.canDelete && deletingFinding && (
+        <AuditConfirmationDialog
+          open={Boolean(deletingFinding)}
+          onOpenChange={(open) => !open && setDeletingFinding(null)}
+          title="Delete finding?"
+          description={
+            <p>
+              This removes the finding from active audit records. Findings must be retained once the
+              audit is completed.
+            </p>
+          }
+          confirmLabel="Delete finding"
+          confirmationText={deletingFinding.finding_ref}
+          destructive
+          onConfirm={() => deleteFinding.mutateAsync(deletingFinding.id)}
+        />
+      )}
+      {access.canUpdate && lifecycleAction && (
+        <AuditConfirmationDialog
+          open={Boolean(lifecycleAction)}
+          onOpenChange={(open) => !open && setLifecycleAction(null)}
+          title={lifecycleTitle(lifecycleAction)}
+          description={<p>{lifecycleDescription(lifecycleAction)}</p>}
+          confirmLabel={`${humanizeAuditToken(lifecycleAction)} audit`}
+          destructive={lifecycleAction === 'cancel'}
+          onConfirm={() => transitionAudit.mutateAsync(lifecycleAction)}
+        />
+      )}
+      {mayDeleteAudit && (
+        <AuditConfirmationDialog
+          open={deleteAuditOpen}
+          onOpenChange={setDeleteAuditOpen}
+          title="Delete audit?"
+          description={
+            <p>This removes the audit plan from active records. Type the reference to confirm.</p>
+          }
+          confirmLabel="Delete audit"
+          confirmationText={audit.audit_ref}
+          destructive
+          onConfirm={confirmAuditDeletion}
+        />
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Add Finding Dialog
-// ---------------------------------------------------------------------------
+interface FindingActionsProps {
+  audit: Audit;
+  finding: AuditFinding;
+  canUpdate: boolean;
+  canDelete: boolean;
+  onView: (finding: AuditFinding) => void;
+  onEdit: (finding: AuditFinding) => void;
+  onDelete: (finding: AuditFinding) => void;
+  onTransition: (status: FindingStatus) => void;
+}
 
-function AddFindingDialog({
-  auditId,
+function FindingActions({
+  audit,
+  finding,
+  canUpdate,
+  canDelete,
+  onView,
+  onEdit,
+  onDelete,
+  onTransition,
+}: FindingActionsProps) {
+  const mutable = !['closed', 'cancelled'].includes(audit.status);
+  const transitions = mutable && canUpdate ? findingNextStatuses(finding.status) : [];
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      <Button size="sm" variant="outline" onClick={() => onView(finding)}>
+        View
+      </Button>
+      {mutable && canUpdate && (
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={`Edit ${finding.finding_ref}`}
+          onClick={() => onEdit(finding)}
+        >
+          <Pencil aria-hidden="true" className="h-4 w-4" />
+        </Button>
+      )}
+      {transitions.length > 0 && (
+        <Select value="" onValueChange={(value) => onTransition(value as FindingStatus)}>
+          <SelectTrigger
+            className="h-9 w-[9.5rem]"
+            aria-label={`Change status for ${finding.finding_ref}`}
+          >
+            <SelectValue placeholder="Change status" />
+          </SelectTrigger>
+          <SelectContent>
+            {transitions.map((status) => (
+              <SelectItem key={status} value={status}>
+                {humanizeAuditToken(status)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      {canDelete && (
+        <Button
+          size="icon"
+          variant="ghost"
+          className="text-destructive hover:text-destructive"
+          aria-label={`Delete ${finding.finding_ref}`}
+          onClick={() => onDelete(finding)}
+        >
+          <Trash2 aria-hidden="true" className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function FindingTableRow(props: FindingActionsProps) {
+  const { finding } = props;
+  const overdue = isFindingOverdue(finding);
+  return (
+    <tr
+      className={cn(
+        'border-b last:border-0 hover:bg-muted/30',
+        overdue && 'bg-red-50/60 dark:bg-red-950/10',
+      )}
+    >
+      <td className="px-4 py-3">
+        <button
+          type="button"
+          className="text-left font-medium text-primary hover:underline"
+          onClick={() => props.onView(finding)}
+        >
+          {finding.title}
+        </button>
+        <div className="font-mono text-xs text-muted-foreground">
+          {finding.finding_ref} · {finding.finding_type}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <Badge className={getRiskLevelColor(finding.severity)}>
+          {humanizeAuditToken(finding.severity)}
+        </Badge>
+      </td>
+      <td className="px-4 py-3">
+        <Badge className={getStatusColor(finding.status)}>
+          {humanizeAuditToken(finding.status)}
+        </Badge>
+      </td>
+      <td className="px-4 py-3">
+        {auditPersonName(finding.responsible_user, finding.responsible_user_id)}
+      </td>
+      <td
+        className={cn('whitespace-nowrap px-4 py-3', overdue && 'font-semibold text-destructive')}
+      >
+        {formatDate(finding.due_date)}
+        {overdue && <span className="ml-1 text-xs">Overdue</span>}
+      </td>
+      <td className="px-4 py-3">
+        <FindingActions {...props} />
+      </td>
+    </tr>
+  );
+}
+
+function FindingCard(props: FindingActionsProps) {
+  const { finding } = props;
+  const overdue = isFindingOverdue(finding);
+  return (
+    <article className={cn('space-y-3 p-4', overdue && 'bg-red-50/60 dark:bg-red-950/10')}>
+      <div className="flex flex-wrap gap-2">
+        <Badge className={getRiskLevelColor(finding.severity)}>
+          {humanizeAuditToken(finding.severity)}
+        </Badge>
+        <Badge className={getStatusColor(finding.status)}>
+          {humanizeAuditToken(finding.status)}
+        </Badge>
+        {overdue && <Badge variant="destructive">Overdue</Badge>}
+      </div>
+      <div>
+        <button
+          type="button"
+          className="text-left font-semibold text-primary hover:underline"
+          onClick={() => props.onView(finding)}
+        >
+          {finding.title}
+        </button>
+        <p className="font-mono text-xs text-muted-foreground">{finding.finding_ref}</p>
+      </div>
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <dt className="text-muted-foreground">Responsible</dt>
+          <dd>{auditPersonName(finding.responsible_user, finding.responsible_user_id)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Due</dt>
+          <dd className={cn(overdue && 'font-semibold text-destructive')}>
+            {formatDate(finding.due_date)}
+          </dd>
+        </div>
+      </dl>
+      <FindingActions {...props} />
+    </article>
+  );
+}
+
+function FindingStatsCards({
+  stats,
+  queryLoading,
+  queryError,
+  onRetry,
+}: {
+  stats?: AuditFindingStats;
+  queryLoading: boolean;
+  queryError: boolean;
+  onRetry: () => void;
+}) {
+  if (queryLoading)
+    return (
+      <div
+        role="status"
+        aria-label="Loading finding statistics"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
+      >
+        {Array.from({ length: 5 }, (_, index) => (
+          <Skeleton key={index} className="h-24" />
+        ))}
+      </div>
+    );
+  if (queryError || !stats)
+    return (
+      <div
+        role="alert"
+        className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 p-4 text-sm"
+      >
+        <span>Finding statistics are unavailable.</span>
+        <Button size="sm" variant="outline" onClick={onRetry}>
+          Retry
+        </Button>
+      </div>
+    );
+  const cards = [
+    ['Total', stats.total, false],
+    ['Open / in progress', stats.open + stats.in_progress, stats.open + stats.in_progress > 0],
+    ['Resolved / closed', stats.resolved + stats.closed, false],
+    ['Risk accepted', stats.accepted, false],
+    ['Overdue', stats.overdue, stats.overdue > 0],
+  ] as const;
+  return (
+    <div
+      role="group"
+      className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
+      aria-label="Finding statistics"
+    >
+      {cards.map(([label, value, alert]) => (
+        <Card key={label} className={cn(alert && 'border-destructive/40')}>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">{label}</p>
+            <p className={cn('mt-1 text-2xl font-bold', alert && 'text-destructive')}>{value}</p>
+            {label === 'Open / in progress' && (
+              <p className="text-xs text-muted-foreground">
+                {stats.critical_open} critical · {stats.high_open} high
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function FindingDetailDialog({
+  finding,
   open,
   onOpenChange,
 }: {
-  auditId: string;
+  finding: AuditFinding | null;
   open: boolean;
-  onOpenChange: (v: boolean) => void;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const createFinding = useCreateFinding(auditId);
-  const { data: usersData } = useUsers({ page: 1, page_size: 100 } as Record<string, unknown>);
-  const users: Record<string, unknown>[] =
-    (usersData as Record<string, unknown>)?.items as Record<string, unknown>[] ?? [];
-
-  const form = useForm<CreateFindingValues>({
-    resolver: zodResolver(createFindingSchema),
-    defaultValues: {
-      title: '',
-      description: '',
-      severity: undefined,
-      finding_type: '',
-      control_id: '',
-      root_cause: '',
-      recommendation: '',
-      responsible_user_id: '',
-      due_date: '',
-    },
-  });
-
-  const onSubmit = async (values: CreateFindingValues) => {
-    const payload = {
-      ...values,
-      control_id: values.control_id || undefined,
-      root_cause: values.root_cause || undefined,
-    };
-    await createFinding.mutateAsync(payload);
-    form.reset();
-    onOpenChange(false);
-  };
-
+  if (!finding) return null;
+  const overdue = isFindingOverdue(finding);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add Finding</DialogTitle>
+          <DialogTitle>{finding.title}</DialogTitle>
           <DialogDescription>
-            Record a finding discovered during this audit.
+            {finding.finding_ref} · created {formatDateTime(finding.created_at)}
           </DialogDescription>
         </DialogHeader>
-
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          {/* Title */}
-          <div className="space-y-2">
-            <Label htmlFor="f-title">Title *</Label>
-            <Input id="f-title" {...form.register('title')} placeholder="Finding title" />
-            {form.formState.errors.title && (
-              <p className="text-sm text-destructive">{form.formState.errors.title.message}</p>
-            )}
-          </div>
-
-          {/* Description */}
-          <div className="space-y-2">
-            <Label htmlFor="f-desc">Description *</Label>
-            <Textarea id="f-desc" {...form.register('description')} placeholder="Describe the finding in detail..." rows={3} />
-            {form.formState.errors.description && (
-              <p className="text-sm text-destructive">{form.formState.errors.description.message}</p>
-            )}
-          </div>
-
-          {/* Severity & Finding Type */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Severity *</Label>
-              <Select
-                value={form.watch('severity')}
-                onValueChange={(v) =>
-                  form.setValue('severity', v as CreateFindingValues['severity'], { shouldValidate: true })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select severity" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="critical">Critical</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="informational">Informational</SelectItem>
-                </SelectContent>
-              </Select>
-              {form.formState.errors.severity && (
-                <p className="text-sm text-destructive">{form.formState.errors.severity.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="f-type">Finding Type *</Label>
-              <Input id="f-type" {...form.register('finding_type')} placeholder="e.g. Non-conformity, Observation" />
-              {form.formState.errors.finding_type && (
-                <p className="text-sm text-destructive">{form.formState.errors.finding_type.message}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Control ID (optional search) */}
-          <div className="space-y-2">
-            <Label htmlFor="f-control">Control ID (optional)</Label>
-            <Input id="f-control" {...form.register('control_id')} placeholder="Enter control ID or search..." />
-          </div>
-
-          {/* Root Cause */}
-          <div className="space-y-2">
-            <Label htmlFor="f-root">Root Cause</Label>
-            <Textarea id="f-root" {...form.register('root_cause')} placeholder="What caused this issue?" rows={2} />
-          </div>
-
-          {/* Recommendation */}
-          <div className="space-y-2">
-            <Label htmlFor="f-rec">Recommendation *</Label>
-            <Textarea id="f-rec" {...form.register('recommendation')} placeholder="Recommended corrective action..." rows={2} />
-            {form.formState.errors.recommendation && (
-              <p className="text-sm text-destructive">{form.formState.errors.recommendation.message}</p>
-            )}
-          </div>
-
-          {/* Responsible & Due Date */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Responsible Person *</Label>
-              <Select
-                value={form.watch('responsible_user_id')}
-                onValueChange={(v) => form.setValue('responsible_user_id', v, { shouldValidate: true })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select person" />
-                </SelectTrigger>
-                <SelectContent>
-                  {users.map((u) => (
-                    <SelectItem key={u.id as string} value={u.id as string}>
-                      {u.first_name as string} {u.last_name as string}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.responsible_user_id && (
-                <p className="text-sm text-destructive">{form.formState.errors.responsible_user_id.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="f-due">Due Date *</Label>
-              <Input id="f-due" type="date" {...form.register('due_date')} />
-              {form.formState.errors.due_date && (
-                <p className="text-sm text-destructive">{form.formState.errors.due_date.message}</p>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={createFinding.isPending}>
-              {createFinding.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Add Finding
-            </Button>
-          </DialogFooter>
-        </form>
+        <div className="flex flex-wrap gap-2">
+          <Badge className={getRiskLevelColor(finding.severity)}>
+            {humanizeAuditToken(finding.severity)}
+          </Badge>
+          <Badge className={getStatusColor(finding.status)}>
+            {humanizeAuditToken(finding.status)}
+          </Badge>
+          {overdue && <Badge variant="destructive">Overdue</Badge>}
+        </div>
+        <dl className="grid gap-4 sm:grid-cols-2">
+          <Detail label="Finding type" value={finding.finding_type} />
+          <Detail label="Due date" value={formatDate(finding.due_date)} />
+          <Detail
+            label="Responsible"
+            value={auditPersonName(finding.responsible_user, finding.responsible_user_id)}
+          />
+          <Detail label="Control UUID" value={finding.control_id ?? 'Not linked'} />
+        </dl>
+        <Separator />
+        <Detail label="Description" value={finding.description} />
+        <Detail label="Root cause" value={finding.root_cause || 'Not documented'} />
+        <Detail label="Recommendation" value={finding.recommendation} />
+        <Detail label="Remediation plan" value={finding.remediation_plan || 'Not documented'} />
+        {finding.accepted_risk_reason && (
+          <Detail label="Risk acceptance rationale" value={finding.accepted_risk_reason} />
+        )}
+        {finding.resolved_at && (
+          <Detail label="Resolved at" value={formatDateTime(finding.resolved_at)} />
+        )}
       </DialogContent>
     </Dialog>
   );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 whitespace-pre-wrap break-words text-sm">{value}</p>
+    </div>
+  );
+}
+
+function IconDetail({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex gap-3">
+      <span className="mt-0.5 text-muted-foreground">{icon}</span>
+      <div>
+        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dd className="text-sm font-medium">{value}</dd>
+      </div>
+    </div>
+  );
+}
+
+function BackLink() {
+  return (
+    <Link
+      href="/audits"
+      className="inline-flex items-center rounded-sm text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <ArrowLeft aria-hidden="true" className="mr-1 h-4 w-4" />
+      Back to audits
+    </Link>
+  );
+}
+
+function AuditDetailSkeleton({ label }: { label: string }) {
+  return (
+    <div role="status" aria-label={label} className="space-y-6">
+      <Skeleton className="h-5 w-28" />
+      <Skeleton className="h-24 w-full" />
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Skeleton className="h-64" />
+        <Skeleton className="h-64" />
+      </div>
+      <Skeleton className="h-80 w-full" />
+    </div>
+  );
+}
+
+function AccessState({
+  title,
+  description,
+  action,
+  alert = false,
+}: {
+  title: string;
+  description: string;
+  action?: React.ReactNode;
+  alert?: boolean;
+}) {
+  return (
+    <Card className="mx-auto max-w-xl">
+      <CardContent
+        role={alert ? 'alert' : undefined}
+        className="flex flex-col items-center gap-3 py-12 text-center"
+      >
+        <LockKeyhole aria-hidden="true" className="h-9 w-9 text-muted-foreground" />
+        <h1 className="text-xl font-semibold">{title}</h1>
+        <p className="text-sm text-muted-foreground">{description}</p>
+        {action}
+      </CardContent>
+    </Card>
+  );
+}
+
+function lifecycleIcon(action: AuditLifecycleAction) {
+  const className = 'mr-2 h-4 w-4';
+  if (action === 'start') return <Play aria-hidden="true" className={className} />;
+  if (action === 'complete') return <CheckCircle2 aria-hidden="true" className={className} />;
+  if (action === 'close') return <Flag aria-hidden="true" className={className} />;
+  return <XCircle aria-hidden="true" className={className} />;
+}
+
+function lifecycleTitle(action: AuditLifecycleAction): string {
+  if (action === 'start') return 'Start audit execution?';
+  if (action === 'complete') return 'Complete audit execution?';
+  if (action === 'close') return 'Close audit?';
+  return 'Cancel audit plan?';
+}
+
+function lifecycleDescription(action: AuditLifecycleAction): string {
+  if (action === 'start')
+    return 'The audit moves to In Progress and today becomes its actual start date.';
+  if (action === 'complete')
+    return 'The audit moves to Completed and today becomes its actual end date.';
+  if (action === 'close')
+    return 'Closure makes the audit and its findings immutable. All active findings must already be resolved or risk-accepted.';
+  return 'Cancellation is only available before execution starts. The cancelled record remains available for retention and reporting.';
+}
+
+function closeReason(statsFailed: boolean, blockers: number): string {
+  if (statsFailed) return 'Finding statistics are unavailable.';
+  if (blockers > 0) return `${blockers} active finding${blockers === 1 ? '' : 's'} block closure.`;
+  return 'Finding statistics are still loading.';
 }

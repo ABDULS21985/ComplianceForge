@@ -20,6 +20,7 @@ type OutboxDispatcher struct {
 	store     OutboxStore
 	publisher EnvelopePublisher
 	config    OutboxConfig
+	observer  Observer
 }
 
 func NewOutboxDispatcher(store OutboxStore, publisher EnvelopePublisher, config OutboxConfig) (*OutboxDispatcher, error) {
@@ -29,7 +30,14 @@ func NewOutboxDispatcher(store OutboxStore, publisher EnvelopePublisher, config 
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	return &OutboxDispatcher{store: store, publisher: publisher, config: config}, nil
+	return &OutboxDispatcher{store: store, publisher: publisher, config: config, observer: noopObserver{}}, nil
+}
+
+func (d *OutboxDispatcher) SetObserver(observer Observer) {
+	if observer == nil {
+		observer = noopObserver{}
+	}
+	d.observer = observer
 }
 
 func (d *OutboxDispatcher) Run(ctx context.Context) error {
@@ -54,13 +62,22 @@ func (d *OutboxDispatcher) Run(ctx context.Context) error {
 	}
 }
 
-func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) (int, error) {
+func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) (processed int, dispatchErr error) {
+	started := time.Now()
+	defer func() {
+		outcome := "success"
+		if dispatchErr != nil {
+			outcome = "error"
+		}
+		d.observer.ObserveQueueOperation("outbox", outcome, time.Since(started))
+	}()
 	messages, err := d.store.ClaimBatch(ctx)
 	if err != nil {
 		return 0, err
 	}
 	for index, message := range messages {
-		publishCtx, cancel := context.WithTimeout(ctx, d.config.PublishTimeout)
+		messageCtx := ExtractTraceContext(ctx, message.Envelope)
+		publishCtx, cancel := context.WithTimeout(messageCtx, d.config.PublishTimeout)
 		err := d.publisher.PublishEnvelope(publishCtx, message.QueueName, message.Envelope)
 		cancel()
 		if err == nil {

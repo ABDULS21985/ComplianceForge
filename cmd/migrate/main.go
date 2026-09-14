@@ -164,15 +164,24 @@ func resolveMigrationSource(configuredPath string) (string, error) {
 	}
 
 	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err != nil || !info.IsDir() {
-			continue
-		}
 		absolutePath, err := filepath.Abs(candidate)
 		if err != nil {
 			return "", fmt.Errorf("resolve migration directory %q: %w", candidate, err)
 		}
-		return (&url.URL{Scheme: "file", Path: filepath.ToSlash(absolutePath)}).String(), nil
+		canonicalPath, err := filepath.EvalSymlinks(absolutePath)
+		if err != nil {
+			continue
+		}
+		// OpenRoot verifies that the canonical source is a directory and binds the
+		// validation to a directory handle instead of a traversal-prone Stat call.
+		root, err := os.OpenRoot(canonicalPath)
+		if err != nil {
+			continue
+		}
+		if closeErr := root.Close(); closeErr != nil {
+			return "", fmt.Errorf("close migration directory %q: %w", candidate, closeErr)
+		}
+		return (&url.URL{Scheme: "file", Path: filepath.ToSlash(canonicalPath)}).String(), nil
 	}
 
 	return "", fmt.Errorf("no migration directory found (checked %s)", strings.Join(candidates, ", "))

@@ -68,8 +68,10 @@ export function getStatusColor(status: string): string {
       return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
     case 'partial': case 'in_progress': case 'under_review': case 'pending_approval': case 'investigating': case 'contained':
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
-    case 'planned': case 'draft': case 'pending': case 'identified': case 'scheduled':
+    case 'planned': case 'draft': case 'pending': case 'identified': case 'scheduled': case 'reported':
       return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+    case 'triaged':
+      return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
     case 'not_implemented': case 'not_started': case 'open': case 'overdue': case 'failed':
       return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
     case 'not_applicable': case 'archived': case 'retired': case 'cancelled': case 'superseded':

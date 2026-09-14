@@ -1,14 +1,44 @@
 // ComplianceForge React Query Hooks
 // Wraps every API endpoint with proper caching, invalidation, and toast notifications
 
+import { api, type PaginationParams } from "./api";
+import type {
+  Audit,
+  AuditCreateInput,
+  AuditFinding,
+  AuditFindingCreateInput,
+  AuditFindingListParams,
+  AuditFindingPatch,
+  AuditFindingStats,
+  AuditFramework,
+  AuditLifecycleAction,
+  AuditListParams,
+  AuditPage,
+  AuditPatch,
+} from '@/types/audit';
 import {
-  useQuery,
   useMutation,
+  useQuery,
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query";
+import { formatAuditError } from './audit';
+import type {
+  Incident,
+  IncidentAssignmentInput,
+  IncidentBreachAssessmentInput,
+  IncidentDPANotificationInput,
+  IncidentEscalationInput,
+  IncidentListParams,
+  IncidentPage,
+  IncidentPatch,
+  IncidentReasonInput,
+  IncidentStatistics,
+  IncidentTransitionInput,
+  IncidentUnassignmentInput,
+} from '@/types/incident';
+import { formatIncidentError } from './incident';
 import { toast } from "sonner";
-import { api, type PaginationParams } from "./api";
 
 // ---------------------------------------------------------------------------
 // Cache key factories
@@ -49,15 +79,21 @@ export const queryKeys = {
   audits: ["audits"] as const,
   auditsList: (params?: Record<string, unknown>) => ["audits", "list", params] as const,
   audit: (id: string) => ["audits", id] as const,
-  auditFindings: (auditId: string, params?: PaginationParams) => ["audits", auditId, "findings", params] as const,
+  auditFindings: (auditId: string, params?: AuditFindingListParams) => ["audits", auditId, "findings", params] as const,
+  auditFinding: (auditId: string, findingId: string) => ["audits", auditId, "findings", findingId] as const,
   auditFindingsStats: (auditId: string) => ["audits", auditId, "findings", "stats"] as const,
+  auditFrameworkOptions: ['audits', 'reference-data', 'frameworks'] as const,
 
   // Incidents
   incidents: ["incidents"] as const,
   incidentsList: (params?: Record<string, unknown>) => ["incidents", "list", params] as const,
   incident: (id: string) => ["incidents", id] as const,
   incidentStats: ["incidents", "stats"] as const,
-  urgentBreaches: ["incidents", "urgent-breaches"] as const,
+  urgentBreaches: ["incidents", "breaches", "upcoming"] as const,
+  incidentTimeline: (id: string, params?: { page?: number; page_size?: number }) =>
+    ["incidents", id, "timeline", params] as const,
+  incidentAssignments: (id: string, activeOnly: boolean) =>
+    ["incidents", id, "assignments", { activeOnly }] as const,
 
   // Vendors
   vendors: ["vendors"] as const,
@@ -389,8 +425,8 @@ export function usePolicyAttestationStats(id: string, options?: Partial<UseQuery
 // ---------------------------------------------------------------------------
 
 export function useAudits(
-  params?: PaginationParams & { status?: string; audit_type?: string },
-  options?: Partial<UseQueryOptions>
+  params?: AuditListParams,
+  options?: Omit<UseQueryOptions<AuditPage<Audit>>, 'queryKey' | 'queryFn'>
 ) {
   return useQuery({
     queryKey: queryKeys.auditsList(params as Record<string, unknown>),
@@ -399,7 +435,10 @@ export function useAudits(
   });
 }
 
-export function useAudit(id: string, options?: Partial<UseQueryOptions>) {
+export function useAudit(
+  id: string,
+  options?: Omit<UseQueryOptions<Audit>, 'queryKey' | 'queryFn'>
+) {
   return useQuery({
     queryKey: queryKeys.audit(id),
     queryFn: () => api.audits.get(id),
@@ -411,35 +450,87 @@ export function useAudit(id: string, options?: Partial<UseQueryOptions>) {
 export function useCreateAudit() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: unknown) => api.audits.create(data),
+    mutationFn: (data: AuditCreateInput) => api.audits.create(data),
     onSuccess: () => {
       toast.success("Audit created.");
       qc.invalidateQueries({ queryKey: queryKeys.audits });
       qc.invalidateQueries({ queryKey: queryKeys.dashboard });
     },
-    onError: () => {
-      toast.error("Failed to create audit.");
+    onError: (error) => {
+      toast.error(formatAuditError(error, 'Failed to create audit.'));
     },
+  });
+}
+
+export function useUpdateAudit(auditId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AuditPatch) => api.audits.update(auditId, data),
+    onSuccess: (audit) => {
+      toast.success('Audit updated.');
+      qc.setQueryData(queryKeys.audit(auditId), audit);
+      qc.invalidateQueries({ queryKey: queryKeys.audits });
+    },
+    onError: (error) => toast.error(formatAuditError(error, 'Failed to update audit.')),
+  });
+}
+
+export function useDeleteAudit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (auditId: string) => api.audits.delete(auditId),
+    onSuccess: (_data, auditId) => {
+      toast.success('Audit deleted.');
+      qc.removeQueries({ queryKey: queryKeys.audit(auditId) });
+      qc.invalidateQueries({ queryKey: queryKeys.audits });
+      qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+    },
+    onError: (error) => toast.error(formatAuditError(error, 'Failed to delete audit.')),
+  });
+}
+
+export function useAuditTransition(auditId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (action: AuditLifecycleAction) => api.audits.transition(auditId, action),
+    onSuccess: (audit, action) => {
+      const successMessages: Record<AuditLifecycleAction, string> = {
+        start: 'Audit started.',
+        complete: 'Audit completed.',
+        close: 'Audit closed.',
+        cancel: 'Audit cancelled.',
+      };
+      toast.success(successMessages[action]);
+      qc.setQueryData(queryKeys.audit(auditId), audit);
+      qc.invalidateQueries({ queryKey: queryKeys.audits });
+      qc.invalidateQueries({ queryKey: queryKeys.dashboard });
+    },
+    onError: (error) =>
+      toast.error(formatAuditError(error, 'Failed to change the audit lifecycle.')),
   });
 }
 
 export function useCreateFinding(auditId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: unknown) => api.audits.createFinding(auditId, data),
+    mutationFn: (data: AuditFindingCreateInput) => api.audits.createFinding(auditId, data),
     onSuccess: () => {
       toast.success("Finding created.");
       qc.invalidateQueries({ queryKey: queryKeys.auditFindings(auditId) });
       qc.invalidateQueries({ queryKey: queryKeys.auditFindingsStats(auditId) });
       qc.invalidateQueries({ queryKey: queryKeys.audit(auditId) });
     },
-    onError: () => {
-      toast.error("Failed to create finding.");
+    onError: (error) => {
+      toast.error(formatAuditError(error, 'Failed to create finding.'));
     },
   });
 }
 
-export function useAuditFindings(auditId: string, params?: PaginationParams, options?: Partial<UseQueryOptions>) {
+export function useAuditFindings(
+  auditId: string,
+  params?: AuditFindingListParams,
+  options?: Omit<UseQueryOptions<AuditPage<AuditFinding>>, 'queryKey' | 'queryFn'>
+) {
   return useQuery({
     queryKey: queryKeys.auditFindings(auditId, params),
     queryFn: () => api.audits.getFindings(auditId, params),
@@ -448,7 +539,10 @@ export function useAuditFindings(auditId: string, params?: PaginationParams, opt
   });
 }
 
-export function useAuditFindingsStats(auditId: string, options?: Partial<UseQueryOptions>) {
+export function useAuditFindingsStats(
+  auditId: string,
+  options?: Omit<UseQueryOptions<AuditFindingStats>, 'queryKey' | 'queryFn'>
+) {
   return useQuery({
     queryKey: queryKeys.auditFindingsStats(auditId),
     queryFn: () => api.audits.findingsStats(auditId),
@@ -457,13 +551,69 @@ export function useAuditFindingsStats(auditId: string, options?: Partial<UseQuer
   });
 }
 
+export function useAuditFrameworkOptions(enabled = true) {
+  return useQuery<AuditPage<AuditFramework>>({
+    queryKey: queryKeys.auditFrameworkOptions,
+    queryFn: () => api.audits.frameworkOptions(),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  });
+}
+
+export function useAuditFinding(
+  auditId: string,
+  findingId: string,
+  options?: Omit<UseQueryOptions<AuditFinding>, 'queryKey' | 'queryFn'>
+) {
+  return useQuery({
+    queryKey: queryKeys.auditFinding(auditId, findingId),
+    queryFn: () => api.audits.getFinding(auditId, findingId),
+    enabled: Boolean(auditId && findingId),
+    ...options,
+  });
+}
+
+export function useUpdateAuditFinding(auditId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ findingId, data }: { findingId: string; data: AuditFindingPatch }) =>
+      api.audits.updateFinding(auditId, findingId, data),
+    onSuccess: (finding) => {
+      toast.success('Finding updated.');
+      qc.setQueryData(queryKeys.auditFinding(auditId, finding.id), finding);
+      qc.invalidateQueries({ queryKey: queryKeys.auditFindings(auditId) });
+      qc.invalidateQueries({ queryKey: queryKeys.auditFindingsStats(auditId) });
+      qc.invalidateQueries({ queryKey: queryKeys.audit(auditId) });
+      qc.invalidateQueries({ queryKey: queryKeys.audits });
+    },
+    onError: (error) => toast.error(formatAuditError(error, 'Failed to update finding.')),
+  });
+}
+
+export function useDeleteAuditFinding(auditId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (findingId: string) => api.audits.deleteFinding(auditId, findingId),
+    onSuccess: (_data, findingId) => {
+      toast.success('Finding deleted.');
+      qc.removeQueries({ queryKey: queryKeys.auditFinding(auditId, findingId) });
+      qc.invalidateQueries({ queryKey: queryKeys.auditFindings(auditId) });
+      qc.invalidateQueries({ queryKey: queryKeys.auditFindingsStats(auditId) });
+      qc.invalidateQueries({ queryKey: queryKeys.audit(auditId) });
+      qc.invalidateQueries({ queryKey: queryKeys.audits });
+    },
+    onError: (error) => toast.error(formatAuditError(error, 'Failed to delete finding.')),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // INCIDENTS
 // ---------------------------------------------------------------------------
 
 export function useIncidents(
-  params?: PaginationParams & { status?: string; severity?: string; is_data_breach?: boolean },
-  options?: Partial<UseQueryOptions>
+  params?: IncidentListParams,
+  options?: Omit<UseQueryOptions<IncidentPage<Incident>>, 'queryKey' | 'queryFn'>
 ) {
   return useQuery({
     queryKey: queryKeys.incidentsList(params as Record<string, unknown>),
@@ -473,7 +623,10 @@ export function useIncidents(
   });
 }
 
-export function useIncident(id: string, options?: Partial<UseQueryOptions>) {
+export function useIncident(
+  id: string,
+  options?: Omit<UseQueryOptions<Incident>, 'queryKey' | 'queryFn'>,
+) {
   return useQuery({
     queryKey: queryKeys.incident(id),
     queryFn: () => api.incidents.get(id),
@@ -486,7 +639,7 @@ export function useIncident(id: string, options?: Partial<UseQueryOptions>) {
 export function useCreateIncident() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: unknown) => api.incidents.create(data),
+    mutationFn: (data: import('@/types/incident').IncidentCreateInput) => api.incidents.create(data),
     onSuccess: () => {
       toast.success("Incident reported.");
       qc.invalidateQueries({ queryKey: queryKeys.incidents });
@@ -494,73 +647,141 @@ export function useCreateIncident() {
       qc.invalidateQueries({ queryKey: queryKeys.urgentBreaches });
       qc.invalidateQueries({ queryKey: queryKeys.dashboard });
     },
-    onError: () => {
-      toast.error("Failed to report incident.");
+    onError: (error) => {
+      toast.error(formatIncidentError(error, 'Failed to report incident.'));
     },
   });
 }
 
-export function useUpdateIncidentStatus() {
+function refreshIncidentQueries(qc: ReturnType<typeof useQueryClient>, id: string) {
+  qc.invalidateQueries({ queryKey: queryKeys.incident(id) });
+  qc.invalidateQueries({ queryKey: queryKeys.incidents });
+  qc.invalidateQueries({ queryKey: queryKeys.incidentStats });
+  qc.invalidateQueries({ queryKey: queryKeys.urgentBreaches });
+  qc.invalidateQueries({ queryKey: queryKeys.incidentTimeline(id) });
+}
+
+export function useUpdateIncident(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { status: string; notes?: string } }) =>
-      api.incidents.updateStatus(id, data),
-    // Optimistic update for status changes
-    onMutate: async ({ id, data }) => {
-      await qc.cancelQueries({ queryKey: queryKeys.incident(id) });
-      const previous = qc.getQueryData(queryKeys.incident(id));
-      qc.setQueryData(queryKeys.incident(id), (old: Record<string, unknown> | undefined) =>
-        old ? { ...old, status: data.status } : old
-      );
-      return { previous, id };
+    mutationFn: (data: IncidentPatch) => api.incidents.update(id, data),
+    onSuccess: (incident) => {
+      toast.success('Incident updated.');
+      qc.setQueryData(queryKeys.incident(id), incident);
+      refreshIncidentQueries(qc, id);
     },
-    onError: (_err, _vars, context) => {
-      if (context?.previous) {
-        qc.setQueryData(queryKeys.incident(context.id), context.previous);
-      }
-      toast.error("Failed to update incident status.");
+    onError: (error) => {
+      toast.error(formatIncidentError(error, 'Failed to update incident.'));
     },
-    onSuccess: (_data, variables) => {
-      toast.success("Incident status updated.");
-      qc.invalidateQueries({ queryKey: queryKeys.incident(variables.id) });
+  });
+}
+
+export function useDeleteIncident() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version: number }) =>
+      api.incidents.delete(id, version),
+    onSuccess: (_data, { id }) => {
+      toast.success('Incident deleted.');
+      qc.removeQueries({ queryKey: queryKeys.incident(id) });
       qc.invalidateQueries({ queryKey: queryKeys.incidents });
       qc.invalidateQueries({ queryKey: queryKeys.incidentStats });
-      qc.invalidateQueries({ queryKey: queryKeys.urgentBreaches });
+      qc.invalidateQueries({ queryKey: queryKeys.dashboard });
     },
+    onError: (error) => toast.error(formatIncidentError(error, 'Failed to delete incident.')),
   });
 }
 
-export function useNotifyDPA() {
+export function useIncidentTransition(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data?: { message?: string } }) =>
-      api.incidents.notifyDPA(id, data),
-    onSuccess: (_data, variables) => {
-      toast.success("DPA notification sent.");
-      qc.invalidateQueries({ queryKey: queryKeys.incident(variables.id) });
+    mutationFn: (data: IncidentTransitionInput) => api.incidents.transition(id, data),
+    onSuccess: (incident) => {
+      toast.success('Incident lifecycle updated.');
+      qc.setQueryData(queryKeys.incident(id), incident);
+      refreshIncidentQueries(qc, id);
     },
-    onError: () => {
-      toast.error("Failed to send DPA notification.");
-    },
+    onError: (error) =>
+      toast.error(formatIncidentError(error, 'Failed to change the incident lifecycle.')),
   });
 }
 
-export function useNis2EarlyWarning() {
+export function useIncidentReasonAction(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data?: unknown }) =>
-      api.incidents.nis2EarlyWarning(id, data),
-    onSuccess: (_data, variables) => {
-      toast.success("NIS2 early warning submitted.");
-      qc.invalidateQueries({ queryKey: queryKeys.incident(variables.id) });
+    mutationFn: ({ action, data }: { action: 'cancel' | 'reopen' | 'close'; data: IncidentReasonInput }) =>
+      api.incidents[action](id, data),
+    onSuccess: (incident, { action }) => {
+      toast.success(`Incident ${action === 'close' ? 'closed' : `${action}ed`}.`);
+      qc.setQueryData(queryKeys.incident(id), incident);
+      refreshIncidentQueries(qc, id);
     },
-    onError: () => {
-      toast.error("Failed to submit NIS2 early warning.");
-    },
+    onError: (error) =>
+      toast.error(formatIncidentError(error, 'Failed to change the incident lifecycle.')),
   });
 }
 
-export function useIncidentStats(options?: Partial<UseQueryOptions>) {
+export function useCloseIncident(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ version, reason, lessonsLearned }: { version: number; reason: string; lessonsLearned: string }) => {
+      const updated = await api.incidents.update(id, {
+        version,
+        lessons_learned: lessonsLearned,
+      });
+      return api.incidents.close(id, { version: updated.version, reason });
+    },
+    onSuccess: (incident) => {
+      toast.success('Incident closed.');
+      qc.setQueryData(queryKeys.incident(id), incident);
+      refreshIncidentQueries(qc, id);
+    },
+    onError: (error) => toast.error(formatIncidentError(error, 'Failed to close incident.')),
+  });
+}
+
+export function useEscalateIncident(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: IncidentEscalationInput) => api.incidents.escalate(id, data),
+    onSuccess: (incident) => {
+      toast.success('Incident severity escalated.');
+      qc.setQueryData(queryKeys.incident(id), incident);
+      refreshIncidentQueries(qc, id);
+    },
+    onError: (error) => toast.error(formatIncidentError(error, 'Failed to escalate incident.')),
+  });
+}
+
+export function useAssessIncidentBreach(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: IncidentBreachAssessmentInput) => api.incidents.assessBreach(id, data),
+    onSuccess: (incident) => {
+      toast.success('Breach assessment recorded.');
+      qc.setQueryData(queryKeys.incident(id), incident);
+      refreshIncidentQueries(qc, id);
+    },
+    onError: (error) => toast.error(formatIncidentError(error, 'Failed to record the breach assessment.')),
+  });
+}
+
+export function useNotifyDPA(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: IncidentDPANotificationInput) => api.incidents.notifyDPA(id, data),
+    onSuccess: (incident) => {
+      toast.success('DPA notification recorded.');
+      qc.setQueryData(queryKeys.incident(id), incident);
+      refreshIncidentQueries(qc, id);
+    },
+    onError: (error) => toast.error(formatIncidentError(error, 'Failed to record the DPA notification.')),
+  });
+}
+
+export function useIncidentStats(
+  options?: Omit<UseQueryOptions<IncidentStatistics>, 'queryKey' | 'queryFn'>,
+) {
   return useQuery({
     queryKey: queryKeys.incidentStats,
     queryFn: () => api.incidents.stats(),
@@ -570,13 +791,71 @@ export function useIncidentStats(options?: Partial<UseQueryOptions>) {
   });
 }
 
-export function useUrgentBreaches(options?: Partial<UseQueryOptions>) {
+export function useUrgentBreaches(
+  params: { horizon_hours?: number; limit?: number } = {},
+  options?: Omit<UseQueryOptions<Incident[]>, 'queryKey' | 'queryFn'>,
+) {
   return useQuery({
-    queryKey: queryKeys.urgentBreaches,
-    queryFn: () => api.incidents.urgentBreaches(),
+    queryKey: [...queryKeys.urgentBreaches, params],
+    queryFn: () => api.incidents.upcomingBreaches(params),
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     ...options,
+  });
+}
+
+export function useIncidentTimeline(
+  id: string,
+  params: { page?: number; page_size?: number },
+  options?: Omit<UseQueryOptions<IncidentPage<import('@/types/incident').IncidentEvent>>, 'queryKey' | 'queryFn'>,
+) {
+  return useQuery({
+    queryKey: queryKeys.incidentTimeline(id, params),
+    queryFn: () => api.incidents.timeline(id, params),
+    enabled: Boolean(id),
+    ...options,
+  });
+}
+
+export function useIncidentAssignments(
+  id: string,
+  activeOnly = true,
+  options?: Omit<UseQueryOptions<import('@/types/incident').IncidentAssignment[]>, 'queryKey' | 'queryFn'>,
+) {
+  return useQuery({
+    queryKey: queryKeys.incidentAssignments(id, activeOnly),
+    queryFn: () => api.incidents.assignments(id, activeOnly),
+    enabled: Boolean(id),
+    ...options,
+  });
+}
+
+export function useAssignIncident(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: IncidentAssignmentInput) => api.incidents.assign(id, data),
+    onSuccess: ({ incident }) => {
+      toast.success('Responder assigned.');
+      qc.setQueryData(queryKeys.incident(id), incident);
+      qc.invalidateQueries({ queryKey: queryKeys.incidentAssignments(id, true) });
+      qc.invalidateQueries({ queryKey: queryKeys.incidentTimeline(id) });
+    },
+    onError: (error) => toast.error(formatIncidentError(error, 'Failed to assign responder.')),
+  });
+}
+
+export function useUnassignIncident(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assignmentId, data }: { assignmentId: string; data: IncidentUnassignmentInput }) =>
+      api.incidents.unassign(id, assignmentId, data),
+    onSuccess: ({ incident }) => {
+      toast.success('Responder unassigned.');
+      qc.setQueryData(queryKeys.incident(id), incident);
+      qc.invalidateQueries({ queryKey: queryKeys.incidentAssignments(id, true) });
+      qc.invalidateQueries({ queryKey: queryKeys.incidentTimeline(id) });
+    },
+    onError: (error) => toast.error(formatIncidentError(error, 'Failed to unassign responder.')),
   });
 }
 

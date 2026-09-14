@@ -37,7 +37,7 @@ func TestEnvelopeRoundTripAndPublishingProperties(t *testing.T) {
 	if publishing.MessageId != envelope.ID || publishing.CorrelationId != envelope.CorrelationID {
 		t.Fatalf("publishing identifiers mismatch: %+v", publishing)
 	}
-	if publishing.Headers["x-tenant-id"] != tenantID || publishing.Headers["x-schema-version"] != int32(CurrentSchemaVersion) {
+	if publishing.Headers["x-tenant-id"] != tenantID || publishing.Headers["x-schema-version"] != int64(CurrentSchemaVersion) {
 		t.Fatalf("publishing metadata mismatch: %+v", publishing.Headers)
 	}
 }

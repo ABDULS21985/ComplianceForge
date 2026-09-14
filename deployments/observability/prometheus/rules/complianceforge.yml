@@ -1,0 +1,98 @@
+groups:
+  - name: complianceforge-slo-recording
+    interval: 30s
+    rules:
+      - record: complianceforge:http_error_ratio:rate5m
+        expr: sum(rate(complianceforge_http_requests_total{status_class="5xx"}[5m])) / clamp_min(sum(rate(complianceforge_http_requests_total[5m])), 1)
+      - record: complianceforge:http_error_ratio:rate30m
+        expr: sum(rate(complianceforge_http_requests_total{status_class="5xx"}[30m])) / clamp_min(sum(rate(complianceforge_http_requests_total[30m])), 1)
+      - record: complianceforge:http_error_ratio:rate1h
+        expr: sum(rate(complianceforge_http_requests_total{status_class="5xx"}[1h])) / clamp_min(sum(rate(complianceforge_http_requests_total[1h])), 1)
+      - record: complianceforge:http_error_ratio:rate6h
+        expr: sum(rate(complianceforge_http_requests_total{status_class="5xx"}[6h])) / clamp_min(sum(rate(complianceforge_http_requests_total[6h])), 1)
+      - record: complianceforge:http_latency_bad_ratio:rate5m
+        expr: 1 - (sum(rate(complianceforge_http_request_duration_seconds_bucket{le="0.5"}[5m])) / clamp_min(sum(rate(complianceforge_http_request_duration_seconds_count[5m])), 1))
+      - record: complianceforge:http_latency_bad_ratio:rate1h
+        expr: 1 - (sum(rate(complianceforge_http_request_duration_seconds_bucket{le="0.5"}[1h])) / clamp_min(sum(rate(complianceforge_http_request_duration_seconds_count[1h])), 1))
+
+  - name: complianceforge-slo-alerts
+    interval: 30s
+    rules:
+      - alert: ComplianceForgeAvailabilityFastBurn
+        expr: complianceforge:http_error_ratio:rate5m > (14.4 * 0.001) and complianceforge:http_error_ratio:rate1h > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: critical
+          slo: api-availability
+        annotations:
+          summary: API availability error budget is burning rapidly
+          description: The 99.9% availability SLO is burning above 14.4x over both 5m and 1h windows.
+      - alert: ComplianceForgeAvailabilitySlowBurn
+        expr: complianceforge:http_error_ratio:rate30m > (6 * 0.001) and complianceforge:http_error_ratio:rate6h > (6 * 0.001)
+        for: 15m
+        labels:
+          severity: warning
+          slo: api-availability
+        annotations:
+          summary: API availability error budget is burning persistently
+          description: The 99.9% availability SLO is burning above 6x over both 30m and 6h windows.
+      - alert: ComplianceForgeLatencyFastBurn
+        expr: complianceforge:http_latency_bad_ratio:rate5m > (14.4 * 0.01) and complianceforge:http_latency_bad_ratio:rate1h > (14.4 * 0.01)
+        for: 2m
+        labels:
+          severity: critical
+          slo: api-latency
+        annotations:
+          summary: API latency error budget is burning rapidly
+          description: More than the allowed share of requests exceed the 500ms objective across both windows.
+
+  - name: complianceforge-operational-alerts
+    interval: 30s
+    rules:
+      - alert: ComplianceForgeTargetDown
+        expr: up{job=~"complianceforge-api|complianceforge-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: ComplianceForge telemetry target is unavailable
+          description: Prometheus cannot scrape {{ $labels.job }} at {{ $labels.instance }}.
+      - alert: ComplianceForgeDependencyDown
+        expr: complianceforge_dependency_up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Required application dependency is unavailable
+          description: Dependency {{ $labels.dependency }} has failed health checks for five minutes.
+      - alert: ComplianceForgeOutboxBacklogOld
+        expr: complianceforge_outbox_oldest_pending_age_seconds > 300
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Transactional outbox delivery is delayed
+          description: The oldest pending outbox message is more than five minutes old.
+      - alert: ComplianceForgeQueueTerminalDelivery
+        expr: increase(complianceforge_queue_operations_total{outcome=~"dead_letter|quarantine"}[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: A queue message reached a terminal failure route
+          description: At least one message was dead-lettered or quarantined in the last five minutes.
+      - alert: ComplianceForgeQueueStateCollectionFailed
+        expr: complianceforge_queue_storage_scrape_success == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Durable queue state metrics cannot be collected
+          description: The worker could not query outbox, inbox, or scheduler lease state.
+      - alert: ComplianceForgePostgresPoolSaturated
+        expr: complianceforge_postgres_connections_acquired / clamp_min(complianceforge_postgres_connections_max, 1) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL connection pool is near saturation
+          description: More than 90% of configured PostgreSQL connections have been acquired for ten minutes.

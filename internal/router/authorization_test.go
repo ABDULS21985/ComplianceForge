@@ -34,7 +34,25 @@ func TestRequiredRoutePermissionMap(t *testing.T) {
 		{http.MethodPut, "/api/v1/policies/id/publish", "policies", "approve"},
 		{http.MethodPut, "/api/v1/policies/id/assign", "policies", "assign"},
 		{http.MethodPut, "/api/v1/policies/id/acknowledge", "policies", "read"},
+		{http.MethodPut, "/api/v1/notifications/id/read", "users", "read"},
+		{http.MethodPut, "/api/v1/notifications/id/acknowledge", "users", "read"},
+		{http.MethodPut, "/api/v1/notifications/preferences", "users", "read"},
+		{http.MethodGet, "/api/v1/access/my-permissions", "users", "read"},
 		{http.MethodPost, "/api/v1/policies/id/exceptions/id/decision", "policies", "approve"},
+		{http.MethodPost, "/api/v1/incidents", "incidents", "create"},
+		{http.MethodGet, "/api/v1/incidents/statistics", "incidents", "read"},
+		{http.MethodPost, "/api/v1/incidents/id/transitions", "incidents", "update"},
+		{http.MethodPost, "/api/v1/incidents/id/cancel", "incidents", "update"},
+		{http.MethodPost, "/api/v1/incidents/id/reopen", "incidents", "update"},
+		{http.MethodPost, "/api/v1/incidents/id/close", "incidents", "approve"},
+		{http.MethodPost, "/api/v1/incidents/id/breach-assessment", "incidents", "approve"},
+		{http.MethodPost, "/api/v1/incidents/id/notify-dpa", "incidents", "approve"},
+		{http.MethodPost, "/api/v1/incidents/id/assignments", "incidents", "assign"},
+		{http.MethodPost, "/api/v1/incidents/id/assignments/id/unassign", "incidents", "assign"},
+		{http.MethodGet, "/api/v1/assets", "assets", "read"},
+		{http.MethodPost, "/api/v1/assets", "assets", "create"},
+		{http.MethodPatch, "/api/v1/assets/id", "assets", "update"},
+		{http.MethodDelete, "/api/v1/assets/id", "assets", "delete"},
 	}
 	for _, test := range tests {
 		permission, ok := permissionForProtectedRequest(test.method, test.path)
@@ -111,5 +129,32 @@ func TestRouterPassesResourceIdentityToAuthorizer(t *testing.T) {
 	}
 	if len(authorizer.requests) != 1 || authorizer.requests[0].ResourceID != testControlID {
 		t.Fatalf("authorization request=%#v", authorizer.requests)
+	}
+}
+
+func TestIncidentRoutesFailClosedBeforeHandlerExecution(t *testing.T) {
+	dependencies := testRouterDependencies()
+	denier := &routerAuthorizer{allowed: false}
+	dependencies.Authorizer = denier
+	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	anonymous := httptest.NewRecorder()
+	router.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/api/v1/incidents/"+testIncidentID, nil))
+	if anonymous.Code != http.StatusUnauthorized || len(denier.requests) != 0 {
+		t.Fatalf("anonymous status=%d authorization=%#v", anonymous.Code, denier.requests)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/incidents/"+testIncidentID+"/notify-dpa", nil)
+	request.Header.Set("Authorization", "Bearer access-token")
+	forbidden := httptest.NewRecorder()
+	router.ServeHTTP(forbidden, request)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("denied incident status=%d body=%s", forbidden.Code, forbidden.Body.String())
+	}
+	if len(denier.requests) != 1 || denier.requests[0].Resource != "incidents" || denier.requests[0].Action != "approve" || denier.requests[0].ResourceID != testIncidentID {
+		t.Fatalf("incident authorization request=%#v", denier.requests)
 	}
 }

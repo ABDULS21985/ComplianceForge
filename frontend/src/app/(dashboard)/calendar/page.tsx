@@ -148,7 +148,10 @@ export default function CalendarPage() {
     }
   }, [currentDate]);
 
-  useEffect(() => { fetchEvents(); }, [fetchEvents]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchEvents(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchEvents]);
 
   // Events by date map
   const eventsByDate = useMemo(() => {

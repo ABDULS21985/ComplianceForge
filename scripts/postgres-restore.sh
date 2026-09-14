@@ -96,7 +96,7 @@ if [ "$rpo_seconds" -ge 0 ] && [ "$rpo_seconds" -gt "$rpo_target_seconds" ]; the
 fi
 
 export PGAPPNAME=complianceforge-restore
-export PGCONNECT_TIMEOUT=${PGCONNECT_TIMEOUT:-15}
+export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-15}"
 target_database=$(psql "$target_database_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command 'SELECT current_database()')
 [ -n "$target_database" ] || fail 'could not resolve the target database name'
 expected_confirmation="RESTORE:$target_database"

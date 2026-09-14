@@ -1,7 +1,6 @@
 // ComplianceForge API Client
 // Singleton same-origin BFF client with retry logic and typed endpoint methods
 
-import type { User } from "@/types";
 import type {
   APIKeyRecord,
   CreateAPIKeyInput,
@@ -29,9 +28,48 @@ import type {
   UpdateNotificationPreferenceInput,
   UpdateSSOConfigurationInput,
 } from "@/types/enterprise-settings";
-import { SESSION_EXPIRED_EVENT } from "./auth-constants";
-import { fetchWithCsrf, resetCsrfToken } from "./csrf-client";
+import type {
+  Audit,
+  AuditCollectionEnvelope,
+  AuditCreateInput,
+  AuditFinding,
+  AuditFindingCreateInput,
+  AuditFindingListParams,
+  AuditFindingPatch,
+  AuditFindingStats,
+  AuditFramework,
+  AuditLifecycleAction,
+  AuditListParams,
+  AuditPage,
+  AuditPatch,
+} from '@/types/audit';
+import type { PermissionMap } from '@/types/access';
+import type {
+  Incident,
+  IncidentAssignment,
+  IncidentAssignmentInput,
+  IncidentAssignmentMutationResponse,
+  IncidentBreachAssessmentInput,
+  IncidentCollectionEnvelope,
+  IncidentCreateInput,
+  IncidentDPANotificationInput,
+  IncidentDataEnvelope,
+  IncidentEscalationInput,
+  IncidentEvent,
+  IncidentListParams,
+  IncidentPage,
+  IncidentPatch,
+  IncidentReasonInput,
+  IncidentStatistics,
+  IncidentTransitionInput,
+  IncidentUnassignmentInput,
+} from '@/types/incident';
+import { AUDIT_API_ROUTES, normalizeAuditCollection } from './audit';
+import { INCIDENT_API_ROUTES, normalizeIncidentCollection } from './incident';
 import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from "./routes";
+import { fetchWithCsrf, resetCsrfToken } from "./csrf-client";
+import { SESSION_EXPIRED_EVENT } from "./auth-constants";
+import type { User } from "@/types";
 
 const BFF_BASE_URL = "/api/bff";
 const MAX_RETRIES = 3;
@@ -342,26 +380,56 @@ class ApiClient {
   // ========================================================================
 
   audits = {
-    list: (params?: PaginationParams & { status?: string; audit_type?: string }) =>
-      this.get<PaginatedResponse<unknown>>("/audits", params as Record<string, unknown>),
+    list: (params?: AuditListParams): Promise<AuditPage<Audit>> =>
+      this.get<AuditCollectionEnvelope<Audit>>(
+        AUDIT_API_ROUTES.collection,
+        params as Record<string, unknown>
+      ).then(normalizeAuditCollection),
 
     get: (id: string) =>
-      this.get<unknown>(`/audits/${id}`),
+      this.get<Audit>(AUDIT_API_ROUTES.detail(id)),
 
-    create: (data: unknown) =>
-      this.post<unknown>("/audits", data),
+    create: (data: AuditCreateInput) =>
+      this.post<Audit>(AUDIT_API_ROUTES.collection, data),
 
-    update: (id: string, data: unknown) =>
-      this.put<unknown>(`/audits/${id}`, data),
+    update: (id: string, data: AuditPatch) =>
+      this.patch<Audit>(AUDIT_API_ROUTES.detail(id), data),
 
-    createFinding: (auditId: string, data: unknown) =>
-      this.post<unknown>(`/audits/${auditId}/findings`, data),
+    delete: (id: string) =>
+      this.delete<void>(AUDIT_API_ROUTES.detail(id)),
 
-    getFindings: (auditId: string, params?: PaginationParams) =>
-      this.get<PaginatedResponse<unknown>>(`/audits/${auditId}/findings`, params as Record<string, unknown>),
+    transition: (id: string, action: AuditLifecycleAction) =>
+      this.put<Audit>(AUDIT_API_ROUTES.lifecycle(id, action)),
+
+    createFinding: (auditId: string, data: AuditFindingCreateInput) =>
+      this.post<AuditFinding>(AUDIT_API_ROUTES.findings(auditId), data),
+
+    getFindings: (
+      auditId: string,
+      params?: AuditFindingListParams
+    ): Promise<AuditPage<AuditFinding>> =>
+      this.get<AuditCollectionEnvelope<AuditFinding>>(
+        AUDIT_API_ROUTES.findings(auditId),
+        params as Record<string, unknown>
+      ).then(normalizeAuditCollection),
+
+    getFinding: (auditId: string, findingId: string) =>
+      this.get<AuditFinding>(AUDIT_API_ROUTES.finding(auditId, findingId)),
+
+    updateFinding: (auditId: string, findingId: string, data: AuditFindingPatch) =>
+      this.patch<AuditFinding>(AUDIT_API_ROUTES.finding(auditId, findingId), data),
+
+    deleteFinding: (auditId: string, findingId: string) =>
+      this.delete<void>(AUDIT_API_ROUTES.finding(auditId, findingId)),
 
     findingsStats: (auditId: string) =>
-      this.get<unknown>(`/audits/${auditId}/findings/stats`),
+      this.get<AuditFindingStats>(AUDIT_API_ROUTES.findingStats(auditId)),
+
+    frameworkOptions: (): Promise<AuditPage<AuditFramework>> =>
+      this.get<AuditCollectionEnvelope<AuditFramework>>('/frameworks/', {
+        page: 1,
+        page_size: 100,
+      }).then(normalizeAuditCollection),
   };
 
   // ========================================================================
@@ -369,32 +437,77 @@ class ApiClient {
   // ========================================================================
 
   incidents = {
-    list: (params?: PaginationParams & { status?: string; severity?: string; is_data_breach?: boolean }) =>
-      this.get<PaginatedResponse<unknown>>("/incidents", params as Record<string, unknown>),
+    list: (params?: IncidentListParams): Promise<IncidentPage<Incident>> =>
+      this.get<IncidentCollectionEnvelope<Incident>>(
+        INCIDENT_API_ROUTES.collection,
+        params as Record<string, unknown>,
+      ).then(normalizeIncidentCollection),
 
-    get: (id: string) =>
-      this.get<unknown>(`/incidents/${id}`),
+    get: (id: string) => this.get<Incident>(INCIDENT_API_ROUTES.detail(id)),
 
-    create: (data: unknown) =>
-      this.post<unknown>("/incidents", data),
+    create: (data: IncidentCreateInput) =>
+      this.post<Incident>(INCIDENT_API_ROUTES.collection, data),
 
-    update: (id: string, data: unknown) =>
-      this.put<unknown>(`/incidents/${id}`, data),
+    update: (id: string, data: IncidentPatch) =>
+      this.patch<Incident>(INCIDENT_API_ROUTES.detail(id), data),
 
-    updateStatus: (id: string, data: { status: string; notes?: string }) =>
-      this.patch<unknown>(`/incidents/${id}/status`, data),
+    delete: (id: string, version: number) =>
+      this.request<void>('DELETE', INCIDENT_API_ROUTES.detail(id), { params: { version } }),
 
-    notifyDPA: (id: string, data?: { message?: string }) =>
-      this.post<unknown>(`/incidents/${id}/notify-dpa`, data),
+    transition: (id: string, data: IncidentTransitionInput) =>
+      this.post<Incident>(INCIDENT_API_ROUTES.transition(id), data),
 
-    nis2EarlyWarning: (id: string, data?: unknown) =>
-      this.post<unknown>(`/incidents/${id}/nis2-early-warning`, data),
+    cancel: (id: string, data: IncidentReasonInput) =>
+      this.post<Incident>(INCIDENT_API_ROUTES.cancel(id), data),
 
-    stats: () =>
-      this.get<unknown>("/incidents/stats"),
+    reopen: (id: string, data: IncidentReasonInput) =>
+      this.post<Incident>(INCIDENT_API_ROUTES.reopen(id), data),
 
+    close: (id: string, data: IncidentReasonInput) =>
+      this.post<Incident>(INCIDENT_API_ROUTES.close(id), data),
+
+    escalate: (id: string, data: IncidentEscalationInput) =>
+      this.put<Incident>(INCIDENT_API_ROUTES.escalate(id), data),
+
+    assessBreach: (id: string, data: IncidentBreachAssessmentInput) =>
+      this.post<Incident>(INCIDENT_API_ROUTES.breachAssessment(id), data),
+
+    notifyDPA: (id: string, data: IncidentDPANotificationInput) =>
+      this.post<Incident>(INCIDENT_API_ROUTES.notifyDpa(id), data),
+
+    stats: () => this.get<IncidentStatistics>(INCIDENT_API_ROUTES.statistics),
+
+    upcomingBreaches: (params?: { horizon_hours?: number; limit?: number }) =>
+      this.get<IncidentDataEnvelope<Incident[]>>(
+        INCIDENT_API_ROUTES.upcomingBreaches,
+        params as Record<string, unknown>,
+      ).then((response) => response.data),
+
+    // Compatibility for dashboard consumers; resolves through the canonical deadline route.
     urgentBreaches: () =>
-      this.get<unknown>("/incidents/urgent-breaches"),
+      this.get<IncidentDataEnvelope<Incident[]>>(INCIDENT_API_ROUTES.upcomingBreaches)
+        .then((response) => response.data),
+
+    timeline: (id: string, params?: Pick<IncidentListParams, 'page' | 'page_size'>) =>
+      this.get<IncidentCollectionEnvelope<IncidentEvent>>(
+        INCIDENT_API_ROUTES.timeline(id),
+        params,
+      ).then(normalizeIncidentCollection),
+
+    assignments: (id: string, activeOnly = true) =>
+      this.get<IncidentDataEnvelope<IncidentAssignment[]>>(
+        INCIDENT_API_ROUTES.assignments(id),
+        { active_only: activeOnly },
+      ).then((response) => response.data),
+
+    assign: (id: string, data: IncidentAssignmentInput) =>
+      this.post<IncidentAssignmentMutationResponse>(INCIDENT_API_ROUTES.assignments(id), data),
+
+    unassign: (id: string, assignmentId: string, data: IncidentUnassignmentInput) =>
+      this.post<IncidentAssignmentMutationResponse>(
+        INCIDENT_API_ROUTES.unassign(id, assignmentId),
+        data,
+      ),
   };
 
   // ========================================================================
@@ -797,7 +910,7 @@ class ApiClient {
     removeAssignment: (policyId: string, assignmentId: string) => this.delete<any>(`/access/policies/${policyId}/assignments/${assignmentId}`),
     testEvaluate: (data: any) => this.post<any>('/access/evaluate', data),
     auditLog: (params?: any) => this.get<any>('/access/audit-log', params),
-    myPermissions: () => this.get<any>('/access/my-permissions'),
+    myPermissions: () => this.get<DataEnvelope<PermissionMap>>('/access/my-permissions'),
     fieldPermissions: (resourceType: string) => this.get<any>(`/access/field-permissions?resource_type=${resourceType}`),
   };
 

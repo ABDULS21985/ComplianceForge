@@ -799,12 +799,12 @@ func (re *ReportEngineService) getComplianceReportData(ctx context.Context, orgI
 			return nil, fmt.Errorf("scan gap: %w", err)
 		}
 		g := map[string]interface{}{
-			"control_code":          code,
-			"control_title":         title,
-			"framework_name":        "",
-			"status":                "gap",
+			"control_code":            code,
+			"control_title":           title,
+			"framework_name":          "",
+			"status":                  "gap",
 			"risk_if_not_implemented": "high",
-			"owner_name":            "",
+			"owner_name":              "",
 		}
 		if gapDesc != nil {
 			g["gap_description"] = *gapDesc
@@ -1083,7 +1083,7 @@ func (re *ReportEngineService) getExecutiveSummaryData(ctx context.Context, orgI
 	var totalIncidents, openIncidents, breachNotifiable int
 	_ = re.pool.QueryRow(ctx, `
 		SELECT COUNT(*),
-		       COUNT(*) FILTER (WHERE status IN ('open', 'investigating', 'contained')),
+		       COUNT(*) FILTER (WHERE status IN ('reported', 'triaged', 'investigating', 'contained')),
 		       COUNT(*) FILTER (WHERE is_breach_notifiable = true)
 		FROM incidents
 		WHERE organization_id = $1 AND deleted_at IS NULL`, orgID).

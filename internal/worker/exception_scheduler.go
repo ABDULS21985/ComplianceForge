@@ -193,7 +193,9 @@ func (es *ExceptionScheduler) AutoExpireExceptions(ctx context.Context) error {
 			WHERE id = $1
 		`, e.id)
 		if err != nil {
-			tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				log.Error().Err(rollbackErr).Str("exception_id", e.id).Msg("exception_scheduler: rollback after status update")
+			}
 			log.Error().Err(err).Str("exception_id", e.id).Msg("exception_scheduler: update status")
 			continue
 		}
@@ -207,7 +209,9 @@ func (es *ExceptionScheduler) AutoExpireExceptions(ctx context.Context) error {
 			        '{"triggered_by": "exception_scheduler"}'::jsonb)
 		`, e.orgID, e.id)
 		if err != nil {
-			tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+				log.Error().Err(rollbackErr).Str("exception_id", e.id).Msg("exception_scheduler: rollback after audit insert")
+			}
 			log.Error().Err(err).Str("exception_id", e.id).Msg("exception_scheduler: audit trail insert")
 			continue
 		}

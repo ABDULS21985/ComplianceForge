@@ -14,7 +14,7 @@ func TestReadManifest(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# comment\nfirst.sql\n\nsecond.sql\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readManifest(path)
+	got, err := readManifest(dir, path)
 	if err != nil {
 		t.Fatalf("readManifest() error = %v", err)
 	}
@@ -27,14 +27,40 @@ func TestReadManifest(t *testing.T) {
 func TestReadManifestRejectsUnsafeOrDuplicateEntries(t *testing.T) {
 	for _, contents := range []string{"../outside.sql\n", "seed.txt\n", "seed.sql\nseed.sql\n"} {
 		t.Run(strings.TrimSpace(contents), func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "manifest.txt")
+			dir := t.TempDir()
+			path := filepath.Join(dir, "manifest.txt")
 			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := readManifest(path); err == nil {
+			if _, err := readManifest(dir, path); err == nil {
 				t.Fatal("expected manifest validation error")
 			}
 		})
+	}
+}
+
+func TestResolveSeedPathsRejectsManifestOutsideSeedDirectory(t *testing.T) {
+	seedDir := t.TempDir()
+	outsideManifest := filepath.Join(t.TempDir(), "manifest.txt")
+	if err := os.WriteFile(outsideManifest, []byte("seed.sql\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveSeedPaths(options{seedDir: seedDir, manifestPath: outsideManifest}); err == nil {
+		t.Fatal("expected an outside manifest to be rejected")
+	}
+}
+
+func TestReadContainedRegularFileRejectsSymlinkEscape(t *testing.T) {
+	seedDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.sql")
+	if err := os.WriteFile(outside, []byte("BEGIN;\nCOMMIT;\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(seedDir, "seed.sql")); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	if _, err := readContainedRegularFile(seedDir, "seed.sql", maxSeedFileSize); err == nil {
+		t.Fatal("expected a symlinked seed file to be rejected")
 	}
 }
 

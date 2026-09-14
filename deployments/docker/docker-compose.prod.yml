@@ -6,6 +6,12 @@ x-backend-environment: &backend-environment
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL with sslmode=require or verify-full is required}
   REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
   RABBITMQ_URL: ${RABBITMQ_URL:?RABBITMQ_URL with non-guest credentials is required}
+  NOTIFICATION_DELIVERY_TENANT_BATCH: ${NOTIFICATION_DELIVERY_TENANT_BATCH:-100}
+  NOTIFICATION_DELIVERY_CLAIM_BATCH: ${NOTIFICATION_DELIVERY_CLAIM_BATCH:-100}
+  NOTIFICATION_DELIVERY_LEASE: ${NOTIFICATION_DELIVERY_LEASE:-3m}
+  NOTIFICATION_RETRY_BASE_DELAY: ${NOTIFICATION_RETRY_BASE_DELAY:-30s}
+  NOTIFICATION_RETRY_MAX_DELAY: ${NOTIFICATION_RETRY_MAX_DELAY:-1h}
+  NOTIFICATION_DELIVERY_POLL_INTERVAL: ${NOTIFICATION_DELIVERY_POLL_INTERVAL:-10s}
   JWT_SECRET: ${JWT_SECRET:?JWT_SECRET of at least 32 characters is required}
   JWT_ISSUER: ${JWT_ISSUER:-complianceforge}
   DSR_ENCRYPTION_KEY: ${DSR_ENCRYPTION_KEY:?DSR_ENCRYPTION_KEY must be a base64-encoded 32-byte key}
@@ -26,6 +32,14 @@ x-backend-environment: &backend-environment
   S3_REGION: ${S3_REGION:?S3_REGION is required}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   LOG_FORMAT: json
+  OBSERVABILITY_METRICS_ENABLED: "true"
+  OBSERVABILITY_METRICS_ADDRESS: 0.0.0.0:9091
+  OBSERVABILITY_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+  OBSERVABILITY_TRACING_ENABLED: ${OBSERVABILITY_TRACING_ENABLED:-true}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+  OBSERVABILITY_TRACE_SAMPLE_RATIO: ${OBSERVABILITY_TRACE_SAMPLE_RATIO:-0.1}
+  OBSERVABILITY_SHUTDOWN_TIMEOUT_SECONDS: 10
+  SERVICE_VERSION: ${IMAGE_TAG:?IMAGE_TAG is required}
 
 services:
   api:
@@ -39,6 +53,9 @@ services:
       API_TRUST_PROXY_HEADERS: "true"
     expose:
       - "8080"
+      - "9091"
+    secrets:
+      - metrics_token
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "3", "--output", "/dev/null", "http://127.0.0.1:8080/health/ready"]
       interval: 30s
@@ -58,6 +75,7 @@ services:
     pids_limit: 256
     networks:
       - complianceforge
+      - telemetry
 
   worker:
     build:
@@ -66,6 +84,16 @@ services:
       target: worker
     image: ${WORKER_IMAGE:-complianceforge-worker}:${IMAGE_TAG:?IMAGE_TAG is required}
     environment: *backend-environment
+    expose:
+      - "9091"
+    secrets:
+      - metrics_token
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "3", "--output", "/dev/null", "http://127.0.0.1:9091/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -79,6 +107,7 @@ services:
     pids_limit: 256
     networks:
       - complianceforge
+      - telemetry
 
   frontend:
     build:
@@ -143,6 +172,94 @@ services:
     networks:
       - complianceforge
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    command: ["--config=/etc/otelcol/config.yml"]
+    environment:
+      OTEL_TRACE_UPSTREAM_ENDPOINT: ${OTEL_TRACE_UPSTREAM_ENDPOINT:?OTEL_TRACE_UPSTREAM_ENDPOINT is required}
+      OTEL_TRACE_UPSTREAM_AUTHORIZATION: ${OTEL_TRACE_UPSTREAM_AUTHORIZATION:-}
+    volumes:
+      - ../observability/otel-collector.yml:/etc/otelcol/config.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    pids_limit: 256
+    networks:
+      - complianceforge
+      - telemetry
+
+  prometheus:
+    image: prom/prometheus:v3.13.3@sha256:6976aa8a60fec930796ce5772b8d12da7a318a5daa8d40d69c5c7819a05eeed7
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+      - --web.enable-lifecycle=false
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    secrets:
+      - metrics_token
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    pids_limit: 256
+    networks:
+      - telemetry
+
+  grafana:
+    image: grafana/grafana:13.2.1@sha256:f772d434e8fab0049deb2b1b30abd43342bcfca1537614aa8d36080232cf4283
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - 127.0.0.1:${GRAFANA_PORT:-3001}:3000
+    depends_on:
+      - prometheus
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    pids_limit: 256
+    networks:
+      - telemetry
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+secrets:
+  metrics_token:
+    file: ${OBSERVABILITY_METRICS_TOKEN_SOURCE:?OBSERVABILITY_METRICS_TOKEN_SOURCE is required}
+
 networks:
   complianceforge:
     driver: bridge
+  telemetry:
+    driver: bridge
+    internal: true

@@ -168,7 +168,7 @@ func (ae *AnalyticsEngine) TakeSnapshot(ctx context.Context, orgID, snapshotType
 	// Incident metrics
 	var openIncidents, breaches int
 	_ = ae.pool.QueryRow(ctx, `
-		SELECT COUNT(*) FILTER (WHERE status NOT IN ('closed', 'resolved')),
+		SELECT COUNT(*) FILTER (WHERE status NOT IN ('closed', 'resolved', 'cancelled')),
 		       COUNT(*) FILTER (WHERE is_data_breach = true)
 		FROM incidents WHERE organization_id = $1 AND deleted_at IS NULL
 	`, orgID).Scan(&openIncidents, &breaches)
@@ -408,9 +408,9 @@ func (ae *AnalyticsEngine) PredictBreachProbability(ctx context.Context, orgID s
 		"model_version":    "logistic_v1",
 		"confidence_level": 0.70,
 		"input_factors": map[string]interface{}{
-			"critical_risks":     criticalRisks,
-			"high_risks":         highRisks,
-			"avg_residual_score": avgScore,
+			"critical_risks":      criticalRisks,
+			"high_risks":          highRisks,
+			"avg_residual_score":  avgScore,
 			"incidents_last_12mo": incidentsLast12mo,
 		},
 		"note": "This is a statistical estimate based on current risk posture. It is not a prediction of a specific event.",

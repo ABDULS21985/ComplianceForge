@@ -30,11 +30,11 @@ type GapInput struct {
 
 // AIUsageStats aggregates token and cost metrics for an organisation.
 type AIUsageStats struct {
-	TotalInteractions int     `json:"total_interactions"`
-	TotalInputTokens  int     `json:"total_input_tokens"`
-	TotalOutputTokens int     `json:"total_output_tokens"`
-	TotalCostEUR      float64 `json:"total_cost_eur"`
-	AvgLatencyMs      float64 `json:"avg_latency_ms"`
+	TotalInteractions int            `json:"total_interactions"`
+	TotalInputTokens  int            `json:"total_input_tokens"`
+	TotalOutputTokens int            `json:"total_output_tokens"`
+	TotalCostEUR      float64        `json:"total_cost_eur"`
+	AvgLatencyMs      float64        `json:"avg_latency_ms"`
 	ByType            map[string]int `json:"by_type"`
 }
 
@@ -293,10 +293,13 @@ func (ai *AIService) callClaude(ctx context.Context, orgID, interactionType, pro
 	// Cost estimate: approximate EUR pricing per 1K tokens.
 	costEUR := float64(inputTokens)*0.003/1000.0 + float64(outputTokens)*0.015/1000.0
 
-	// Log the interaction asynchronously.
+	// Preserve request-scoped tenant/trace values for the detached audit write,
+	// while bounding it independently so client disconnects neither discard the
+	// record nor leave an unbounded database operation behind.
+	logCtx, cancelLog := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	go func() {
-		bgCtx := context.Background()
-		if logErr := ai.logInteraction(bgCtx, orgID, interactionType, prompt, responseText, ai.model, inputTokens, outputTokens, latencyMs, userID, costEUR); logErr != nil {
+		defer cancelLog()
+		if logErr := ai.logInteraction(logCtx, orgID, interactionType, prompt, responseText, ai.model, inputTokens, outputTokens, latencyMs, userID, costEUR); logErr != nil {
 			log.Error().Err(logErr).Msg("ai_service: failed to log interaction")
 		}
 	}()

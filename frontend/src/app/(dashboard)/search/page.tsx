@@ -23,6 +23,15 @@ interface Facets {
   date_to: string;
 }
 
+const EMPTY_FACETS: Facets = {
+  entity_type: '',
+  framework: '',
+  status: '',
+  severity: '',
+  date_from: '',
+  date_to: '',
+};
+
 const ENTITY_TYPES = [
   { value: 'framework', label: 'Frameworks', icon: '🛡' },
   { value: 'control', label: 'Controls', icon: '🔧' },
@@ -69,14 +78,7 @@ export default function SearchPage() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [facets, setFacets] = useState<Facets>({
-    entity_type: '',
-    framework: '',
-    status: '',
-    severity: '',
-    date_from: '',
-    date_to: '',
-  });
+  const [facets, setFacets] = useState<Facets>(EMPTY_FACETS);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -121,11 +123,15 @@ export default function SearchPage() {
     []
   );
 
-  // Run search on mount if query present
+  // Keep URL-driven searches synchronized without a synchronous effect update.
   useEffect(() => {
-    if (initialQuery) doSearch(initialQuery, 1, facets);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!initialQuery) return;
+    const timer = window.setTimeout(
+      () => void doSearch(initialQuery, 1, EMPTY_FACETS),
+      0,
+    );
+    return () => window.clearTimeout(timer);
+  }, [doSearch, initialQuery]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -151,7 +157,7 @@ export default function SearchPage() {
   };
 
   const clearFilters = () => {
-    const cleared: Facets = { entity_type: '', framework: '', status: '', severity: '', date_from: '', date_to: '' };
+    const cleared: Facets = { ...EMPTY_FACETS };
     setFacets(cleared);
     if (query.trim()) doSearch(query, 1, cleared);
   };

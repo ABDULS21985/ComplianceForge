@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -39,15 +41,15 @@ type PushService interface {
 
 // MobileDashboard provides a compact dashboard for mobile clients.
 type MobileDashboard struct {
-	ComplianceScore    float64            `json:"compliance_score"`
-	OpenRisks          int                `json:"open_risks"`
-	CriticalRisks      int                `json:"critical_risks"`
-	PendingApprovals   int                `json:"pending_approvals"`
-	ActiveIncidents    int                `json:"active_incidents"`
-	UpcomingDeadlines  int                `json:"upcoming_deadlines"`
-	OverdueItems       int                `json:"overdue_items"`
-	RecentAlerts       []MobileAlert      `json:"recent_alerts,omitempty"`
-	QuickStats         map[string]int     `json:"quick_stats,omitempty"`
+	ComplianceScore   float64        `json:"compliance_score"`
+	OpenRisks         int            `json:"open_risks"`
+	CriticalRisks     int            `json:"critical_risks"`
+	PendingApprovals  int            `json:"pending_approvals"`
+	ActiveIncidents   int            `json:"active_incidents"`
+	UpcomingDeadlines int            `json:"upcoming_deadlines"`
+	OverdueItems      int            `json:"overdue_items"`
+	RecentAlerts      []MobileAlert  `json:"recent_alerts,omitempty"`
+	QuickStats        map[string]int `json:"quick_stats,omitempty"`
 }
 
 // MobileAlert represents a compact alert for mobile display.
@@ -61,16 +63,16 @@ type MobileAlert struct {
 
 // MobileApproval represents a pending approval item for mobile.
 type MobileApproval struct {
-	ID           string `json:"id"`
-	Type         string `json:"type"` // policy, exception, vendor, workflow
-	Title        string `json:"title"`
-	Description  string `json:"description,omitempty"`
-	RequestedBy  string `json:"requested_by"`
-	RequestedAt  string `json:"requested_at"`
-	DueDate      string `json:"due_date,omitempty"`
-	Priority     string `json:"priority,omitempty"`
-	EntityType   string `json:"entity_type,omitempty"`
-	EntityID     string `json:"entity_id,omitempty"`
+	ID          string `json:"id"`
+	Type        string `json:"type"` // policy, exception, vendor, workflow
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	RequestedBy string `json:"requested_by"`
+	RequestedAt string `json:"requested_at"`
+	DueDate     string `json:"due_date,omitempty"`
+	Priority    string `json:"priority,omitempty"`
+	EntityType  string `json:"entity_type,omitempty"`
+	EntityID    string `json:"entity_id,omitempty"`
 }
 
 // ApprovalActionRequest is the payload for approve/reject actions.
@@ -80,11 +82,11 @@ type ApprovalActionRequest struct {
 
 // MobileIncident represents a compact incident for mobile display.
 type MobileIncident struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Severity    string `json:"severity"`
-	Status      string `json:"status"`
-	ReportedAt  string `json:"reported_at"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	Severity     string `json:"severity"`
+	Status       string `json:"status"`
+	ReportedAt   string `json:"reported_at"`
 	AssigneeName string `json:"assignee_name,omitempty"`
 }
 
@@ -119,15 +121,15 @@ type PushRegistration struct {
 
 // PushPreferences holds push notification preferences.
 type PushPreferences struct {
-	Enabled          bool     `json:"enabled"`
-	IncidentAlerts   bool     `json:"incident_alerts"`
-	ApprovalRequests bool     `json:"approval_requests"`
-	DeadlineReminders bool    `json:"deadline_reminders"`
-	RiskAlerts       bool     `json:"risk_alerts"`
-	CommentMentions  bool     `json:"comment_mentions"`
-	QuietHoursStart  string   `json:"quiet_hours_start,omitempty"` // e.g. "22:00"
-	QuietHoursEnd    string   `json:"quiet_hours_end,omitempty"`   // e.g. "07:00"
-	MutedEntities    []string `json:"muted_entities,omitempty"`
+	Enabled           bool     `json:"enabled"`
+	IncidentAlerts    bool     `json:"incident_alerts"`
+	ApprovalRequests  bool     `json:"approval_requests"`
+	DeadlineReminders bool     `json:"deadline_reminders"`
+	RiskAlerts        bool     `json:"risk_alerts"`
+	CommentMentions   bool     `json:"comment_mentions"`
+	QuietHoursStart   string   `json:"quiet_hours_start,omitempty"` // e.g. "22:00"
+	QuietHoursEnd     string   `json:"quiet_hours_end,omitempty"`   // e.g. "07:00"
+	MutedEntities     []string `json:"muted_entities,omitempty"`
 }
 
 // ---------- handler ----------
@@ -196,7 +198,11 @@ func (h *MobileHandler) ApproveItem(w http.ResponseWriter, r *http.Request) {
 
 	var req ApprovalActionRequest
 	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&req)
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+			return
+		}
 	}
 
 	if err := h.svc.ApproveItem(r.Context(), orgID, userID, approvalID, &req); err != nil {
@@ -219,7 +225,11 @@ func (h *MobileHandler) RejectItem(w http.ResponseWriter, r *http.Request) {
 
 	var req ApprovalActionRequest
 	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&req)
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+			return
+		}
 	}
 
 	if err := h.svc.RejectItem(r.Context(), orgID, userID, approvalID, &req); err != nil {

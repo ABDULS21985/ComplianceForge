@@ -101,11 +101,11 @@ function PieChart({ data }: { data: { basis: string; count: number }[] }) {
   if (total === 0) return <div className="flex items-center justify-center h-40 text-sm text-gray-400">No data</div>;
 
   const colors = ['#1A56DB', '#059669', '#7C3AED', '#DC2626', '#D97706', '#4F46E5', '#0891B2'];
-  let cumulativePct = 0;
   const segments = data.map((d, i) => {
     const pct = (d.count / total) * 100;
-    const start = cumulativePct;
-    cumulativePct += pct;
+    const start = data
+      .slice(0, i)
+      .reduce((sum, item) => sum + (item.count / total) * 100, 0);
     return { ...d, pct, start, color: colors[i % colors.length] };
   });
   const gradientParts = segments.map((s) => `${s.color} ${s.start}% ${s.start + s.pct}%`).join(', ');

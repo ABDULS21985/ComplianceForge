@@ -10,6 +10,12 @@ x-backend-environment: &backend-environment
   REDIS_HOST: redis
   REDIS_PORT: 6379
   RABBITMQ_URL: amqp://complianceforge:${RABBITMQ_PASSWORD:-complianceforge}@rabbitmq:5672/
+  NOTIFICATION_DELIVERY_TENANT_BATCH: ${NOTIFICATION_DELIVERY_TENANT_BATCH:-100}
+  NOTIFICATION_DELIVERY_CLAIM_BATCH: ${NOTIFICATION_DELIVERY_CLAIM_BATCH:-100}
+  NOTIFICATION_DELIVERY_LEASE: ${NOTIFICATION_DELIVERY_LEASE:-3m}
+  NOTIFICATION_RETRY_BASE_DELAY: ${NOTIFICATION_RETRY_BASE_DELAY:-30s}
+  NOTIFICATION_RETRY_MAX_DELAY: ${NOTIFICATION_RETRY_MAX_DELAY:-1h}
+  NOTIFICATION_DELIVERY_POLL_INTERVAL: ${NOTIFICATION_DELIVERY_POLL_INTERVAL:-10s}
   JWT_SECRET: ${JWT_SECRET:-development-only-jwt-secret}
   DSR_ENCRYPTION_KEY: ${DSR_ENCRYPTION_KEY:-ZGV2ZWxvcG1lbnQtZHNyLWtleS0zMi1ieXRlcyEhISE=}
   INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-646576656c6f706d656e742d696e746567726174696f6e2d6b65792d33326221}
@@ -23,6 +29,13 @@ x-backend-environment: &backend-environment
   STORAGE_PATH: /app/storage
   CORS_ALLOWED_ORIGINS: http://localhost:3000
   LOG_LEVEL: debug
+  OBSERVABILITY_METRICS_ENABLED: "true"
+  OBSERVABILITY_METRICS_ADDRESS: 0.0.0.0:9091
+  OBSERVABILITY_TRACING_ENABLED: ${OBSERVABILITY_TRACING_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+  OBSERVABILITY_TRACE_SAMPLE_RATIO: ${OBSERVABILITY_TRACE_SAMPLE_RATIO:-0.1}
+  OBSERVABILITY_SHUTDOWN_TIMEOUT_SECONDS: 10
+  SERVICE_VERSION: development
 
 services:
   migrate:
@@ -63,6 +76,7 @@ services:
     stop_grace_period: 45s
     networks:
       - complianceforge
+      - telemetry
 
   worker:
     build:
@@ -84,6 +98,7 @@ services:
     stop_grace_period: 45s
     networks:
       - complianceforge
+      - telemetry
 
   frontend:
     build:
@@ -168,12 +183,84 @@ services:
     networks:
       - complianceforge
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    profiles: [observability]
+    command: ["--config=/etc/otelcol/config.yml"]
+    volumes:
+      - ../observability/otel-collector.dev.yml:/etc/otelcol/config.yml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    networks:
+      - telemetry
+
+  prometheus:
+    image: prom/prometheus:v3.13.3@sha256:6976aa8a60fec930796ce5772b8d12da7a318a5daa8d40d69c5c7819a05eeed7
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle=false
+    volumes:
+      - ../observability/prometheus/prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    ports:
+      - 127.0.0.1:9090:9090
+    depends_on:
+      - api
+      - worker
+      - otel-collector
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    networks:
+      - telemetry
+
+  grafana:
+    image: grafana/grafana:13.2.1@sha256:f772d434e8fab0049deb2b1b30abd43342bcfca1537614aa8d36080232cf4283
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-complianceforge}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - 127.0.0.1:3001:3000
+    depends_on:
+      - prometheus
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    networks:
+      - telemetry
+
 volumes:
   app_storage:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   complianceforge:
     driver: bridge
+  telemetry:
+    driver: bridge
+    internal: true

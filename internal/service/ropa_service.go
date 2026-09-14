@@ -52,103 +52,103 @@ type DataCategory struct {
 
 // ProcessingActivity represents a GDPR Article 30 processing activity record.
 type ProcessingActivity struct {
-	ID                   string                 `json:"id"`
-	OrgID                string                 `json:"organization_id"`
-	ActivityRef          string                 `json:"activity_ref"`
-	Name                 string                 `json:"name"`
-	Description          string                 `json:"description"`
-	Purpose              string                 `json:"purpose"`
-	LegalBasis           string                 `json:"legal_basis"` // consent, contract, legal_obligation, vital_interest, public_interest, legitimate_interest
-	LegalBasisDetail     string                 `json:"legal_basis_detail"`
-	DataControllerName   string                 `json:"data_controller_name"`
-	DataControllerContact string                `json:"data_controller_contact"`
-	DPOContact           string                 `json:"dpo_contact"`
-	JointControllers     []string               `json:"joint_controllers"`
-	DataSubjectCategories []string              `json:"data_subject_categories"` // employees, customers, prospects, minors, patients
-	DataCategories       []string               `json:"data_categories"`
-	SpecialCategories    []string               `json:"special_categories"`
-	Recipients           []string               `json:"recipients"`
-	ThirdCountryTransfers []ThirdCountryTransfer `json:"third_country_transfers"`
-	RetentionPeriod      string                 `json:"retention_period"`
-	RetentionJustification string              `json:"retention_justification"`
-	SecurityMeasures     []string               `json:"security_measures"`
-	DPIARequired         bool                   `json:"dpia_required"`
-	DPIAStatus           string                 `json:"dpia_status"` // not_required, pending, in_progress, completed
-	DPIADate             *string                `json:"dpia_date"`
-	AutomatedDecision    bool                   `json:"automated_decision_making"`
-	ProfilingUsed        bool                   `json:"profiling_used"`
-	Status               string                 `json:"status"` // draft, active, under_review, retired
-	Owner                *string                `json:"owner"`
-	Department           string                 `json:"department"`
-	NextReviewDate       *string                `json:"next_review_date"`
-	Metadata             map[string]interface{} `json:"metadata"`
-	CreatedAt            string                 `json:"created_at"`
-	UpdatedAt            string                 `json:"updated_at"`
+	ID                     string                 `json:"id"`
+	OrgID                  string                 `json:"organization_id"`
+	ActivityRef            string                 `json:"activity_ref"`
+	Name                   string                 `json:"name"`
+	Description            string                 `json:"description"`
+	Purpose                string                 `json:"purpose"`
+	LegalBasis             string                 `json:"legal_basis"` // consent, contract, legal_obligation, vital_interest, public_interest, legitimate_interest
+	LegalBasisDetail       string                 `json:"legal_basis_detail"`
+	DataControllerName     string                 `json:"data_controller_name"`
+	DataControllerContact  string                 `json:"data_controller_contact"`
+	DPOContact             string                 `json:"dpo_contact"`
+	JointControllers       []string               `json:"joint_controllers"`
+	DataSubjectCategories  []string               `json:"data_subject_categories"` // employees, customers, prospects, minors, patients
+	DataCategories         []string               `json:"data_categories"`
+	SpecialCategories      []string               `json:"special_categories"`
+	Recipients             []string               `json:"recipients"`
+	ThirdCountryTransfers  []ThirdCountryTransfer `json:"third_country_transfers"`
+	RetentionPeriod        string                 `json:"retention_period"`
+	RetentionJustification string                 `json:"retention_justification"`
+	SecurityMeasures       []string               `json:"security_measures"`
+	DPIARequired           bool                   `json:"dpia_required"`
+	DPIAStatus             string                 `json:"dpia_status"` // not_required, pending, in_progress, completed
+	DPIADate               *string                `json:"dpia_date"`
+	AutomatedDecision      bool                   `json:"automated_decision_making"`
+	ProfilingUsed          bool                   `json:"profiling_used"`
+	Status                 string                 `json:"status"` // draft, active, under_review, retired
+	Owner                  *string                `json:"owner"`
+	Department             string                 `json:"department"`
+	NextReviewDate         *string                `json:"next_review_date"`
+	Metadata               map[string]interface{} `json:"metadata"`
+	CreatedAt              string                 `json:"created_at"`
+	UpdatedAt              string                 `json:"updated_at"`
 }
 
 // ThirdCountryTransfer represents a data transfer outside the EEA.
 type ThirdCountryTransfer struct {
-	Country       string `json:"country"`
-	Recipient     string `json:"recipient"`
-	Safeguard     string `json:"safeguard"` // adequacy_decision, sccs, bcrs, derogation, none
-	SafeguardRef  string `json:"safeguard_ref"`
+	Country      string `json:"country"`
+	Recipient    string `json:"recipient"`
+	Safeguard    string `json:"safeguard"` // adequacy_decision, sccs, bcrs, derogation, none
+	SafeguardRef string `json:"safeguard_ref"`
 }
 
 // DataFlow represents data movement for a processing activity.
 type DataFlow struct {
-	ID           string `json:"id"`
-	OrgID        string `json:"organization_id"`
-	ActivityID   string `json:"activity_id"`
-	SourceSystem string `json:"source_system"`
-	SourceType   string `json:"source_type"` // internal, external, third_party
-	DestSystem   string `json:"destination_system"`
-	DestType     string `json:"destination_type"`
-	DataElements []string `json:"data_elements"`
-	TransferMethod string `json:"transfer_method"` // api, file_transfer, manual, streaming, email
-	Encrypted    bool   `json:"encrypted"`
-	Frequency    string `json:"frequency"`
-	Volume       string `json:"volume"`
-	CreatedAt    string `json:"created_at"`
+	ID             string   `json:"id"`
+	OrgID          string   `json:"organization_id"`
+	ActivityID     string   `json:"activity_id"`
+	SourceSystem   string   `json:"source_system"`
+	SourceType     string   `json:"source_type"` // internal, external, third_party
+	DestSystem     string   `json:"destination_system"`
+	DestType       string   `json:"destination_type"`
+	DataElements   []string `json:"data_elements"`
+	TransferMethod string   `json:"transfer_method"` // api, file_transfer, manual, streaming, email
+	Encrypted      bool     `json:"encrypted"`
+	Frequency      string   `json:"frequency"`
+	Volume         string   `json:"volume"`
+	CreatedAt      string   `json:"created_at"`
 }
 
 // CreateProcessingActivityRequest holds input for creating an activity.
 type CreateProcessingActivityRequest struct {
-	Name                  string                 `json:"name"`
-	Description           string                 `json:"description"`
-	Purpose               string                 `json:"purpose"`
-	LegalBasis            string                 `json:"legal_basis"`
-	LegalBasisDetail      string                 `json:"legal_basis_detail"`
-	DataControllerName    string                 `json:"data_controller_name"`
-	DataControllerContact string                 `json:"data_controller_contact"`
-	DPOContact            string                 `json:"dpo_contact"`
-	JointControllers      []string               `json:"joint_controllers"`
-	DataSubjectCategories []string               `json:"data_subject_categories"`
-	DataCategories        []string               `json:"data_categories"`
-	SpecialCategories     []string               `json:"special_categories"`
-	Recipients            []string               `json:"recipients"`
-	ThirdCountryTransfers []ThirdCountryTransfer `json:"third_country_transfers"`
-	RetentionPeriod       string                 `json:"retention_period"`
-	RetentionJustification string               `json:"retention_justification"`
-	SecurityMeasures      []string               `json:"security_measures"`
-	AutomatedDecision     bool                   `json:"automated_decision_making"`
-	ProfilingUsed         bool                   `json:"profiling_used"`
-	Owner                 *string                `json:"owner"`
-	Department            string                 `json:"department"`
-	Metadata              map[string]interface{} `json:"metadata"`
+	Name                   string                 `json:"name"`
+	Description            string                 `json:"description"`
+	Purpose                string                 `json:"purpose"`
+	LegalBasis             string                 `json:"legal_basis"`
+	LegalBasisDetail       string                 `json:"legal_basis_detail"`
+	DataControllerName     string                 `json:"data_controller_name"`
+	DataControllerContact  string                 `json:"data_controller_contact"`
+	DPOContact             string                 `json:"dpo_contact"`
+	JointControllers       []string               `json:"joint_controllers"`
+	DataSubjectCategories  []string               `json:"data_subject_categories"`
+	DataCategories         []string               `json:"data_categories"`
+	SpecialCategories      []string               `json:"special_categories"`
+	Recipients             []string               `json:"recipients"`
+	ThirdCountryTransfers  []ThirdCountryTransfer `json:"third_country_transfers"`
+	RetentionPeriod        string                 `json:"retention_period"`
+	RetentionJustification string                 `json:"retention_justification"`
+	SecurityMeasures       []string               `json:"security_measures"`
+	AutomatedDecision      bool                   `json:"automated_decision_making"`
+	ProfilingUsed          bool                   `json:"profiling_used"`
+	Owner                  *string                `json:"owner"`
+	Department             string                 `json:"department"`
+	Metadata               map[string]interface{} `json:"metadata"`
 }
 
 // UpdateProcessingActivityRequest holds partial update fields.
 type UpdateProcessingActivityRequest struct {
-	Name                  *string                 `json:"name"`
-	Description           *string                 `json:"description"`
-	Purpose               *string                 `json:"purpose"`
-	LegalBasis            *string                 `json:"legal_basis"`
-	Status                *string                 `json:"status"`
-	RetentionPeriod       *string                 `json:"retention_period"`
-	SecurityMeasures      []string                `json:"security_measures"`
-	Owner                 *string                 `json:"owner"`
-	Department            *string                 `json:"department"`
-	NextReviewDate        *string                 `json:"next_review_date"`
+	Name             *string  `json:"name"`
+	Description      *string  `json:"description"`
+	Purpose          *string  `json:"purpose"`
+	LegalBasis       *string  `json:"legal_basis"`
+	Status           *string  `json:"status"`
+	RetentionPeriod  *string  `json:"retention_period"`
+	SecurityMeasures []string `json:"security_measures"`
+	Owner            *string  `json:"owner"`
+	Department       *string  `json:"department"`
+	NextReviewDate   *string  `json:"next_review_date"`
 }
 
 // ROPADocument represents a generated ROPA export.
@@ -162,15 +162,15 @@ type ROPADocument struct {
 
 // ROPADashboard provides aggregate ROPA statistics.
 type ROPADashboard struct {
-	TotalActivities       int            `json:"total_activities"`
-	ByLegalBasis          map[string]int `json:"by_legal_basis"`
-	SpecialCategoryCount  int            `json:"special_category_count"`
-	TransferCount         int            `json:"third_country_transfers"`
-	DPIAPending           int            `json:"dpia_pending"`
-	DPIACompleted         int            `json:"dpia_completed"`
-	OverdueReviews        int            `json:"overdue_reviews"`
-	ByStatus              map[string]int `json:"by_status"`
-	ByDepartment          map[string]int `json:"by_department"`
+	TotalActivities      int            `json:"total_activities"`
+	ByLegalBasis         map[string]int `json:"by_legal_basis"`
+	SpecialCategoryCount int            `json:"special_category_count"`
+	TransferCount        int            `json:"third_country_transfers"`
+	DPIAPending          int            `json:"dpia_pending"`
+	DPIACompleted        int            `json:"dpia_completed"`
+	OverdueReviews       int            `json:"overdue_reviews"`
+	ByStatus             map[string]int `json:"by_status"`
+	ByDepartment         map[string]int `json:"by_department"`
 }
 
 // HighRiskIndicator flags a processing activity with DPIA triggers.
@@ -184,14 +184,14 @@ type HighRiskIndicator struct {
 
 // DataSubjectImpactEntry describes what data is collected for a subject category.
 type DataSubjectImpactEntry struct {
-	ActivityRef   string   `json:"activity_ref"`
-	ActivityName  string   `json:"activity_name"`
-	Purpose       string   `json:"purpose"`
-	DataElements  []string `json:"data_elements"`
-	LegalBasis    string   `json:"legal_basis"`
-	Retention     string   `json:"retention_period"`
-	Recipients    []string `json:"recipients"`
-	Transfers     []string `json:"third_country_transfers"`
+	ActivityRef  string   `json:"activity_ref"`
+	ActivityName string   `json:"activity_name"`
+	Purpose      string   `json:"purpose"`
+	DataElements []string `json:"data_elements"`
+	LegalBasis   string   `json:"legal_basis"`
+	Retention    string   `json:"retention_period"`
+	Recipients   []string `json:"recipients"`
+	Transfers    []string `json:"third_country_transfers"`
 }
 
 // CreateDataFlowRequest holds input for mapping a data flow.
@@ -642,8 +642,15 @@ func (s *ROPAService) GetROPADashboard(ctx context.Context, orgID string) (*ROPA
 		for rows.Next() {
 			var k string
 			var v int
-			rows.Scan(&k, &v)
+			if err := rows.Scan(&k, &v); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan ROPA legal-basis aggregate: %w", err)
+			}
 			dash.ByLegalBasis[k] = v
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate ROPA legal-basis aggregates: %w", err)
 		}
 		rows.Close()
 	}
@@ -656,8 +663,15 @@ func (s *ROPAService) GetROPADashboard(ctx context.Context, orgID string) (*ROPA
 		for rows.Next() {
 			var k string
 			var v int
-			rows.Scan(&k, &v)
+			if err := rows.Scan(&k, &v); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan ROPA status aggregate: %w", err)
+			}
 			dash.ByStatus[k] = v
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate ROPA status aggregates: %w", err)
 		}
 		rows.Close()
 	}
@@ -670,8 +684,15 @@ func (s *ROPAService) GetROPADashboard(ctx context.Context, orgID string) (*ROPA
 		for rows.Next() {
 			var k string
 			var v int
-			rows.Scan(&k, &v)
+			if err := rows.Scan(&k, &v); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan ROPA department aggregate: %w", err)
+			}
 			dash.ByDepartment[k] = v
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate ROPA department aggregates: %w", err)
 		}
 		rows.Close()
 	}

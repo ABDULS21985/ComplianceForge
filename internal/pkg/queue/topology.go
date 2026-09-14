@@ -28,7 +28,10 @@ func TopologyFor(queueName string, cfg Config) (Topology, error) {
 	primaryArguments["x-dead-letter-exchange"] = cfg.DeadLetterExchange
 	primaryArguments["x-dead-letter-routing-key"] = queueName
 	if cfg.QueueType == "quorum" {
-		primaryArguments["x-delivery-limit"] = int32(cfg.MaxAttempts + 2)
+		// Keep the value wide on the wire. Config validation constrains it to
+		// RabbitMQ's signed 32-bit range, and widening before addition avoids a
+		// platform-sized integer overflow or narrowing conversion.
+		primaryArguments["x-delivery-limit"] = int64(cfg.MaxAttempts) + 2
 	}
 
 	retryArguments := cloneTable(baseArguments)

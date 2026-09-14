@@ -46,6 +46,14 @@ SET delivery_key = encode(digest(id::TEXT, 'sha256'), 'hex'),
         ELSE NULL
     END;
 
+-- Historical synchronous delivery stored raw provider errors, which may
+-- contain recipient addresses, endpoint URLs or transport credentials. Keep
+-- the failure signal while removing unsafe legacy detail.
+UPDATE notifications
+SET failure_code = 'legacy_failure',
+    error_message = 'legacy notification delivery failure (redacted)'
+WHERE error_message IS NOT NULL;
+
 ALTER TABLE notifications
     ALTER COLUMN delivery_key SET NOT NULL,
     ADD CONSTRAINT chk_notifications_delivery_key
@@ -62,6 +70,32 @@ ALTER TABLE notifications
         CHECK (dead_at IS NULL OR status IN ('failed', 'bounced')),
     ADD CONSTRAINT chk_notifications_escalation_parent
         CHECK (parent_notification_id IS NULL OR parent_notification_id <> id);
+
+-- Repair historically unconstrained escalation settings before enforcing the
+-- pair invariant. Incomplete configurations are disabled rather than guessed.
+UPDATE notification_rules
+SET cooldown_minutes = LEAST(GREATEST(cooldown_minutes, 0), 525600),
+    escalation_after_minutes = NULL,
+    escalation_channel_ids = NULL
+WHERE escalation_after_minutes IS NULL
+   OR escalation_after_minutes <= 0
+   OR escalation_after_minutes > 525600
+   OR cardinality(COALESCE(escalation_channel_ids, '{}'::uuid[])) = 0;
+
+UPDATE notification_rules
+SET cooldown_minutes = LEAST(GREATEST(cooldown_minutes, 0), 525600)
+WHERE cooldown_minutes NOT BETWEEN 0 AND 525600;
+
+ALTER TABLE notification_rules
+    ADD CONSTRAINT chk_notification_rules_cooldown
+		CHECK (cooldown_minutes BETWEEN 0 AND 525600),
+    ADD CONSTRAINT chk_notification_rules_escalation
+        CHECK (
+            (escalation_after_minutes IS NULL AND cardinality(COALESCE(escalation_channel_ids, '{}'::uuid[])) = 0)
+            OR
+			(escalation_after_minutes BETWEEN 1 AND 525600
+			 AND cardinality(COALESCE(escalation_channel_ids, '{}'::uuid[])) > 0)
+        );
 
 CREATE UNIQUE INDEX uq_notifications_delivery_key
     ON notifications(organization_id, delivery_key);

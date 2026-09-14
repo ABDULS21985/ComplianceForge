@@ -2,12 +2,14 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
+	"github.com/complianceforge/platform/internal/database"
 	"github.com/complianceforge/platform/internal/service"
 )
 
@@ -62,18 +64,55 @@ func (rs *RegulatoryScheduler) Run(ctx context.Context) error {
 // dpa_notified_at IS NULL, calculates hours remaining from the 72-hour GDPR window,
 // and emits events at 48h, 12h, 6h, 1h, and 0h (exceeded) thresholds.
 func (rs *RegulatoryScheduler) CheckGDPRBreachDeadlines(ctx context.Context) error {
-	rows, err := rs.pool.Query(ctx, `
-		SELECT i.id, i.organization_id, i.title,
-		       COALESCE(i.detected_at, i.created_at) AS breach_detected_at,
-		       i.notification_deadline
-		FROM incidents i
-		WHERE i.is_breach_notifiable = true
-		  AND i.dpa_notified_at IS NULL
-		  AND i.deleted_at IS NULL
-		  AND i.status NOT IN ('Closed', 'Resolved')
-	`)
+	if rs == nil || rs.pool == nil || rs.bus == nil {
+		return fmt.Errorf("GDPR breach scheduler is not configured")
+	}
+	rows, err := rs.pool.Query(ctx, `SELECT organization_id FROM incident_due_tenants($1)`, 1000)
 	if err != nil {
-		return fmt.Errorf("query GDPR breach incidents: %w", err)
+		return fmt.Errorf("discover tenants with due GDPR breaches: %w", err)
+	}
+	var tenantIDs []string
+	for rows.Next() {
+		var tenantID string
+		if err := rows.Scan(&tenantID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan tenant with due GDPR breach: %w", err)
+		}
+		tenantIDs = append(tenantIDs, tenantID)
+	}
+	rowErr := rows.Err()
+	rows.Close()
+	if rowErr != nil {
+		return fmt.Errorf("iterate tenants with due GDPR breaches: %w", rowErr)
+	}
+
+	var tenantErrors []error
+	for _, tenantID := range tenantIDs {
+		tenantID := tenantID
+		if err := database.WithTenantConnection(ctx, rs.pool, tenantID, func(tenantCtx context.Context) error {
+			return rs.checkGDPRBreachDeadlinesForTenant(tenantCtx, tenantID)
+		}); err != nil {
+			tenantErrors = append(tenantErrors, fmt.Errorf("tenant %s GDPR breach deadlines: %w", tenantID, err))
+		}
+	}
+	return errors.Join(tenantErrors...)
+}
+
+func (rs *RegulatoryScheduler) checkGDPRBreachDeadlinesForTenant(ctx context.Context, tenantID string) error {
+	rows, err := database.QuerierFromContext(ctx, rs.pool).Query(ctx, `
+		SELECT i.id, i.incident_ref, i.title, i.detected_at, i.notification_deadline
+		FROM incidents AS i
+		WHERE i.organization_id = $1
+		  AND i.is_breach_notifiable
+		  AND i.dpa_notified_at IS NULL
+		  AND i.notification_deadline IS NOT NULL
+		  AND i.notification_deadline <= statement_timestamp() + INTERVAL '48 hours'
+		  AND i.deleted_at IS NULL
+		  AND i.status NOT IN ('closed', 'cancelled')
+		ORDER BY i.notification_deadline, i.id
+	`, tenantID)
+	if err != nil {
+		return fmt.Errorf("query due GDPR breach incidents: %w", err)
 	}
 	defer rows.Close()
 
@@ -81,8 +120,8 @@ func (rs *RegulatoryScheduler) CheckGDPRBreachDeadlines(ctx context.Context) err
 
 	// Thresholds define the remaining hours at which we emit events.
 	type threshold struct {
-		hours    float64
-		severity string
+		hours       float64
+		severity    string
 		eventSuffix string
 	}
 	thresholds := []threshold{
@@ -94,22 +133,14 @@ func (rs *RegulatoryScheduler) CheckGDPRBreachDeadlines(ctx context.Context) err
 	}
 
 	for rows.Next() {
-		var incidentID, orgID, title string
-		var detectedAt time.Time
-		var notificationDeadline *time.Time
+		var incidentID, incidentRef, title string
+		var detectedAt, notificationDeadline time.Time
 
-		if err := rows.Scan(&incidentID, &orgID, &title, &detectedAt, &notificationDeadline); err != nil {
-			log.Error().Err(err).Msg("scan GDPR breach row")
-			continue
+		if err := rows.Scan(&incidentID, &incidentRef, &title, &detectedAt, &notificationDeadline); err != nil {
+			return fmt.Errorf("scan due GDPR breach incident: %w", err)
 		}
 
-		// Calculate the deadline: 72 hours from detection.
-		deadline := detectedAt.Add(72 * time.Hour)
-		if notificationDeadline != nil {
-			deadline = *notificationDeadline
-		}
-
-		hoursRemaining := deadline.Sub(now).Hours()
+		hoursRemaining := notificationDeadline.Sub(now).Hours()
 
 		// Find the appropriate threshold to emit.
 		for _, t := range thresholds {
@@ -117,14 +148,15 @@ func (rs *RegulatoryScheduler) CheckGDPRBreachDeadlines(ctx context.Context) err
 				rs.bus.Publish(service.Event{
 					Type:       "gdpr.breach_" + t.eventSuffix,
 					Severity:   t.severity,
-					OrgID:      orgID,
+					OrgID:      tenantID,
 					EntityType: "incident",
 					EntityID:   incidentID,
-					EntityRef:  title,
+					EntityRef:  incidentRef,
 					Data: map[string]interface{}{
 						"incident_title":  title,
+						"incident_ref":    incidentRef,
 						"detected_at":     detectedAt.Format(time.RFC3339),
-						"deadline":        deadline.Format(time.RFC3339),
+						"deadline":        notificationDeadline.Format(time.RFC3339),
 						"hours_remaining": fmt.Sprintf("%.1f", hoursRemaining),
 						"is_exceeded":     hoursRemaining <= 0,
 					},
@@ -256,8 +288,8 @@ func (rs *RegulatoryScheduler) CheckPolicyReviews(ctx context.Context) error {
 		}
 
 		data := map[string]interface{}{
-			"policy_title":    title,
-			"next_review_date": nextReview.Format("2006-01-02"),
+			"policy_title":      title,
+			"next_review_date":  nextReview.Format("2006-01-02"),
 			"days_until_review": fmt.Sprintf("%.0f", daysUntilReview),
 		}
 		if ownerID != nil {
@@ -329,9 +361,9 @@ func (rs *RegulatoryScheduler) CheckFindingRemediations(ctx context.Context) err
 		}
 
 		data := map[string]interface{}{
-			"finding_title":   title,
-			"audit_title":     auditTitle,
-			"due_date":        dueDate.Format("2006-01-02"),
+			"finding_title":    title,
+			"audit_title":      auditTitle,
+			"due_date":         dueDate.Format("2006-01-02"),
 			"finding_severity": findingSeverity,
 			"days_until_due":   fmt.Sprintf("%.0f", daysUntilDue),
 		}
@@ -404,8 +436,8 @@ func (rs *RegulatoryScheduler) CheckVendorAssessments(ctx context.Context) error
 		}
 
 		data := map[string]interface{}{
-			"vendor_name":          name,
-			"next_assessment_date": nextAssessment.Format("2006-01-02"),
+			"vendor_name":           name,
+			"next_assessment_date":  nextAssessment.Format("2006-01-02"),
 			"days_until_assessment": fmt.Sprintf("%.0f", daysUntilAssessment),
 		}
 		if ownerID != nil {
@@ -479,8 +511,8 @@ func (rs *RegulatoryScheduler) CheckRiskReviews(ctx context.Context) error {
 		}
 
 		data := map[string]interface{}{
-			"risk_title":       title,
-			"next_review_date": nextReview.Format("2006-01-02"),
+			"risk_title":        title,
+			"next_review_date":  nextReview.Format("2006-01-02"),
 			"days_until_review": fmt.Sprintf("%.0f", daysUntilReview),
 		}
 		if ownerID != nil {

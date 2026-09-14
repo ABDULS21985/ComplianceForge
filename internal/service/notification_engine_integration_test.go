@@ -92,7 +92,7 @@ func TestNotificationEngineAgainstMigratedPostgres(t *testing.T) {
 	}
 	deliveryConfig := NotificationDeliveryConfig{
 		OwnerID: uuid.NewString(), TenantBatch: 10, ClaimBatch: 10,
-		LeaseDuration: time.Minute, RetryBaseDelay: time.Second,
+		LeaseDuration: 3 * time.Minute, RetryBaseDelay: time.Second,
 		RetryMaxDelay: time.Minute, PollInterval: time.Second,
 	}
 	if err := engine.RunDeliveryCycle(ctx, deliveryConfig); err != nil {
@@ -124,6 +124,19 @@ func TestNotificationEngineAgainstMigratedPostgres(t *testing.T) {
 	if len(sender.messages) != 1 {
 		t.Fatalf("cooldown delivered %d messages, want 1", len(sender.messages))
 	}
+	if _, err := pool.Exec(ctx, `UPDATE notification_rules SET cooldown_minutes=0 WHERE id=$1`, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.ProcessEvent(ctx, event); err != nil {
+		t.Fatalf("idempotent ProcessEvent() error = %v", err)
+	}
+	var idempotentCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM notifications WHERE organization_id=$1 AND rule_id=$2`, orgA, ruleID).Scan(&idempotentCount); err != nil {
+		t.Fatal(err)
+	}
+	if idempotentCount != 1 {
+		t.Fatalf("same event produced %d durable notifications, want 1", idempotentCount)
+	}
 
 	if _, err := pool.Exec(ctx, `UPDATE notification_rules SET channel_ids=ARRAY[$1::uuid] WHERE id=$2`, channelB, ruleID); err != nil {
 		t.Fatal(err)
@@ -134,5 +147,59 @@ func TestNotificationEngineAgainstMigratedPostgres(t *testing.T) {
 	}
 	if len(sender.messages) != 1 {
 		t.Fatal("cross-tenant channel caused a delivery")
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE notification_rules SET channel_ids=ARRAY[$1::uuid],event_type='risk.escalated' WHERE id=$2`, channelA, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO notification_preferences
+		(user_id,organization_id,event_type,email_enabled,digest_frequency)
+		VALUES ($1,$2,'*',true,'daily')`, userA, orgA); err != nil {
+		t.Fatal(err)
+	}
+	event.ID, event.EntityID = uuid.NewString(), uuid.NewString()
+	if err := engine.ProcessEvent(ctx, event); err != nil {
+		t.Fatalf("digest ProcessEvent() error = %v", err)
+	}
+	var digestStatus string
+	var digestScheduledFor time.Time
+	if err := pool.QueryRow(ctx, `SELECT status,scheduled_for FROM notifications WHERE event_id=$1`, event.ID).
+		Scan(&digestStatus, &digestScheduledFor); err != nil {
+		t.Fatal(err)
+	}
+	if digestStatus != "pending" || !digestScheduledFor.After(time.Now().UTC()) {
+		t.Fatalf("digest status=%s scheduled_for=%s", digestStatus, digestScheduledFor)
+	}
+	if err := engine.RunDeliveryCycle(ctx, deliveryConfig); err != nil {
+		t.Fatalf("pre-window delivery cycle: %v", err)
+	}
+	if len(sender.messages) != 1 {
+		t.Fatal("digest was delivered before its scheduled window")
+	}
+
+	// Critical regulatory deadlines bypass opt-outs, digest windows and quiet
+	// hours, while the previously scheduled digest remains durable.
+	if _, err := pool.Exec(ctx, `UPDATE notification_rules SET event_type='regulatory.deadline_exceeded' WHERE id=$1`, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	critical := event
+	critical.ID, critical.EntityID = uuid.NewString(), uuid.NewString()
+	critical.Type = "regulatory.deadline_exceeded"
+	critical.Severity = "critical"
+	if err := engine.ProcessEvent(ctx, critical); err != nil {
+		t.Fatalf("critical bypass ProcessEvent() error = %v", err)
+	}
+	var criticalScheduledFor time.Time
+	if err := pool.QueryRow(ctx, `SELECT scheduled_for FROM notifications WHERE event_id=$1`, critical.ID).Scan(&criticalScheduledFor); err != nil {
+		t.Fatal(err)
+	}
+	if criticalScheduledFor.After(time.Now().UTC().Add(time.Second)) {
+		t.Fatalf("critical notification was deferred until %s", criticalScheduledFor)
+	}
+	if err := engine.RunDeliveryCycle(ctx, deliveryConfig); err != nil {
+		t.Fatalf("critical delivery cycle: %v", err)
+	}
+	if len(sender.messages) != 2 {
+		t.Fatalf("critical bypass deliveries=%d want=2 total", len(sender.messages))
 	}
 }

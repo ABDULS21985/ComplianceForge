@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { middleware } from '@/middleware';
+import { proxy } from '@/proxy';
 import {
   ACCESS_TOKEN_COOKIE,
   DEVELOPMENT_ACCESS_TOKEN_COOKIE,
@@ -16,11 +16,11 @@ afterEach(() => {
   else process.env.APP_ENV = originalAppEnvironment;
 });
 
-describe('authentication middleware routing', () => {
+describe('authentication proxy routing', () => {
   it.each([ROUTES.portals.vendor, ROUTES.portals.board])(
     'allows unauthenticated access to %s',
     (route) => {
-      const response = middleware(
+      const response = proxy(
         new NextRequest(`https://app.example.test${route}?token=invite-token`),
       );
 
@@ -30,7 +30,7 @@ describe('authentication middleware routing', () => {
   );
 
   it('redirects protected routes and preserves their query string', () => {
-    const response = middleware(
+    const response = proxy(
       new NextRequest('https://app.example.test/risks?page=3&status=open'),
     );
     const location = response.headers.get('location');
@@ -42,7 +42,7 @@ describe('authentication middleware routing', () => {
   });
 
   it('allows an authenticated request through', () => {
-    const response = middleware(
+    const response = proxy(
       new NextRequest('https://app.example.test/dashboard', {
         headers: { cookie: `${ACCESS_TOKEN_COOKIE}=present` },
       }),
@@ -53,7 +53,7 @@ describe('authentication middleware routing', () => {
   });
 
   it('allows a refresh-only session through for server-side rotation', () => {
-    const response = middleware(
+    const response = proxy(
       new NextRequest('https://app.example.test/dashboard', {
         headers: { cookie: `${REFRESH_TOKEN_COOKIE}=present` },
       }),
@@ -65,7 +65,7 @@ describe('authentication middleware routing', () => {
 
   it('recognizes the isolated loopback HTTP development cookie', () => {
     process.env.APP_ENV = 'development';
-    const response = middleware(
+    const response = proxy(
       new NextRequest('http://localhost:3000/dashboard', {
         headers: { cookie: `${DEVELOPMENT_ACCESS_TOKEN_COOKIE}=present` },
       }),
@@ -76,13 +76,13 @@ describe('authentication middleware routing', () => {
   });
 
   it('does not bypass auth for paths that only share a static prefix', () => {
-    const response = middleware(new NextRequest('https://app.example.test/apiary'));
+    const response = proxy(new NextRequest('https://app.example.test/apiary'));
 
     expect(response.headers.get('location')).not.toBeNull();
   });
 
   it('expires a legacy JavaScript-readable token cookie during migration', () => {
-    const response = middleware(
+    const response = proxy(
       new NextRequest('https://app.example.test/login', {
         headers: {
           cookie: 'cf_access_token=legacy-token; cf_refresh_token=legacy-refresh',

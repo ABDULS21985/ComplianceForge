@@ -58,7 +58,7 @@ type CalendarEvent struct {
 	OrganizationID string   `json:"organization_id"`
 	Title          string   `json:"title" validate:"required"`
 	Description    string   `json:"description,omitempty"`
-	Type           string   `json:"type"` // audit, review, assessment, deadline, meeting, custom
+	Type           string   `json:"type"`   // audit, review, assessment, deadline, meeting, custom
 	Status         string   `json:"status"` // scheduled, in_progress, completed, overdue, cancelled
 	StartDate      string   `json:"start_date"`
 	EndDate        string   `json:"end_date,omitempty"`
@@ -125,13 +125,13 @@ type CalendarOverdueItem struct {
 
 // CalendarSummary provides a summary of calendar activity.
 type CalendarSummary struct {
-	Period           string         `json:"period"`
-	TotalEvents      int            `json:"total_events"`
-	CompletedEvents  int            `json:"completed_events"`
-	OverdueEvents    int            `json:"overdue_events"`
-	UpcomingDeadlines int           `json:"upcoming_deadlines"`
-	EventsByType     map[string]int `json:"events_by_type"`
-	EventsByStatus   map[string]int `json:"events_by_status"`
+	Period            string         `json:"period"`
+	TotalEvents       int            `json:"total_events"`
+	CompletedEvents   int            `json:"completed_events"`
+	OverdueEvents     int            `json:"overdue_events"`
+	UpcomingDeadlines int            `json:"upcoming_deadlines"`
+	EventsByType      map[string]int `json:"events_by_type"`
+	EventsByStatus    map[string]int `json:"events_by_status"`
 }
 
 // CalendarSubscriptions holds user calendar subscription preferences.
@@ -147,7 +147,7 @@ type CalendarSubscriptions struct {
 // CalendarSyncStatus holds the status of external calendar sync.
 type CalendarSyncStatus struct {
 	Provider     string `json:"provider,omitempty"` // google, outlook, ical
-	Status       string `json:"status"` // connected, syncing, error, disconnected
+	Status       string `json:"status"`             // connected, syncing, error, disconnected
 	LastSyncAt   string `json:"last_sync_at,omitempty"`
 	NextSyncAt   string `json:"next_sync_at,omitempty"`
 	EventsSynced int    `json:"events_synced"`
@@ -431,10 +431,7 @@ func (h *CalendarHandler) GetICalFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=\"calendar.ics\"")
-	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	writeAttachment(w, "calendar.ics", "text/calendar", data)
 }
 
 // GetSyncStatus handles GET /calendar/sync/status.

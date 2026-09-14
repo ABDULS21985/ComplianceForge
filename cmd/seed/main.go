@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -21,7 +22,11 @@ import (
 	"github.com/complianceforge/platform/internal/config"
 )
 
-const seedLockID int64 = 0x434653454544 // "CFSEED"
+const (
+	seedLockID          int64 = 0x434653454544 // "CFSEED"
+	maxSeedManifestSize int64 = 1 << 20
+	maxSeedFileSize     int64 = 16 << 20
+)
 
 type options struct {
 	seedDir      string
@@ -46,7 +51,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to locate seed files")
 	}
-	seedNames, err := readManifest(manifestPath)
+	seedNames, err := readManifest(seedDir, manifestPath)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to read seed manifest")
 	}
@@ -82,8 +87,7 @@ func main() {
 	applied := 0
 	skipped := 0
 	for index, seedName := range seedNames {
-		seedPath := filepath.Join(seedDir, seedName)
-		contents, readErr := os.ReadFile(seedPath)
+		contents, readErr := readContainedRegularFile(seedDir, seedName, maxSeedFileSize)
 		if readErr != nil {
 			log.Fatal().Err(readErr).Str("seed", seedName).Msg("failed to read seed file")
 		}
@@ -144,14 +148,23 @@ func resolveSeedPaths(opts options) (string, string, error) {
 
 	var seedDir string
 	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err == nil && info.IsDir() {
-			seedDir, err = filepath.Abs(candidate)
-			if err != nil {
-				return "", "", fmt.Errorf("resolve seed directory %q: %w", candidate, err)
-			}
-			break
+		absolutePath, err := filepath.Abs(candidate)
+		if err != nil {
+			return "", "", fmt.Errorf("resolve seed directory %q: %w", candidate, err)
 		}
+		canonicalPath, err := filepath.EvalSymlinks(absolutePath)
+		if err != nil {
+			continue
+		}
+		root, err := os.OpenRoot(canonicalPath)
+		if err != nil {
+			continue
+		}
+		if closeErr := root.Close(); closeErr != nil {
+			return "", "", fmt.Errorf("close seed directory %q: %w", candidate, closeErr)
+		}
+		seedDir = canonicalPath
+		break
 	}
 	if seedDir == "" {
 		return "", "", fmt.Errorf("no seed directory found (checked %s)", strings.Join(candidates, ", "))
@@ -163,23 +176,25 @@ func resolveSeedPaths(opts options) (string, string, error) {
 	} else if !filepath.IsAbs(manifestPath) {
 		manifestPath = filepath.Join(seedDir, manifestPath)
 	}
-	info, err := os.Stat(manifestPath)
-	if err != nil || info.IsDir() {
-		return "", "", fmt.Errorf("seed manifest not found: %s", manifestPath)
+	manifestRelative, err := containedRelativePath(seedDir, manifestPath)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid seed manifest: %w", err)
 	}
-	return seedDir, manifestPath, nil
+	if _, err := readContainedRegularFile(seedDir, manifestRelative, maxSeedManifestSize); err != nil {
+		return "", "", fmt.Errorf("seed manifest not found or invalid: %w", err)
+	}
+	return seedDir, filepath.Join(seedDir, manifestRelative), nil
 }
 
-func readManifest(path string) ([]string, error) {
-	file, err := os.Open(path)
+func readManifest(seedDir, path string) ([]string, error) {
+	contents, err := readContainedRegularFile(seedDir, path, maxSeedManifestSize)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
 	var names []string
 	seen := make(map[string]struct{})
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(contents))
 	for scanner.Scan() {
 		name := strings.TrimSpace(scanner.Text())
 		if name == "" || strings.HasPrefix(name, "#") {
@@ -201,6 +216,57 @@ func readManifest(path string) ([]string, error) {
 		return nil, errors.New("seed manifest is empty")
 	}
 	return names, nil
+}
+
+func containedRelativePath(rootDir, path string) (string, error) {
+	if strings.TrimSpace(path) == "" || strings.ContainsRune(path, '\x00') {
+		return "", errors.New("path is empty or contains a NUL byte")
+	}
+	candidate := path
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(rootDir, candidate)
+	}
+	absolutePath, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", err
+	}
+	relativePath, err := filepath.Rel(rootDir, absolutePath)
+	if err != nil || relativePath == "." || relativePath == ".." ||
+		strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) || filepath.IsAbs(relativePath) {
+		return "", errors.New("path escapes the seed directory")
+	}
+	return relativePath, nil
+}
+
+func readContainedRegularFile(rootDir, path string, maxSize int64) ([]byte, error) {
+	relativePath, err := containedRelativePath(rootDir, path)
+	if err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("open seed directory: %w", err)
+	}
+	defer root.Close()
+
+	info, err := root.Lstat(relativePath)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("seed path is not a regular file")
+	}
+	if info.Size() < 0 || info.Size() > maxSize {
+		return nil, fmt.Errorf("seed file size %d exceeds the %d-byte limit", info.Size(), maxSize)
+	}
+	contents, err := root.ReadFile(relativePath)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(contents)) > maxSize {
+		return nil, fmt.Errorf("seed file exceeds the %d-byte limit", maxSize)
+	}
+	return contents, nil
 }
 
 func unwrapTransaction(contents []byte) (string, error) {

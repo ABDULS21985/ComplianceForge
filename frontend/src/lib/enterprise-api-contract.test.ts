@@ -1,8 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import api from '@/lib/api';
 import { CSRF_TOKEN_HEADER } from '@/lib/auth-constants';
 import { resetCsrfToken } from '@/lib/csrf-client';
+import { normalizePermissionMap } from '@/lib/navigation';
+import type { PermissionMap } from '@/types/access';
+import type { DataEnvelope } from '@/types/enterprise-settings';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -12,7 +15,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('enterprise settings API route contracts', () => {
-  const fetchMock = vi.fn<[RequestInfo | URL, RequestInit?], Promise<Response>>();
+  const fetchMock = vi.fn<
+    (input: RequestInfo | URL, request?: RequestInit) => Promise<Response>
+  >();
 
   beforeEach(() => {
     resetCsrfToken();
@@ -78,6 +83,25 @@ describe('enterprise settings API route contracts', () => {
     expect(JSON.parse(String(request?.body))).toMatchObject({
       permissions: ['read:controls'],
       rate_limit: 60,
+    });
+  });
+
+  it('keeps the permissions endpoint on its canonical typed envelope', async () => {
+    expectTypeOf(api.access.myPermissions)
+      .returns.resolves.toEqualTypeOf<DataEnvelope<PermissionMap>>();
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ data: { audits: ['create', 'read'], reports: ['read'] } }),
+    );
+
+    const response = await api.access.myPermissions();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/bff/access/my-permissions',
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin' }),
+    );
+    expect(normalizePermissionMap(response)).toEqual({
+      audits: ['create', 'read'],
+      reports: ['read'],
     });
   });
 });

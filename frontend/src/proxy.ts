@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-import { AUTH_REDIRECT_QUERY_PARAM, isPublicRoute, ROUTES } from '@/lib/routes';
 import {
   LEGACY_ACCESS_TOKEN_KEY,
   LEGACY_REFRESH_TOKEN_KEY,
 } from '@/lib/auth-constants';
 import { sessionCookiePolicy } from '@/lib/request-security';
+import { AUTH_REDIRECT_QUERY_PARAM, isPublicRoute, ROUTES } from '@/lib/routes';
 
 function clearLegacyCookie(request: NextRequest, response: NextResponse): NextResponse {
   for (const name of [LEGACY_ACCESS_TOKEN_KEY, LEGACY_REFRESH_TOKEN_KEY]) {
@@ -22,7 +22,7 @@ function clearLegacyCookie(request: NextRequest, response: NextResponse): NextRe
   return response;
 }
 
-function isMiddlewareBypassPath(pathname: string): boolean {
+function isProxyBypassPath(pathname: string): boolean {
   return (
     pathname === '/api' ||
     pathname.startsWith('/api/') ||
@@ -31,11 +31,10 @@ function isMiddlewareBypassPath(pathname: string): boolean {
   );
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip middleware for static assets and API routes
-  if (isMiddlewareBypassPath(pathname)) {
+  if (isProxyBypassPath(pathname)) {
     return clearLegacyCookie(request, NextResponse.next());
   }
 
@@ -49,10 +48,12 @@ export function middleware(request: NextRequest) {
   const accessToken = request.cookies.get(cookiePolicy.access)?.value;
   const refreshToken = request.cookies.get(cookiePolicy.refresh)?.value;
 
-  // If no token and trying to access a protected page, redirect to login
   if (!accessToken && !refreshToken) {
     const loginUrl = new URL(ROUTES.auth.login, request.url);
-    loginUrl.searchParams.set(AUTH_REDIRECT_QUERY_PARAM, `${pathname}${request.nextUrl.search}`);
+    loginUrl.searchParams.set(
+      AUTH_REDIRECT_QUERY_PARAM,
+      `${pathname}${request.nextUrl.search}`,
+    );
     return clearLegacyCookie(request, NextResponse.redirect(loginUrl));
   }
 

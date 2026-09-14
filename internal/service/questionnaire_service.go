@@ -31,67 +31,67 @@ var (
 
 // Questionnaire is a vendor assessment questionnaire template.
 type Questionnaire struct {
-	ID            string              `json:"id"`
-	OrgID         string              `json:"organization_id"`
-	Title         string              `json:"title"`
-	Description   string              `json:"description"`
-	Category      string              `json:"category"` // security, privacy, compliance, risk, general
-	Version       int                 `json:"version"`
-	Status        string              `json:"status"` // draft, published, archived
-	ScoringMethod string              `json:"scoring_method"` // weighted_average, pass_fail, risk_rated
-	Sections      []QuestionSection   `json:"sections"`
-	IsTemplate    bool                `json:"is_template"`
-	CreatedBy     string              `json:"created_by"`
-	CreatedAt     string              `json:"created_at"`
-	UpdatedAt     string              `json:"updated_at"`
+	ID            string            `json:"id"`
+	OrgID         string            `json:"organization_id"`
+	Title         string            `json:"title"`
+	Description   string            `json:"description"`
+	Category      string            `json:"category"` // security, privacy, compliance, risk, general
+	Version       int               `json:"version"`
+	Status        string            `json:"status"`         // draft, published, archived
+	ScoringMethod string            `json:"scoring_method"` // weighted_average, pass_fail, risk_rated
+	Sections      []QuestionSection `json:"sections"`
+	IsTemplate    bool              `json:"is_template"`
+	CreatedBy     string            `json:"created_by"`
+	CreatedAt     string            `json:"created_at"`
+	UpdatedAt     string            `json:"updated_at"`
 }
 
 // QuestionSection groups related questions.
 type QuestionSection struct {
-	ID           string     `json:"id"`
-	Title        string     `json:"title"`
-	Description  string     `json:"description"`
-	Weight       float64    `json:"weight"`
-	SortOrder    int        `json:"sort_order"`
-	Questions    []Question `json:"questions"`
+	ID          string     `json:"id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Weight      float64    `json:"weight"`
+	SortOrder   int        `json:"sort_order"`
+	Questions   []Question `json:"questions"`
 }
 
 // Question is a single question within a section.
 type Question struct {
-	ID            string   `json:"id"`
-	SectionID     string   `json:"section_id"`
-	QuestionText  string   `json:"question_text"`
-	QuestionType  string   `json:"question_type"` // yes_no, multiple_choice, text, rating, file_upload
-	IsRequired    bool     `json:"is_required"`
-	Weight        float64  `json:"weight"`
-	Options       []string `json:"options"`
-	SortOrder     int      `json:"sort_order"`
-	GuidanceText  string   `json:"guidance_text"`
+	ID           string   `json:"id"`
+	SectionID    string   `json:"section_id"`
+	QuestionText string   `json:"question_text"`
+	QuestionType string   `json:"question_type"` // yes_no, multiple_choice, text, rating, file_upload
+	IsRequired   bool     `json:"is_required"`
+	Weight       float64  `json:"weight"`
+	Options      []string `json:"options"`
+	SortOrder    int      `json:"sort_order"`
+	GuidanceText string   `json:"guidance_text"`
 }
 
 // VendorAssessment is a sent questionnaire instance for a specific vendor.
 type VendorAssessment struct {
-	ID                string                 `json:"id"`
-	OrgID             string                 `json:"organization_id"`
-	QuestionnaireID   string                 `json:"questionnaire_id"`
-	VendorID          string                 `json:"vendor_id"`
-	VendorName        string                 `json:"vendor_name"`
-	ContactEmail      string                 `json:"contact_email"`
-	Status            string                 `json:"status"` // sent, in_progress, submitted, reviewed, expired
-	DueDate           string                 `json:"due_date"`
-	SubmittedAt       *string                `json:"submitted_at"`
-	ReviewedAt        *string                `json:"reviewed_at"`
-	ReviewedBy        *string                `json:"reviewed_by"`
-	ReviewComments    *string                `json:"review_comments"`
-	ReviewOutcome     *string                `json:"review_outcome"` // approved, conditionally_approved, rejected, needs_followup
-	OverallScore      *float64               `json:"overall_score"`
-	SectionScores     map[string]float64     `json:"section_scores"`
-	RiskLevel         *string                `json:"risk_level"`
-	TokenHash         string                 `json:"-"`
-	ReminderCount     int                    `json:"reminder_count"`
-	LastReminderAt    *string                `json:"last_reminder_at"`
-	Answers           []AssessmentAnswer     `json:"answers"`
-	CreatedAt         string                 `json:"created_at"`
+	ID              string             `json:"id"`
+	OrgID           string             `json:"organization_id"`
+	QuestionnaireID string             `json:"questionnaire_id"`
+	VendorID        string             `json:"vendor_id"`
+	VendorName      string             `json:"vendor_name"`
+	ContactEmail    string             `json:"contact_email"`
+	Status          string             `json:"status"` // sent, in_progress, submitted, reviewed, expired
+	DueDate         string             `json:"due_date"`
+	SubmittedAt     *string            `json:"submitted_at"`
+	ReviewedAt      *string            `json:"reviewed_at"`
+	ReviewedBy      *string            `json:"reviewed_by"`
+	ReviewComments  *string            `json:"review_comments"`
+	ReviewOutcome   *string            `json:"review_outcome"` // approved, conditionally_approved, rejected, needs_followup
+	OverallScore    *float64           `json:"overall_score"`
+	SectionScores   map[string]float64 `json:"section_scores"`
+	RiskLevel       *string            `json:"risk_level"`
+	TokenHash       string             `json:"-"`
+	ReminderCount   int                `json:"reminder_count"`
+	LastReminderAt  *string            `json:"last_reminder_at"`
+	Answers         []AssessmentAnswer `json:"answers"`
+	CreatedAt       string             `json:"created_at"`
 }
 
 // AssessmentAnswer is a vendor's response to a single question.
@@ -441,8 +441,13 @@ func (s *QuestionnaireService) SubmitAssessment(ctx context.Context, token strin
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		rows.Scan(&id)
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("scan required question: %w", err)
+		}
 		requiredIDs = append(requiredIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate required questions: %w", err)
 	}
 
 	answeredMap := make(map[string]bool)
@@ -568,8 +573,13 @@ func (s *QuestionnaireService) CalculateScore(ctx context.Context, assessmentID 
 	var sections []sectionInfo
 	for secRows.Next() {
 		var si sectionInfo
-		secRows.Scan(&si.ID, &si.Title, &si.Weight)
+		if err := secRows.Scan(&si.ID, &si.Title, &si.Weight); err != nil {
+			return nil, fmt.Errorf("scan questionnaire section: %w", err)
+		}
 		sections = append(sections, si)
+	}
+	if err := secRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate questionnaire sections: %w", err)
 	}
 
 	totalWeight := 0.0
@@ -744,8 +754,13 @@ func (s *QuestionnaireService) GetAssessmentDashboard(ctx context.Context, orgID
 	for rows.Next() {
 		var st string
 		var cnt int
-		rows.Scan(&st, &cnt)
+		if err := rows.Scan(&st, &cnt); err != nil {
+			return nil, fmt.Errorf("scan assessment status aggregate: %w", err)
+		}
 		dash.ByStatus[st] = cnt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate assessment status aggregates: %w", err)
 	}
 
 	_ = s.pool.QueryRow(ctx, `
@@ -872,9 +887,14 @@ func (s *QuestionnaireService) GetAssessment(ctx context.Context, orgID, assessm
 		defer ansRows.Close()
 		for ansRows.Next() {
 			var ans AssessmentAnswer
-			ansRows.Scan(&ans.QuestionID, &ans.QuestionText, &ans.AnswerValue,
-				&ans.AnswerScore, &ans.Comments, &ans.FileURL)
+			if err := ansRows.Scan(&ans.QuestionID, &ans.QuestionText, &ans.AnswerValue,
+				&ans.AnswerScore, &ans.Comments, &ans.FileURL); err != nil {
+				return nil, fmt.Errorf("scan assessment answer: %w", err)
+			}
 			a.Answers = append(a.Answers, ans)
+		}
+		if err := ansRows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate assessment answers: %w", err)
 		}
 	}
 

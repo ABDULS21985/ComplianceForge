@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -11,6 +12,20 @@ import (
 	"github.com/complianceforge/platform/internal/middleware"
 	"github.com/complianceforge/platform/internal/models"
 )
+
+const (
+	maxLogoFileBytes    = 5 << 20
+	maxLogoRequestBytes = maxLogoFileBytes + (1 << 20)
+	maxMultipartMemory  = 1 << 20
+)
+
+var allowedLogoMediaTypes = map[string]struct{}{
+	"image/gif":    {},
+	"image/jpeg":   {},
+	"image/png":    {},
+	"image/webp":   {},
+	"image/x-icon": {},
+}
 
 // ---------- service interface ----------
 
@@ -77,17 +92,17 @@ type DomainVerifyRequest struct {
 
 // DomainVerifyResult holds the result of a domain verification request.
 type DomainVerifyResult struct {
-	Domain           string `json:"domain"`
-	Status           string `json:"status"` // pending, verified, failed
+	Domain             string `json:"domain"`
+	Status             string `json:"status"` // pending, verified, failed
 	VerificationRecord string `json:"verification_record,omitempty"`
-	CNAMETarget      string `json:"cname_target,omitempty"`
-	Instructions     string `json:"instructions,omitempty"`
+	CNAMETarget        string `json:"cname_target,omitempty"`
+	Instructions       string `json:"instructions,omitempty"`
 }
 
 // DomainStatus holds the current status of a custom domain.
 type DomainStatus struct {
 	Domain       string `json:"domain"`
-	Status       string `json:"status"` // pending, verified, active, error
+	Status       string `json:"status"`               // pending, verified, active, error
 	SSLStatus    string `json:"ssl_status,omitempty"` // pending, active, error
 	DNSVerified  bool   `json:"dns_verified"`
 	SSLActive    bool   `json:"ssl_active"`
@@ -104,31 +119,31 @@ type BrandingPreview struct {
 
 // Partner represents a white-label partner.
 type Partner struct {
-	ID               string `json:"id"`
-	Name             string `json:"name" validate:"required"`
-	Slug             string `json:"slug"`
-	ContactEmail     string `json:"contact_email" validate:"required"`
-	ContactName      string `json:"contact_name,omitempty"`
-	LogoURL          string `json:"logo_url,omitempty"`
-	PrimaryColor     string `json:"primary_color,omitempty"`
-	CustomDomain     string `json:"custom_domain,omitempty"`
-	MaxTenants       int    `json:"max_tenants"`
-	ActiveTenants    int    `json:"active_tenants"`
-	IsActive         bool   `json:"is_active"`
-	CommissionRate   float64 `json:"commission_rate,omitempty"`
-	CreatedBy        string `json:"created_by,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name" validate:"required"`
+	Slug           string  `json:"slug"`
+	ContactEmail   string  `json:"contact_email" validate:"required"`
+	ContactName    string  `json:"contact_name,omitempty"`
+	LogoURL        string  `json:"logo_url,omitempty"`
+	PrimaryColor   string  `json:"primary_color,omitempty"`
+	CustomDomain   string  `json:"custom_domain,omitempty"`
+	MaxTenants     int     `json:"max_tenants"`
+	ActiveTenants  int     `json:"active_tenants"`
+	IsActive       bool    `json:"is_active"`
+	CommissionRate float64 `json:"commission_rate,omitempty"`
+	CreatedBy      string  `json:"created_by,omitempty"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
 }
 
 // PartnerTenant represents a tenant under a partner.
 type PartnerTenant struct {
-	TenantID       string `json:"tenant_id"`
+	TenantID         string `json:"tenant_id"`
 	OrganizationName string `json:"organization_name"`
-	Plan           string `json:"plan"`
-	Status         string `json:"status"` // active, suspended, cancelled
-	UserCount      int    `json:"user_count"`
-	CreatedAt      string `json:"created_at"`
+	Plan             string `json:"plan"`
+	Status           string `json:"status"` // active, suspended, cancelled
+	UserCount        int    `json:"user_count"`
+	CreatedAt        string `json:"created_at"`
 }
 
 // ---------- handler ----------
@@ -174,9 +189,7 @@ func (h *BrandingHandler) GetBrandingCSS(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(css))
+	writeStylesheet(w, css)
 }
 
 // UpdateBranding handles PUT /branding.
@@ -206,31 +219,63 @@ func (h *BrandingHandler) UploadLogo(w http.ResponseWriter, r *http.Request) {
 	orgID := middleware.GetOrgIDFromContext(r.Context())
 	userID := middleware.GetUserIDFromContext(r.Context())
 
-	// Max 5MB
-	if err := r.ParseMultipartForm(5 << 20); err != nil {
+	// ParseMultipartForm's argument controls only in-memory buffering; cap the
+	// complete body separately so multipart metadata cannot bypass the 5 MiB file
+	// policy and exhaust disk or memory.
+	r.Body = http.MaxBytesReader(w, r.Body, maxLogoRequestBytes)
+	// #nosec G120 -- MaxBytesReader above caps the entire request at 6 MiB;
+	// ParseMultipartForm is additionally limited to 1 MiB of in-memory buffering.
+	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "Logo upload is too large", "")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "Failed to parse multipart form", err.Error())
 		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
 	}
 
 	logoType := r.FormValue("type")
 	if logoType == "" {
 		logoType = "logo"
 	}
+	switch logoType {
+	case "logo", "logo_dark", "logo_small", "favicon":
+	default:
+		writeError(w, http.StatusBadRequest, "Invalid logo type", "")
+		return
+	}
 
-	file, header, err := r.FormFile("file")
+	file, _, err := r.FormFile("file")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Missing file in request", err.Error())
 		return
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(file)
+	data, err := io.ReadAll(io.LimitReader(file, maxLogoFileBytes+1))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to read file", err.Error())
 		return
 	}
+	if len(data) == 0 {
+		writeError(w, http.StatusBadRequest, "Logo file is empty", "")
+		return
+	}
+	if len(data) > maxLogoFileBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "Logo file exceeds 5 MiB", "")
+		return
+	}
+	detectedType := http.DetectContentType(data)
+	if _, allowed := allowedLogoMediaTypes[detectedType]; !allowed {
+		writeError(w, http.StatusUnsupportedMediaType, "Unsupported logo file type", "")
+		return
+	}
 
-	result, err := h.svc.UploadLogo(r.Context(), orgID, userID, logoType, data, header.Header.Get("Content-Type"))
+	result, err := h.svc.UploadLogo(r.Context(), orgID, userID, logoType, data, detectedType)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to upload logo", err.Error())
 		return

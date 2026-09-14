@@ -586,6 +586,15 @@ function CreateRiskForm({ onClose }: { onClose: () => void }) {
 // Main Page
 // ---------------------------------------------------------------------------
 
+function SortIcon({ active, direction }: { active: boolean; direction: 'asc' | 'desc' }) {
+  if (!active) return null;
+  return direction === 'asc' ? (
+    <ChevronUp className="ml-1 inline h-3 w-3" />
+  ) : (
+    <ChevronDown className="ml-1 inline h-3 w-3" />
+  );
+}
+
 export default function RiskRegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -648,15 +657,6 @@ export default function RiskRegisterPage() {
       updateParams({ sort_by: col, sort_dir: 'desc' });
     }
   };
-
-  function SortIcon({ col }: { col: string }) {
-    if (sortBy !== col) return null;
-    return sortDir === 'asc' ? (
-      <ChevronUp className="inline h-3 w-3 ml-1" />
-    ) : (
-      <ChevronDown className="inline h-3 w-3 ml-1" />
-    );
-  }
 
   // ---------------------------------------------------------------------------
   // Render
@@ -770,14 +770,15 @@ export default function RiskRegisterPage() {
                           className="px-4 py-3 text-left font-medium cursor-pointer select-none"
                           onClick={() => toggleSort('title')}
                         >
-                          Title <SortIcon col="title" />
+                          Title <SortIcon active={sortBy === 'title'} direction={sortDir} />
                         </th>
                         <th className="px-4 py-3 text-left font-medium">Category</th>
                         <th
                           className="px-4 py-3 text-left font-medium cursor-pointer select-none"
                           onClick={() => toggleSort('residual_risk_score')}
                         >
-                          Residual Score <SortIcon col="residual_risk_score" />
+                          Residual Score{' '}
+                          <SortIcon active={sortBy === 'residual_risk_score'} direction={sortDir} />
                         </th>
                         <th className="px-4 py-3 text-left font-medium">Level</th>
                         <th className="px-4 py-3 text-left font-medium">Owner</th>

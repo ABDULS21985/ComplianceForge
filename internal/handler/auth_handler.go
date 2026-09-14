@@ -183,6 +183,12 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 // writeError writes a models.ErrorResponse as JSON with the given status code.
 func writeError(w http.ResponseWriter, code int, message, details string) {
+	// Internal dependency and persistence errors are logged at their source but
+	// must never be reflected to callers. Validation details remain available
+	// for actionable 4xx responses.
+	if code >= http.StatusInternalServerError {
+		details = ""
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(models.ErrorResponse{

@@ -61,58 +61,58 @@ type DataClassification struct {
 
 // DataCategory represents a personal data category (e.g., contact info, financial data).
 type DataCategory struct {
-	ID              string   `json:"id"`
-	OrganizationID  string   `json:"organization_id"`
-	Name            string   `json:"name" validate:"required"`
-	Description     string   `json:"description"`
-	IsSpecial       bool     `json:"is_special_category"` // GDPR Article 9
-	ClassificationID string  `json:"classification_id,omitempty"`
-	RetentionPeriod string   `json:"retention_period,omitempty"`
-	LegalBases      []string `json:"legal_bases,omitempty"`
-	CreatedBy       string   `json:"created_by"`
-	CreatedAt       string   `json:"created_at"`
-	UpdatedAt       string   `json:"updated_at"`
+	ID               string   `json:"id"`
+	OrganizationID   string   `json:"organization_id"`
+	Name             string   `json:"name" validate:"required"`
+	Description      string   `json:"description"`
+	IsSpecial        bool     `json:"is_special_category"` // GDPR Article 9
+	ClassificationID string   `json:"classification_id,omitempty"`
+	RetentionPeriod  string   `json:"retention_period,omitempty"`
+	LegalBases       []string `json:"legal_bases,omitempty"`
+	CreatedBy        string   `json:"created_by"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
 }
 
 // ProcessingActivityFilters holds filter parameters for listing processing activities.
 type ProcessingActivityFilters struct {
-	LegalBasis   string `json:"legal_basis"`
-	Department   string `json:"department"`
-	RiskLevel    string `json:"risk_level"`
-	Status       string `json:"status"`
-	Search       string `json:"search"`
+	LegalBasis string `json:"legal_basis"`
+	Department string `json:"department"`
+	RiskLevel  string `json:"risk_level"`
+	Status     string `json:"status"`
+	Search     string `json:"search"`
 }
 
 // ProcessingActivity represents a data processing activity for ROPA.
 type ProcessingActivity struct {
-	ID                  string   `json:"id"`
-	OrganizationID      string   `json:"organization_id"`
-	Name                string   `json:"name" validate:"required"`
-	Description         string   `json:"description"`
-	Purpose             string   `json:"purpose"`
-	LegalBasis          string   `json:"legal_basis"` // consent, contract, legal_obligation, vital_interest, public_interest, legitimate_interest
-	Department          string   `json:"department"`
-	DataController      string   `json:"data_controller,omitempty"`
-	DataProcessor       string   `json:"data_processor,omitempty"`
-	DataCategoryIDs     []string `json:"data_category_ids,omitempty"`
-	DataSubjectTypes    []string `json:"data_subject_types,omitempty"` // employees, customers, prospects, minors
-	Recipients          []string `json:"recipients,omitempty"`
+	ID                    string   `json:"id"`
+	OrganizationID        string   `json:"organization_id"`
+	Name                  string   `json:"name" validate:"required"`
+	Description           string   `json:"description"`
+	Purpose               string   `json:"purpose"`
+	LegalBasis            string   `json:"legal_basis"` // consent, contract, legal_obligation, vital_interest, public_interest, legitimate_interest
+	Department            string   `json:"department"`
+	DataController        string   `json:"data_controller,omitempty"`
+	DataProcessor         string   `json:"data_processor,omitempty"`
+	DataCategoryIDs       []string `json:"data_category_ids,omitempty"`
+	DataSubjectTypes      []string `json:"data_subject_types,omitempty"` // employees, customers, prospects, minors
+	Recipients            []string `json:"recipients,omitempty"`
 	ThirdCountryTransfers []string `json:"third_country_transfers,omitempty"`
-	RetentionPeriod     string   `json:"retention_period,omitempty"`
-	SecurityMeasures    []string `json:"security_measures,omitempty"`
-	DPIARequired        bool     `json:"dpia_required"`
-	DPIACompletedAt     string   `json:"dpia_completed_at,omitempty"`
-	RiskLevel           string   `json:"risk_level,omitempty"` // high, medium, low
-	Status              string   `json:"status"` // active, inactive, under_review
-	CreatedBy           string   `json:"created_by"`
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
+	RetentionPeriod       string   `json:"retention_period,omitempty"`
+	SecurityMeasures      []string `json:"security_measures,omitempty"`
+	DPIARequired          bool     `json:"dpia_required"`
+	DPIACompletedAt       string   `json:"dpia_completed_at,omitempty"`
+	RiskLevel             string   `json:"risk_level,omitempty"` // high, medium, low
+	Status                string   `json:"status"`               // active, inactive, under_review
+	CreatedBy             string   `json:"created_by"`
+	CreatedAt             string   `json:"created_at"`
+	UpdatedAt             string   `json:"updated_at"`
 }
 
 // ProcessingActivityDetail extends ProcessingActivity with data flows.
 type ProcessingActivityDetail struct {
 	ProcessingActivity
-	DataFlows    []DataFlow     `json:"data_flows,omitempty"`
+	DataFlows      []DataFlow     `json:"data_flows,omitempty"`
 	DataCategories []DataCategory `json:"data_categories,omitempty"`
 }
 
@@ -123,7 +123,7 @@ type DataFlow struct {
 	Source      string `json:"source"`
 	Destination string `json:"destination"`
 	DataType    string `json:"data_type"`
-	Method      string `json:"method"`  // api, file_transfer, manual, automated
+	Method      string `json:"method"` // api, file_transfer, manual, automated
 	Encrypted   bool   `json:"encrypted"`
 	CrossBorder bool   `json:"cross_border"`
 	Country     string `json:"country,omitempty"`
@@ -137,9 +137,9 @@ type DataFlowRequest struct {
 
 // DataFlowDiagram represents a visual diagram of data flows for an activity.
 type DataFlowDiagram struct {
-	ActivityID string          `json:"activity_id"`
-	Nodes      []FlowNode      `json:"nodes"`
-	Edges      []FlowEdge      `json:"edges"`
+	ActivityID string     `json:"activity_id"`
+	Nodes      []FlowNode `json:"nodes"`
+	Edges      []FlowEdge `json:"edges"`
 }
 
 // FlowNode represents a node in a data flow diagram.
@@ -160,9 +160,9 @@ type FlowEdge struct {
 
 // ROPAExportRequest is the payload for POST /data/ropa/export.
 type ROPAExportRequest struct {
-	Format   string   `json:"format" validate:"required"` // pdf, csv, excel, json
-	Scope    string   `json:"scope,omitempty"`             // all, department, legal_basis
-	FilterBy string   `json:"filter_by,omitempty"`
+	Format   string `json:"format" validate:"required"` // pdf, csv, excel, json
+	Scope    string `json:"scope,omitempty"`            // all, department, legal_basis
+	FilterBy string `json:"filter_by,omitempty"`
 }
 
 // ROPAExport represents an export of ROPA data.
@@ -189,31 +189,31 @@ type ROPAExportFile struct {
 
 // ROPADashboard provides ROPA metrics for an organization.
 type ROPADashboard struct {
-	TotalActivities       int            `json:"total_activities"`
-	ActiveActivities      int            `json:"active_activities"`
-	HighRiskActivities    int            `json:"high_risk_activities"`
-	DPIARequired          int            `json:"dpia_required"`
-	DPIACompleted         int            `json:"dpia_completed"`
-	ByLegalBasis          map[string]int `json:"by_legal_basis"`
-	ByDepartment          map[string]int `json:"by_department"`
-	SpecialCategories     int            `json:"special_categories_processed"`
-	CrossBorderTransfers  int            `json:"cross_border_transfers"`
-	TotalDataCategories   int            `json:"total_data_categories"`
-	TotalClassifications  int            `json:"total_classifications"`
+	TotalActivities      int            `json:"total_activities"`
+	ActiveActivities     int            `json:"active_activities"`
+	HighRiskActivities   int            `json:"high_risk_activities"`
+	DPIARequired         int            `json:"dpia_required"`
+	DPIACompleted        int            `json:"dpia_completed"`
+	ByLegalBasis         map[string]int `json:"by_legal_basis"`
+	ByDepartment         map[string]int `json:"by_department"`
+	SpecialCategories    int            `json:"special_categories_processed"`
+	CrossBorderTransfers int            `json:"cross_border_transfers"`
+	TotalDataCategories  int            `json:"total_data_categories"`
+	TotalClassifications int            `json:"total_classifications"`
 }
 
 // DataSubjectMap provides a map of data subjects and their data for a category.
 type DataSubjectMap struct {
-	Category       string              `json:"category"`
-	SubjectTypes   []SubjectTypeData   `json:"subject_types"`
+	Category     string            `json:"category"`
+	SubjectTypes []SubjectTypeData `json:"subject_types"`
 }
 
 // SubjectTypeData represents data held about a specific subject type.
 type SubjectTypeData struct {
-	Type            string   `json:"type"`
-	ActivityCount   int      `json:"activity_count"`
-	DataCategories  []string `json:"data_categories"`
-	LegalBases      []string `json:"legal_bases"`
+	Type             string   `json:"type"`
+	ActivityCount    int      `json:"activity_count"`
+	DataCategories   []string `json:"data_categories"`
+	LegalBases       []string `json:"legal_bases"`
 	RetentionPeriods []string `json:"retention_periods"`
 }
 
@@ -547,10 +547,7 @@ func (h *ROPAHandler) DownloadExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(file.FileData) > 0 {
-		w.Header().Set("Content-Type", file.ContentType)
-		w.Header().Set("Content-Disposition", "attachment; filename=\""+file.FileName+"\"")
-		w.WriteHeader(http.StatusOK)
-		w.Write(file.FileData)
+		writeAttachment(w, file.FileName, file.ContentType, file.FileData)
 		return
 	}
 

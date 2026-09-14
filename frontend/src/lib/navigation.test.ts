@@ -23,9 +23,9 @@ describe('enterprise navigation model', () => {
       isSuperAdmin: false,
       roleSlugs: ['viewer'],
       permissions: {
-        organization: ['read'],
-        report: [],
-        risk: ['read'],
+        organizations: ['read'],
+        reports: [],
+        risks: ['read'],
       },
     });
     const ids = groups.flatMap((group) => group.items.map((item) => item.id));
@@ -55,7 +55,7 @@ describe('enterprise navigation model', () => {
   it('uses an admin-role fallback only when settings permissions are unavailable', () => {
     const fallbackIds = getVisibleNavigationGroups({
       roleSlugs: ['org_admin'],
-      permissions: { organization: ['update'] },
+      permissions: { organizations: ['update'] },
     }).flatMap((group) => group.items.map((item) => item.id));
     expect(fallbackIds).toContain('integrations');
     expect(fallbackIds).toContain('notifications');

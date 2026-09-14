@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import api, { type ApiError } from '@/lib/api';
 import { normalizePermissionMap } from '@/lib/navigation';
 import { ROUTES } from '@/lib/routes';
@@ -13,11 +13,11 @@ import { useRouter } from 'next/navigation';
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, isAuthenticated: storeIsAuth, clearAuth, logout, setAuth } = useAuthStore();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
 
   const sessionQuery = useQuery({
     queryKey: ['auth', 'session'],

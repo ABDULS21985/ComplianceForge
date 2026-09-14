@@ -941,7 +941,7 @@ func (ne *NotificationEngine) createNotificationRecord(
 			 channel_type, channel_id, subject, body, body_text, body_html, status,
 			 metadata, event_id, delivery_key, digest_frequency, scheduled_for, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-		        $13, $14, $15, $16, $17::digest_frequency, $18, $19)
+		        $13, $14, $15, $16::digest_frequency, $17, $18)
 		ON CONFLICT (organization_id, delivery_key) DO UPDATE
 		SET delivery_key = EXCLUDED.delivery_key
 		RETURNING id`
@@ -957,36 +957,6 @@ func (ne *NotificationEngine) createNotificationRecord(
 		return "", fmt.Errorf("insert notification: %w", err)
 	}
 	return id, nil
-}
-
-func (ne *NotificationEngine) updateNotificationStatus(ctx context.Context, notifID, status string, deliveryErr error) error {
-	var errorMessage *string
-	if deliveryErr != nil {
-		message := deliveryErr.Error()
-		if len(message) > 1000 {
-			message = message[:1000]
-		}
-		errorMessage = &message
-	}
-	query := `
-		UPDATE notifications
-		SET status = $1::notification_status,
-		    sent_at = CASE WHEN $1::notification_status = 'sent' THEN NOW() ELSE sent_at END,
-		    delivered_at = CASE WHEN $1::notification_status = 'delivered' THEN NOW() ELSE delivered_at END,
-		    error_message = $3::text,
-		    retry_count = CASE WHEN $1::notification_status = 'failed' THEN retry_count + 1 ELSE retry_count END,
-		    next_retry_at = CASE WHEN $1::notification_status = 'failed' AND retry_count + 1 < max_retries
-		                         THEN NOW() + make_interval(mins => LEAST(60, (retry_count + 1) * 5))
-		                         ELSE NULL END
-		WHERE id = $2`
-	result, err := database.QuerierFromContext(ctx, ne.pool).Exec(ctx, query, status, notifID, errorMessage)
-	if err != nil {
-		return fmt.Errorf("update notification %s status: %w", notifID, err)
-	}
-	if result.RowsAffected() != 1 {
-		return fmt.Errorf("update notification %s status: record not found", notifID)
-	}
-	return nil
 }
 
 func (ne *NotificationEngine) dispatchEmail(ctx context.Context, n Notification, _ map[string]any) error {

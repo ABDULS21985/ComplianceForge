@@ -11,18 +11,33 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'node',
-    environmentMatchGlobs: [['src/**/*.test.tsx', 'jsdom']],
     setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
     exclude: ['e2e/**', 'node_modules/**', '.next/**', 'playwright-report/**'],
     passWithNoTests: false,
     restoreMocks: true,
     clearMocks: true,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'node',
+          environment: 'node',
+          include: ['src/**/*.test.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'jsdom',
+          environment: 'jsdom',
+          include: ['src/**/*.test.tsx'],
+        },
+      },
+    ],
     coverage: {
       reporter: ['text', 'json-summary', 'html'],
       reportsDirectory: './coverage',
-      include: ['src/lib/**/*.{ts,tsx}', 'src/middleware.ts'],
+      include: ['src/lib/**/*.{ts,tsx}', 'src/proxy.ts'],
       exclude: ['src/**/*.test.{ts,tsx}'],
     },
   },

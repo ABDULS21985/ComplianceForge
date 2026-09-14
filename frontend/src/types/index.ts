@@ -1,3 +1,7 @@
+export * from './access';
+export * from './audit';
+export * from './incident';
+
 // === API Response Wrappers ===
 export interface APIResponse<T> {
   data: T;
@@ -28,10 +32,6 @@ export type RiskLevel = 'critical' | 'high' | 'medium' | 'low' | 'very_low';
 export type ControlStatus = 'not_applicable' | 'not_implemented' | 'planned' | 'partial' | 'implemented' | 'effective';
 export type ImplementationStatus = 'not_started' | 'in_progress' | 'completed' | 'failed';
 export type PolicyStatus = 'draft' | 'under_review' | 'pending_approval' | 'approved' | 'published' | 'archived' | 'retired' | 'superseded';
-export type IncidentSeverity = 'critical' | 'high' | 'medium' | 'low';
-export type IncidentStatus = 'open' | 'investigating' | 'contained' | 'resolved' | 'closed';
-export type AuditStatus = 'planned' | 'in_progress' | 'completed' | 'closed';
-export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
 export type VendorRiskTier = 'critical' | 'high' | 'medium' | 'low';
 export type Classification = 'public' | 'internal' | 'confidential' | 'restricted';
 export type ReviewStatus = 'current' | 'review_due' | 'overdue' | 'not_applicable';
@@ -236,55 +236,6 @@ export interface PolicyAttestation {
 export interface AttestationStats {
   total_policies: number; total_attestations: number; attested: number;
   pending: number; overdue: number; declined: number; average_rate: number;
-}
-
-// === Audits ===
-export interface Audit {
-  id: string; organization_id: string; audit_ref: string; title: string;
-  description?: string; audit_type: string; status: AuditStatus;
-  lead_auditor_id?: string; scope?: string;
-  scheduled_start_date?: string; scheduled_end_date?: string;
-  actual_start_date?: string; actual_end_date?: string;
-  framework_id?: string; created_at: string; updated_at: string;
-  lead_auditor?: User; findings_count?: number; critical_findings?: number;
-  high_findings?: number;
-}
-
-export interface AuditFinding {
-  id: string; audit_id: string; finding_ref: string; title: string;
-  description?: string; severity: FindingSeverity; status: string;
-  finding_type?: string; control_id?: string; root_cause?: string;
-  recommendation?: string; responsible_user_id?: string; due_date?: string;
-  resolved_at?: string; created_at: string; updated_at: string;
-  responsible_user?: User;
-}
-
-export interface FindingsStats {
-  total: number; critical: number; high: number; medium: number;
-  low: number; informational: number; open: number; resolved: number;
-}
-
-// === Incidents ===
-export interface Incident {
-  id: string; organization_id: string; incident_ref: string; title: string;
-  description?: string; incident_type?: string; severity: IncidentSeverity;
-  status: IncidentStatus; category?: string; reporter_id?: string;
-  assignee_id?: string; detected_at?: string; contained_at?: string;
-  resolved_at?: string; root_cause?: string; impact?: string;
-  lessons_learned?: string;
-  is_data_breach: boolean; notification_deadline?: string;
-  dpa_notified_at?: string; data_subjects_affected?: number;
-  data_categories?: string[];
-  is_nis2_reportable: boolean; nis2_early_warning_at?: string;
-  nis2_notification_at?: string; nis2_final_report_at?: string;
-  created_at: string; updated_at: string;
-  reporter?: User; assignee?: User;
-}
-
-export interface IncidentStats {
-  total: number; open: number; investigating: number; contained: number;
-  resolved: number; closed: number; data_breaches: number;
-  nis2_reportable: number; urgent_breaches: number;
 }
 
 // === Vendors ===

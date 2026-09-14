@@ -2,532 +2,135 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import {
-  ArrowLeft,
-  ShieldAlert,
-  Clock,
-  Bell,
-  AlertTriangle,
-  CheckCircle2,
-  Loader2,
-  FileWarning,
-  Send,
-} from 'lucide-react';
+import { useParams, useRouter } from 'next/navigation';
+import { AlertTriangle, ArrowLeft, Bell, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Clock3, History, LockKeyhole, Pencil, Plus, RotateCcw, ShieldAlert, Trash2, UserMinus, UsersRound, XCircle, Zap } from 'lucide-react';
 
-import {
-  cn,
-  formatDateTime,
-  getStatusColor,
-  getRiskLevelColor,
-} from '@/lib/utils';
-import {
-  useIncident,
-  useNotifyDPA,
-  useNis2EarlyWarning,
-  useUpdateIncidentStatus,
-} from '@/lib/api-hooks';
-
-import { Button } from '@/components/ui/button';
+import { BreachAssessmentDialog } from '@/components/incidents/breach-assessment-dialog';
+import { DPANotificationDialog } from '@/components/incidents/dpa-notification-dialog';
+import { IncidentActionDialog, type IncidentAction } from '@/components/incidents/incident-action-dialog';
+import { IncidentAssignmentDialog } from '@/components/incidents/incident-assignment-dialog';
+import { IncidentDeleteDialog } from '@/components/incidents/incident-delete-dialog';
+import { IncidentEditorDialog } from '@/components/incidents/incident-editor-dialog';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Separator } from '@/components/ui/separator';
+import { useIncidentPermissions } from '@/hooks/use-incident-permissions';
+import { useIncident, useIncidentAssignments, useIncidentTimeline } from '@/lib/api-hooks';
+import { canDeleteIncident, formatIncidentError, humanizeIncidentToken, incidentDeadline, incidentEscalationOptions, incidentNextStatuses } from '@/lib/incident';
+import { cn, formatDate, formatDateTime, getRiskLevelColor, getStatusColor } from '@/lib/utils';
+import type { Incident, IncidentAssignment, IncidentEvent, IncidentStatus } from '@/types/incident';
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+const LIFECYCLE: Exclude<IncidentStatus, 'cancelled'>[] = ['reported', 'triaged', 'investigating', 'contained', 'resolved', 'closed'];
 
 export default function IncidentDetailPage() {
-  const params = useParams();
-  const id = params.id as string;
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const access = useIncidentPermissions();
+  const incidentQuery = useIncident(id, { enabled: access.canRead && Boolean(id) });
+  const [timelinePage, setTimelinePage] = React.useState(1);
+  const timelineQuery = useIncidentTimeline(id, { page: timelinePage, page_size: 20 }, { enabled: access.canRead && Boolean(id) });
+  const assignmentsQuery = useIncidentAssignments(id, true, { enabled: access.canRead && Boolean(id) });
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [breachOpen, setBreachOpen] = React.useState(false);
+  const [dpaOpen, setDpaOpen] = React.useState(false);
+  const [assignOpen, setAssignOpen] = React.useState(false);
+  const [unassigning, setUnassigning] = React.useState<IncidentAssignment | null>(null);
+  const [action, setAction] = React.useState<IncidentAction | null>(null);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [now, setNow] = React.useState(() => new Date());
 
-  const { data: incident, isLoading, isError, error } = useIncident(id);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const inc = incident as any;
-
-  const notifyDPA = useNotifyDPA();
-  const nis2EarlyWarning = useNis2EarlyWarning();
-  const updateStatus = useUpdateIncidentStatus();
-
-  // Live countdown for GDPR deadline
-  const [now, setNow] = React.useState(Date.now());
   React.useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
+    const interval = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(interval);
   }, []);
 
-  // Loading
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-4 w-96" />
-        <div className="grid gap-4 md:grid-cols-2">
-          <Skeleton className="h-48" />
-          <Skeleton className="h-48" />
-        </div>
-      </div>
-    );
-  }
+  if (access.isLoading || !access.user) return <DetailSkeleton />;
+  if (access.isError) return <AccessState title="Incident access could not be verified" description="The permission service is unavailable, so the incident was not loaded." action={<Button onClick={() => void access.retry()}>Try again</Button>} />;
+  if (!access.canRead) return <AccessState title="Incident unavailable" description="Your role does not grant read access to incident records." />;
+  if (incidentQuery.isLoading) return <DetailSkeleton />;
+  if (incidentQuery.isError || !incidentQuery.data) return <LoadError error={incidentQuery.error} retry={() => void incidentQuery.refetch()} />;
 
-  // Error
-  if (isError || !inc) {
-    return (
-      <div className="space-y-4">
-        <Link href="/incidents" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="mr-1 h-4 w-4" /> Back to Incidents
-        </Link>
-        <div className="text-center py-12 text-destructive">
-          {isError
-            ? `Failed to load incident: ${(error as Error)?.message ?? 'Unknown error'}`
-            : 'Incident not found'}
-        </div>
-      </div>
-    );
-  }
-
-  const isBreach = inc.is_data_breach as boolean;
-  const isNis2 = inc.is_nis2_reportable as boolean;
-  const dpaNotifiedAt = inc.dpa_notified_at as string | undefined;
-  const notificationDeadline = inc.notification_deadline as string | undefined;
-  const status = inc.status as string;
-
-  // Countdown calculation
-  const deadlineMs = notificationDeadline ? new Date(notificationDeadline).getTime() : null;
-  const remainingMs = deadlineMs ? Math.max(0, deadlineMs - now) : null;
-  const remainingHours = remainingMs !== null ? remainingMs / (1000 * 60 * 60) : null;
-  const remainingMinutes = remainingMs !== null ? Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60)) : null;
-  const remainingSeconds = remainingMs !== null ? Math.floor((remainingMs % (1000 * 60)) / 1000) : null;
+  const incident = incidentQuery.data;
+  const terminal = incident.status === 'closed' || incident.status === 'cancelled';
+  const nextStatuses = incidentNextStatuses(incident.status);
+  const mayClose = access.canApprove && incident.status === 'resolved';
+  const mayDelete = access.canDelete && canDeleteIncident(incident, now);
+  const escalationOptions = incidentEscalationOptions(incident.severity);
+  const deadline = incidentDeadline(incident, now);
+  const totalTimelinePages = Math.max(timelineQuery.data?.total_pages ?? 0, 1);
 
   return (
     <div className="space-y-6">
-      {/* Back link */}
-      <Link href="/incidents" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="mr-1 h-4 w-4" /> Back to Incidents
-      </Link>
+      <Link href="/incidents" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"><ArrowLeft aria-hidden="true" className="mr-1 h-4 w-4" />Back to incidents</Link>
 
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-sm text-muted-foreground">
-              {inc.incident_ref as string}
-            </span>
-            <Badge className={getRiskLevelColor(inc.severity as string)}>
-              {inc.severity as string}
-            </Badge>
-            <Badge className={getStatusColor(status)}>
-              {status.replace('_', ' ')}
-            </Badge>
-            {isBreach && (
-              <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                <ShieldAlert className="mr-1 h-3 w-3" />
-                Data Breach
-              </Badge>
-            )}
-            {isNis2 && (
-              <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
-                NIS2 Reportable
-              </Badge>
-            )}
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight">{inc.title as string}</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          {status !== 'resolved' && status !== 'closed' && (
-            <Button
-              variant="outline"
-              onClick={() => updateStatus.mutate({ id, data: { status: 'resolved' } })}
-              disabled={updateStatus.isPending}
-            >
-              {updateStatus.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Resolve Incident
-            </Button>
-          )}
-          {status === 'resolved' && (
-            <Button
-              variant="outline"
-              onClick={() => updateStatus.mutate({ id, data: { status: 'closed' } })}
-              disabled={updateStatus.isPending}
-            >
-              {updateStatus.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Close Incident
-            </Button>
-          )}
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0 space-y-2"><div className="flex flex-wrap items-center gap-2"><span className="font-mono text-sm text-muted-foreground">{incident.incident_ref}</span><Badge className={getRiskLevelColor(incident.severity)}>{humanizeIncidentToken(incident.severity)}</Badge><Badge className={getStatusColor(incident.status)}>{humanizeIncidentToken(incident.status)}</Badge>{incident.is_data_breach && <Badge variant="outline" className="border-red-400 text-red-700 dark:text-red-300"><ShieldAlert aria-hidden="true" className="mr-1 h-3 w-3" />Personal-data breach</Badge>}</div><h1 className="break-words text-3xl font-bold tracking-tight">{incident.title}</h1><p className="text-sm text-muted-foreground">Version {incident.version} · Updated {formatDateTime(incident.updated_at)}</p></div>
+        <div className="flex flex-wrap gap-2">
+          {access.canUpdate && !terminal && <Button variant="outline" onClick={() => setEditOpen(true)}><Pencil aria-hidden="true" className="mr-2 h-4 w-4" />Edit</Button>}
+          {access.canUpdate && !terminal && escalationOptions.length > 0 && <Button variant="outline" onClick={() => setAction({ kind: 'escalate' })}><Zap aria-hidden="true" className="mr-2 h-4 w-4" />Escalate</Button>}
+          {access.canUpdate && nextStatuses.map((status) => <Button key={status} onClick={() => setAction({ kind: 'transition', status })}>Move to {humanizeIncidentToken(status)}</Button>)}
+          {mayClose && <Button onClick={() => setAction({ kind: 'close' })}><CheckCircle2 aria-hidden="true" className="mr-2 h-4 w-4" />Close incident</Button>}
+          {access.canUpdate && !terminal && <Button variant="destructive" onClick={() => setAction({ kind: 'cancel' })}><XCircle aria-hidden="true" className="mr-2 h-4 w-4" />Cancel</Button>}
+          {access.canUpdate && terminal && <Button onClick={() => setAction({ kind: 'reopen' })}><RotateCcw aria-hidden="true" className="mr-2 h-4 w-4" />Reopen</Button>}
+          {mayDelete && <Button variant="destructive" onClick={() => setDeleteOpen(true)}><Trash2 aria-hidden="true" className="mr-2 h-4 w-4" />Delete</Button>}
         </div>
       </div>
 
-      {/* ============================================================= */}
-      {/* GDPR Breach Notification Panel                                 */}
-      {/* ============================================================= */}
-      {isBreach && (
-        <div
-          className={cn(
-            'rounded-lg border-2 p-5',
-            dpaNotifiedAt
-              ? 'border-green-400 bg-green-50 dark:border-green-700 dark:bg-green-950/20'
-              : 'border-red-500 bg-red-50 dark:border-red-700 dark:bg-red-950/30'
-          )}
-        >
-          <div className="flex items-center gap-2 mb-4">
-            <ShieldAlert
-              className={cn(
-                'h-5 w-5',
-                dpaNotifiedAt
-                  ? 'text-green-600 dark:text-green-400'
-                  : 'text-red-600 dark:text-red-400'
-              )}
-            />
-            <h2
-              className={cn(
-                'text-lg font-bold',
-                dpaNotifiedAt
-                  ? 'text-green-700 dark:text-green-400'
-                  : 'text-red-700 dark:text-red-400'
-              )}
-            >
-              GDPR Article 33 — Data Breach Notification
-            </h2>
-          </div>
+      {incident.status === 'resolved' && incident.is_breach_notifiable && !incident.dpa_notified_at && <Warning text="This incident cannot close until the supervisory-authority notification is recorded." />}
+      {terminal && !mayDelete && access.canDelete && <Warning text={incident.legal_hold ? 'Deletion is blocked by legal hold.' : incident.retention_until && new Date(incident.retention_until) > now ? `Deletion is blocked until retention expires on ${formatDateTime(incident.retention_until)}.` : 'Only terminal incident records can be deleted.'} />}
 
-          <div className="grid gap-6 md:grid-cols-2">
-            {/* Left: Deadline & Countdown */}
-            <div className="space-y-4">
-              {/* Live Countdown */}
-              {!dpaNotifiedAt && remainingMs !== null && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-muted-foreground">Time Remaining for DPA Notification</p>
-                  {remainingMs === 0 ? (
-                    <div className="text-3xl font-bold text-red-700 dark:text-red-400">
-                      DEADLINE PASSED
-                    </div>
-                  ) : (
-                    <div className="flex items-baseline gap-1">
-                      <span
-                        className={cn(
-                          'text-4xl font-bold tabular-nums',
-                          (remainingHours ?? 0) < 12
-                            ? 'text-red-700 dark:text-red-400'
-                            : (remainingHours ?? 0) < 24
-                              ? 'text-orange-600 dark:text-orange-400'
-                              : 'text-yellow-600 dark:text-yellow-400'
-                        )}
-                      >
-                        {Math.floor(remainingHours ?? 0)}h {remainingMinutes}m {remainingSeconds}s
-                      </span>
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    Deadline: {formatDateTime(notificationDeadline)}
-                  </p>
-                </div>
-              )}
+      <LifecycleRail incident={incident} />
 
-              {/* Notification Status */}
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-muted-foreground">DPA Notification Status</p>
-                {dpaNotifiedAt ? (
-                  <div className="flex items-center gap-2 text-green-700 dark:text-green-400">
-                    <CheckCircle2 className="h-5 w-5" />
-                    <span className="font-semibold">
-                      Notified at {formatDateTime(dpaNotifiedAt)}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
-                    <AlertTriangle className="h-5 w-5" />
-                    <span className="font-bold">Not notified</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Notify button */}
-              {!dpaNotifiedAt && (
-                <Button
-                  variant="destructive"
-                  size="lg"
-                  onClick={() => notifyDPA.mutate({ id })}
-                  disabled={notifyDPA.isPending}
-                  className="w-full"
-                >
-                  {notifyDPA.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Bell className="mr-2 h-4 w-4" />
-                  )}
-                  Record DPA Notification
-                </Button>
-              )}
-            </div>
-
-            {/* Right: Breach details */}
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Data Subjects Affected</p>
-                <p className="text-2xl font-bold">
-                  {((inc.data_subjects_affected as number) ?? 0).toLocaleString()}
-                </p>
-              </div>
-              {(inc.data_categories as string[])?.length > 0 && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground mb-2">Data Categories</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(inc.data_categories as string[]).map((cat) => (
-                      <Badge
-                        key={cat}
-                        variant="outline"
-                        className="border-red-300 text-red-700 dark:border-red-600 dark:text-red-400"
-                      >
-                        {cat}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================= */}
-      {/* NIS2 Section                                                   */}
-      {/* ============================================================= */}
-      {isNis2 && (
-        <Card className="border-purple-300 dark:border-purple-700">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-purple-700 dark:text-purple-400">
-              <FileWarning className="h-5 w-5" />
-              NIS2 Directive — Incident Reporting
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Early Warning Status */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">Early Warning Status</p>
-                <p className="text-sm text-muted-foreground">
-                  {inc.nis2_early_warning_at
-                    ? `Submitted at ${formatDateTime(inc.nis2_early_warning_at as string)}`
-                    : 'Not submitted yet'}
-                </p>
-              </div>
-              {!inc.nis2_early_warning_at && (
-                <Button
-                  variant="outline"
-                  onClick={() => nis2EarlyWarning.mutate({ id })}
-                  disabled={nis2EarlyWarning.isPending}
-                  className="border-purple-300 text-purple-700 hover:bg-purple-50 dark:border-purple-600 dark:text-purple-400 dark:hover:bg-purple-950/30"
-                >
-                  {nis2EarlyWarning.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="mr-2 h-4 w-4" />
-                  )}
-                  Submit Early Warning
-                </Button>
-              )}
-            </div>
-
-            <Separator />
-
-            {/* NIS2 Timeline */}
-            <div>
-              <p className="text-sm font-semibold mb-3">NIS2 Reporting Timeline</p>
-              <div className="relative space-y-0">
-                {[
-                  {
-                    label: 'Early Warning',
-                    deadline: '24 hours',
-                    description: 'Initial notification to CSIRT/competent authority',
-                    done: !!inc.nis2_early_warning_at,
-                    doneAt: inc.nis2_early_warning_at as string,
-                  },
-                  {
-                    label: 'Incident Notification',
-                    deadline: '72 hours',
-                    description: 'Detailed incident notification with initial assessment',
-                    done: !!inc.nis2_notification_at,
-                    doneAt: inc.nis2_notification_at as string,
-                  },
-                  {
-                    label: 'Final Report',
-                    deadline: '1 month',
-                    description: 'Comprehensive final report including root cause analysis',
-                    done: !!inc.nis2_final_report_at,
-                    doneAt: inc.nis2_final_report_at as string,
-                  },
-                ].map((step, idx) => (
-                  <div key={step.label} className="flex gap-4 pb-4">
-                    <div className="flex flex-col items-center">
-                      <div
-                        className={cn(
-                          'flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold',
-                          step.done
-                            ? 'border-green-500 bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400'
-                            : 'border-purple-300 bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-400'
-                        )}
-                      >
-                        {step.done ? (
-                          <CheckCircle2 className="h-4 w-4" />
-                        ) : (
-                          idx + 1
-                        )}
-                      </div>
-                      {idx < 2 && (
-                        <div className="w-0.5 flex-1 bg-border mt-1" />
-                      )}
-                    </div>
-                    <div className="flex-1 pb-2">
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-sm">{step.label}</p>
-                        <Badge variant="outline" className="text-xs">
-                          {step.deadline}
-                        </Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">{step.description}</p>
-                      {step.done && step.doneAt && (
-                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-                          Completed: {formatDateTime(step.doneAt)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ============================================================= */}
-      {/* Incident Details                                               */}
-      {/* ============================================================= */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Incident Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Description</p>
-              <p className="mt-1 text-sm whitespace-pre-wrap">
-                {(inc.description as string) || 'No description provided.'}
-              </p>
-            </div>
-            {inc.root_cause && (
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Root Cause</p>
-                <p className="mt-1 text-sm whitespace-pre-wrap">{String(inc.root_cause)}</p>
-              </div>
-            )}
-            {inc.impact && (
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Impact</p>
-                <p className="mt-1 text-sm whitespace-pre-wrap">{String(inc.impact)}</p>
-              </div>
-            )}
-            {inc.lessons_learned && (
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Lessons Learned</p>
-                <p className="mt-1 text-sm whitespace-pre-wrap">{String(inc.lessons_learned)}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Metadata</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <MetaRow label="Incident Type" value={inc.incident_type as string} />
-            <MetaRow label="Category" value={inc.category as string} />
-            <MetaRow label="Reported" value={formatDateTime(inc.reported_at as string ?? inc.created_at as string)} />
-            {inc.resolved_at && <MetaRow label="Resolved" value={formatDateTime(inc.resolved_at as string)} />}
-            {inc.closed_at && <MetaRow label="Closed" value={formatDateTime(inc.closed_at as string)} />}
-            <MetaRow
-              label="Reporter"
-              value={
-                (inc.reporter as Record<string, string>)
-                  ? `${(inc.reporter as Record<string, string>).first_name} ${(inc.reporter as Record<string, string>).last_name}`
-                  : '—'
-              }
-            />
-            <MetaRow
-              label="Assignee"
-              value={
-                (inc.assignee as Record<string, string>)
-                  ? `${(inc.assignee as Record<string, string>).first_name} ${(inc.assignee as Record<string, string>).last_name}`
-                  : '—'
-              }
-            />
-          </CardContent>
-        </Card>
+      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+        <Card><CardHeader><CardTitle className="text-lg">Incident brief</CardTitle></CardHeader><CardContent className="space-y-5"><Detail label="Description" value={incident.description} /><div className="grid gap-4 sm:grid-cols-2"><Detail label="Category" value={incident.category} /><Detail label="Reporter ID" value={incident.reporter_id} mono /></div><div className="grid gap-4 sm:grid-cols-2"><Detail label="Detected" value={formatDateTime(incident.detected_at)} /><Detail label="Occurred" value={formatDateTime(incident.occurred_at)} /><Detail label="Reported" value={formatDateTime(incident.reported_at)} /><Detail label="Follow-up" value={formatDate(incident.followup_date)} /></div>{incident.related_asset_id && <Detail label="Related asset ID" value={incident.related_asset_id} mono />}</CardContent></Card>
+        <Card><CardHeader><CardTitle className="text-lg">Investigation record</CardTitle></CardHeader><CardContent className="space-y-5"><Detail label="Impact" value={incident.impact || 'Not recorded'} /><Detail label="Root cause" value={incident.root_cause || 'Not recorded'} /><Detail label="Lessons learned" value={incident.lessons_learned || 'Not recorded'} /><div className="grid gap-4 sm:grid-cols-2"><Detail label="Retention until" value={formatDateTime(incident.retention_until)} /><Detail label="Legal hold" value={incident.legal_hold ? 'Active' : 'No'} /></div></CardContent></Card>
       </div>
 
-      {/* ============================================================= */}
-      {/* Timeline                                                       */}
-      {/* ============================================================= */}
-      {(inc.timeline as Record<string, unknown>[])?.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Timeline</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {(inc.timeline as any[]).map((entry: any, idx: number) => (
-                <div key={idx} className="flex gap-4">
-                  <div className="flex flex-col items-center">
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full border bg-muted">
-                      <Clock className="h-3 w-3 text-muted-foreground" />
-                    </div>
-                    {idx < (inc.timeline as Record<string, unknown>[]).length - 1 && (
-                      <div className="w-0.5 flex-1 bg-border mt-1" />
-                    )}
-                  </div>
-                  <div className="flex-1 pb-4">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-sm">{String(entry.action ?? (entry as Record<string, unknown>).event ?? "")}</p>
-                      {entry.status && (
-                        <Badge className={getStatusColor(entry.status as string)} >
-                          {(entry.status as string).replace('_', ' ')}
-                        </Badge>
-                      )}
-                    </div>
-                    {entry.notes && (
-                      <p className="text-sm text-muted-foreground mt-0.5">{String(entry.notes)}</p>
-                    )}
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {formatDateTime(entry.created_at as string ?? entry.timestamp as string)}
-                      {entry.user && (
-                        <span>
-                          {' '}by {(entry.user as Record<string, string>)?.first_name}{' '}
-                          {(entry.user as Record<string, string>)?.last_name}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <BreachPanel incident={incident} deadline={deadline} canApprove={access.canApprove} onAssess={() => setBreachOpen(true)} onNotify={() => setDpaOpen(true)} />
+
+      <Card><CardHeader className="flex flex-row items-center justify-between"><div><CardTitle className="flex items-center gap-2 text-lg"><UsersRound aria-hidden="true" className="h-5 w-5" />Response team</CardTitle><p className="mt-1 text-sm text-muted-foreground">Active assignments; ended assignments remain in the timeline.</p></div>{access.canAssign && !terminal && <Button size="sm" onClick={() => setAssignOpen(true)}><Plus aria-hidden="true" className="mr-2 h-4 w-4" />Assign</Button>}</CardHeader><CardContent><AssignmentList assignments={assignmentsQuery.data ?? []} loading={assignmentsQuery.isLoading} error={assignmentsQuery.isError} canUnassign={access.canAssign && !terminal} onUnassign={setUnassigning} retry={() => void assignmentsQuery.refetch()} /></CardContent></Card>
+
+      <Card><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><History aria-hidden="true" className="h-5 w-5" />Immutable timeline</CardTitle></CardHeader><CardContent><Timeline events={timelineQuery.data?.items ?? []} loading={timelineQuery.isLoading} error={timelineQuery.isError} retry={() => void timelineQuery.refetch()} />{timelineQuery.data && timelineQuery.data.total > 0 && <div className="mt-5 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-muted-foreground">Page {timelinePage} of {totalTimelinePages} · {timelineQuery.data.total} events</p><div className="flex gap-2"><Button variant="outline" size="sm" disabled={timelinePage <= 1} onClick={() => setTimelinePage((value) => value - 1)}><ChevronLeft aria-hidden="true" className="mr-1 h-4 w-4" />Previous</Button><Button variant="outline" size="sm" disabled={timelinePage >= totalTimelinePages} onClick={() => setTimelinePage((value) => value + 1)}>Next<ChevronRight aria-hidden="true" className="ml-1 h-4 w-4" /></Button></div></div>}</CardContent></Card>
+
+      {access.canUpdate && <IncidentEditorDialog incident={incident} open={editOpen} onOpenChange={setEditOpen} />}
+      <IncidentActionDialog incident={incident} action={action} onOpenChange={(open) => !open && setAction(null)} />
+      {access.canApprove && <><BreachAssessmentDialog incident={incident} open={breachOpen} onOpenChange={setBreachOpen} /><DPANotificationDialog incident={incident} open={dpaOpen} onOpenChange={setDpaOpen} /></>}
+      {access.canAssign && <><IncidentAssignmentDialog incident={incident} open={assignOpen} onOpenChange={setAssignOpen} />{unassigning && <IncidentAssignmentDialog incident={incident} assignment={unassigning} open onOpenChange={(open) => !open && setUnassigning(null)} />}</>}
+      {access.canDelete && <IncidentDeleteDialog incident={incident} open={deleteOpen} onOpenChange={setDeleteOpen} onDeleted={() => { router.push('/incidents'); router.refresh(); }} />}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Metadata row helper
-// ---------------------------------------------------------------------------
-
-function MetaRow({ label, value }: { label: string; value: string | undefined | null }) {
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{value || '—'}</span>
-    </div>
-  );
+function LifecycleRail({ incident }: { incident: Incident }) {
+  const timestamps: Partial<Record<Exclude<IncidentStatus, 'cancelled'>, string | undefined>> = { reported: incident.reported_at, triaged: incident.triaged_at, investigating: incident.investigation_started_at, contained: incident.contained_at, resolved: incident.resolved_at, closed: incident.closed_at };
+  const currentIndex = LIFECYCLE.indexOf(incident.status as Exclude<IncidentStatus, 'cancelled'>);
+  return <Card><CardHeader><CardTitle className="text-base">Response lifecycle</CardTitle></CardHeader><CardContent><ol className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">{LIFECYCLE.map((status, index) => { const complete = currentIndex >= index && incident.status !== 'cancelled'; const current = incident.status === status; return <li key={status} aria-current={current ? 'step' : undefined} className={cn('rounded-md border p-3', current && 'border-primary bg-primary/5', complete && !current && 'bg-muted/50')}><div className="flex items-center gap-2">{complete ? <CheckCircle2 aria-hidden="true" className="h-4 w-4 text-emerald-600" /> : <span aria-hidden="true" className="h-4 w-4 rounded-full border" />}<span className="text-sm font-medium">{humanizeIncidentToken(status)}</span></div><p className="mt-1 text-xs text-muted-foreground">{formatDateTime(timestamps[status])}</p></li>; })}</ol>{incident.status === 'cancelled' && <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><XCircle aria-hidden="true" className="h-4 w-4" />Cancelled {formatDateTime(incident.cancelled_at)} · {incident.cancellation_reason}</p>}</CardContent></Card>;
 }
+
+function BreachPanel({ incident, deadline, canApprove, onAssess, onNotify }: { incident: Incident; deadline: ReturnType<typeof incidentDeadline>; canApprove: boolean; onAssess: () => void; onNotify: () => void }) {
+  return <Card className={cn(incident.is_breach_notifiable && !incident.dpa_notified_at && (deadline.state === 'overdue' ? 'border-red-600' : 'border-orange-400'))}><CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="flex items-center gap-2 text-lg"><ShieldAlert aria-hidden="true" className="h-5 w-5" />GDPR breach assessment</CardTitle><p className="mt-1 text-sm text-muted-foreground">Assessment status: {humanizeIncidentToken(incident.breach_assessment_status)}</p></div><div className="flex flex-wrap gap-2">{canApprove && !incident.dpa_notified_at && <Button variant="outline" onClick={onAssess}>{incident.breach_assessment_status === 'pending' ? 'Assess breach' : 'Revise assessment'}</Button>}{canApprove && incident.is_breach_notifiable && !incident.dpa_notified_at && <Button variant="destructive" onClick={onNotify}><Bell aria-hidden="true" className="mr-2 h-4 w-4" />Record DPA notification</Button>}</div></CardHeader><CardContent className="space-y-5">
+    {incident.is_breach_notifiable && <div role={deadline.state === 'overdue' ? 'alert' : 'status'} aria-live="polite" className={cn('flex items-start gap-3 rounded-md border p-4', deadline.state === 'overdue' ? 'border-red-500 bg-red-50 text-red-950 dark:bg-red-950/30 dark:text-red-100' : deadline.state === 'notified' ? 'border-emerald-400 bg-emerald-50 text-emerald-950 dark:bg-emerald-950/30 dark:text-emerald-100' : 'border-orange-400 bg-orange-50 text-orange-950 dark:bg-orange-950/30 dark:text-orange-100')}><CalendarClock aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0" /><div><p className="font-semibold">{deadline.state === 'notified' ? `DPA notified ${formatDateTime(incident.dpa_notified_at)}` : deadline.state === 'overdue' ? '72-hour notification deadline has passed' : `${Math.max(0, deadline.hoursRemaining ?? 0).toFixed(1)} hours remaining`}</p><p className="text-sm">Awareness {formatDateTime(incident.breach_awareness_at)} · Deadline {formatDateTime(incident.notification_deadline)}</p>{incident.dpa_notification_reference && <p className="mt-1 text-sm">Authority reference: {incident.dpa_notification_reference}</p>}</div></div>}
+    {incident.breach_assessment_status === 'pending' ? <p className="text-sm text-muted-foreground">No decision has been recorded. Assess whether personal data was involved and whether notification is required.</p> : <div className="grid gap-5 lg:grid-cols-2"><Detail label="Assessment rationale" value={incident.breach_assessment_reason ?? '—'} /><div className="grid grid-cols-2 gap-4"><Detail label="Data subjects" value={incident.data_subjects_affected?.toLocaleString() ?? '—'} /><Detail label="Records" value={incident.records_affected?.toLocaleString() ?? '—'} /><Detail label="Special-category data" value={incident.special_category_data ? 'Yes' : 'No'} /><Detail label="Cross-border" value={incident.cross_border ? 'Yes' : 'No'} /></div><Detail label="Nature" value={incident.breach_nature || 'Not recorded'} /><Detail label="Likely consequences" value={incident.likely_consequences || 'Not recorded'} /><Detail label="Mitigation measures" value={incident.mitigation_measures || 'Not recorded'} /><Detail label="Data categories" value={incident.data_categories.length ? incident.data_categories.join(', ') : 'None recorded'} /></div>}
+  </CardContent></Card>;
+}
+
+function AssignmentList({ assignments, loading, error, canUnassign, onUnassign, retry }: { assignments: IncidentAssignment[]; loading: boolean; error: boolean; canUnassign: boolean; onUnassign: (assignment: IncidentAssignment) => void; retry: () => void }) {
+  if (loading) return <div className="space-y-2" aria-label="Loading assignments"><Skeleton className="h-12" /><Skeleton className="h-12" /></div>;
+  if (error) return <div role="alert" className="flex items-center justify-between gap-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive"><span>Assignments could not be loaded.</span><Button variant="outline" size="sm" onClick={retry}>Retry</Button></div>;
+  if (!assignments.length) return <p className="py-5 text-center text-sm text-muted-foreground">No active responders assigned.</p>;
+  return <ul className="divide-y">{assignments.map((assignment) => <li key={assignment.id} className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-mono text-sm">{assignment.assignee_user_id}</p><p className="text-xs text-muted-foreground">{humanizeIncidentToken(assignment.role)} · assigned {formatDateTime(assignment.assigned_at)}</p><p className="mt-1 text-sm">{assignment.reason}</p></div>{canUnassign && <Button variant="outline" size="sm" onClick={() => onUnassign(assignment)}><UserMinus aria-hidden="true" className="mr-2 h-4 w-4" />Unassign</Button>}</li>)}</ul>;
+}
+
+function Timeline({ events, loading, error, retry }: { events: IncidentEvent[]; loading: boolean; error: boolean; retry: () => void }) {
+  if (loading) return <div className="space-y-3" aria-label="Loading timeline">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-16" />)}</div>;
+  if (error) return <div role="alert" className="flex items-center justify-between gap-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive"><span>Timeline events could not be loaded.</span><Button variant="outline" size="sm" onClick={retry}>Retry</Button></div>;
+  if (!events.length) return <p className="py-5 text-center text-sm text-muted-foreground">No timeline events recorded.</p>;
+  return <ol className="space-y-0">{events.map((event, index) => <li key={event.id} className="flex gap-3"><div className="flex flex-col items-center"><span className="mt-1 flex h-7 w-7 items-center justify-center rounded-full border bg-background"><Clock3 aria-hidden="true" className="h-3.5 w-3.5" /></span>{index < events.length - 1 && <span aria-hidden="true" className="w-px flex-1 bg-border" />}</div><div className="min-w-0 flex-1 pb-5"><div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium">{event.summary}</p><p className="text-xs text-muted-foreground">{humanizeIncidentToken(event.event_type)} · actor <span className="font-mono">{event.actor_user_id}</span></p></div><time className="whitespace-nowrap text-xs text-muted-foreground" dateTime={event.occurred_at}>{formatDateTime(event.occurred_at)}</time></div>{event.from_status && event.to_status && <p className="mt-2 text-sm"><Badge variant="outline">{humanizeIncidentToken(event.from_status)}</Badge><span aria-hidden="true" className="mx-2">→</span><Badge variant="outline">{humanizeIncidentToken(event.to_status)}</Badge></p>}</div></li>)}</ol>;
+}
+
+function Detail({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) { return <div><p className="text-sm font-medium text-muted-foreground">{label}</p><p className={cn('mt-1 break-words whitespace-pre-wrap text-sm', mono && 'font-mono text-xs')}>{value || '—'}</p></div>; }
+function Warning({ text }: { text: string }) { return <div role="status" className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />{text}</div>; }
+function DetailSkeleton() { return <div className="space-y-5" aria-label="Loading incident"><Skeleton className="h-5 w-36" /><Skeleton className="h-12 w-3/4" /><Skeleton className="h-32" /><div className="grid gap-5 lg:grid-cols-2"><Skeleton className="h-72" /><Skeleton className="h-72" /></div></div>; }
+function AccessState({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) { return <Card><CardContent role="alert" className="flex flex-col items-center gap-3 py-12 text-center"><LockKeyhole aria-hidden="true" className="h-9 w-9" /><h1 className="text-xl font-semibold">{title}</h1><p className="max-w-lg text-sm text-muted-foreground">{description}</p>{action}</CardContent></Card>; }
+function LoadError({ error, retry }: { error: unknown; retry: () => void }) { return <div className="space-y-5"><Link href="/incidents" className="inline-flex items-center text-sm text-muted-foreground"><ArrowLeft aria-hidden="true" className="mr-1 h-4 w-4" />Back to incidents</Link><Card><CardContent role="alert" className="flex flex-col items-center gap-3 py-12 text-center"><AlertTriangle aria-hidden="true" className="h-9 w-9 text-destructive" /><h1 className="text-xl font-semibold">Incident could not be loaded</h1><p className="text-sm text-muted-foreground">{formatIncidentError(error, 'The incident was not found or is temporarily unavailable.')}</p><Button variant="outline" onClick={retry}>Retry</Button></CardContent></Card></div>; }

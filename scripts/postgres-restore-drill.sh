@@ -35,6 +35,9 @@ for command_name in pg_dump pg_restore psql; do
 done
 
 source_name=$(psql "$source_url" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --command 'SELECT current_database()')
+case "$source_name" in
+  ''|*[!A-Za-z0-9_.-]*) fail 'source database name contains characters that cannot be safely recorded in drill evidence' ;;
+esac
 [ "$source_name" != "$target_name" ] || fail 'drill target must not be the source database'
 
 drill_started_epoch=$(date +%s)

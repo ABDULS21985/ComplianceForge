@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -238,7 +240,11 @@ func (h *WorkflowHandler) CancelWorkflow(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		Reason string `json:"reason"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
 
 	if err := h.svc.CancelWorkflow(r.Context(), orgID, instanceID, userID, body.Reason); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to cancel workflow", err.Error())
@@ -299,7 +305,11 @@ func (h *WorkflowHandler) ApproveStep(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Comments string `json:"comments"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
 
 	if err := h.svc.ProcessStep(r.Context(), orgID, executionID, "approve", userID, body.Comments, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to approve step", err.Error())

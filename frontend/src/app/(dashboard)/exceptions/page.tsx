@@ -115,11 +115,11 @@ function DonutChart({ data }: { data: { level: string; count: number }[] }) {
     medium: '#D97706',
     low: '#059669',
   };
-  let cumulativePct = 0;
-  const segments = data.map((d) => {
+  const segments = data.map((d, index) => {
     const pct = (d.count / total) * 100;
-    const start = cumulativePct;
-    cumulativePct += pct;
+    const start = data
+      .slice(0, index)
+      .reduce((sum, item) => sum + (item.count / total) * 100, 0);
     return { ...d, pct, start, color: colors[d.level] ?? '#6B7280' };
   });
   const gradientParts = segments.map((s) => `${s.color} ${s.start}% ${s.start + s.pct}%`).join(', ');

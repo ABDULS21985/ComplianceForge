@@ -21,6 +21,7 @@ import (
 
 	"github.com/complianceforge/platform/internal/config"
 	"github.com/complianceforge/platform/internal/database"
+	"github.com/complianceforge/platform/internal/observability"
 	"github.com/complianceforge/platform/internal/pkg/coordination"
 	emailpkg "github.com/complianceforge/platform/internal/pkg/email"
 	queuepkg "github.com/complianceforge/platform/internal/pkg/queue"
@@ -71,6 +72,23 @@ type taskRunner interface {
 	Run(context.Context, string, func(context.Context) error) (bool, error)
 }
 
+type observedTaskRunner struct {
+	next    taskRunner
+	metrics *observability.Metrics
+}
+
+func (r observedTaskRunner) Run(ctx context.Context, taskName string, work func(context.Context) error) (bool, error) {
+	started := time.Now()
+	observedWork := func(workCtx context.Context) error {
+		r.metrics.WorkerStarted()
+		defer r.metrics.WorkerFinished()
+		return work(workCtx)
+	}
+	acquired, err := r.next.Run(ctx, taskName, observedWork)
+	r.metrics.ObserveWorkerTask(taskName, acquired, time.Since(started), err)
+	return acquired, err
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -111,6 +129,13 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	telemetry, err := observability.New(parentCtx, cfg.Observability, "complianceforge-worker", cfg.App.Env, instanceID)
+	if err != nil {
+		return fmt.Errorf("initialize observability: %w", err)
+	}
+	telemetry.Metrics().RegisterPostgresPool(pool)
+	telemetry.Metrics().RegisterQueueStorage(pool)
+	defer shutdownWorkerTelemetry(telemetry, cfg.Observability.ShutdownTimeoutSeconds)
 	notificationDelivery, err := service.NotificationDeliveryConfigFromEnvironment(instanceID)
 	if err != nil {
 		return fmt.Errorf("load notification delivery configuration: %w", err)
@@ -135,6 +160,7 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("create queue service: %w", err)
 	}
+	broker.SetObserver(telemetry.Metrics())
 	defer broker.Close()
 
 	outboxConfig, err := queuepkg.OutboxConfigFromEnvironment()
@@ -152,6 +178,7 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("create outbox dispatcher: %w", err)
 	}
+	outboxDispatcher.SetObserver(telemetry.Metrics())
 	schedulerLease, err := workerSchedulerLease()
 	if err != nil {
 		return err
@@ -166,6 +193,7 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("create scheduler coordinator: %w", err)
 	}
+	runner := observedTaskRunner{next: coordinator, metrics: telemetry.Metrics()}
 	emailSender, err := workerEmailSender(cfg.SMTP)
 	if err != nil {
 		return fmt.Errorf("create SMTP email sender: %w", err)
@@ -191,8 +219,34 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 		search:               workerpkg.NewSearchIndexer(pool),
 		workflows:            workerpkg.NewWorkflowScheduler(pool),
 	}
+	tasks := scheduledTasks(components)
+	tasks = append(tasks,
+		scheduledTask{key: "maintenance.queue.inbox-retention", name: "queue inbox retention", interval: time.Hour, runOnBoot: false, run: func(ctx context.Context) error {
+			_, err := deduplicator.PurgeExpired(ctx, 1000)
+			return err
+		}},
+		scheduledTask{key: "maintenance.queue.outbox-retention", name: "queue outbox retention", interval: time.Hour, runOnBoot: false, run: func(ctx context.Context) error {
+			_, err := outbox.PurgePublishedBefore(ctx, time.Now().UTC().Add(-outboxConfig.Retention), 1000)
+			return err
+		}},
+	)
+	taskNames := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		taskNames = append(taskNames, task.key)
+	}
+	telemetry.Metrics().RegisterWorkerTasks(taskNames)
 	dispatcher := queuepkg.NewDispatcher()
-	if err := registerJobHandlers(dispatcher, components, coordinator); err != nil {
+	if err := registerJobHandlers(dispatcher, components, runner); err != nil {
+		return err
+	}
+	postgresHealth := telemetry.Metrics().WrapDependencyCheck("postgres", func(ctx context.Context) error {
+		return database.HealthCheck(ctx, pool)
+	})
+	rabbitHealth := telemetry.Metrics().WrapDependencyCheck("rabbitmq", broker.HealthCheck)
+	readiness := func(ctx context.Context) error {
+		return errors.Join(postgresHealth(ctx), rabbitHealth(ctx))
+	}
+	if err := telemetry.StartMetricsServer(readiness); err != nil {
 		return err
 	}
 
@@ -234,23 +288,12 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 		}
 	}()
 
-	tasks := scheduledTasks(components)
-	tasks = append(tasks,
-		scheduledTask{key: "maintenance.queue.inbox-retention", name: "queue inbox retention", interval: time.Hour, runOnBoot: false, run: func(ctx context.Context) error {
-			_, err := deduplicator.PurgeExpired(ctx, 1000)
-			return err
-		}},
-		scheduledTask{key: "maintenance.queue.outbox-retention", name: "queue outbox retention", interval: time.Hour, runOnBoot: false, run: func(ctx context.Context) error {
-			_, err := outbox.PurgePublishedBefore(ctx, time.Now().UTC().Add(-outboxConfig.Retention), 1000)
-			return err
-		}},
-	)
 	for _, task := range tasks {
 		task := task
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			runScheduledTask(workerCtx, task, coordinator)
+			runScheduledTask(workerCtx, task, runner)
 		}()
 	}
 
@@ -269,7 +312,10 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 		log.Info().Msg("worker shutdown requested")
 	case runErr = <-workerErrors:
 		log.Error().Err(runErr).Msg("worker component failed")
+	case runErr = <-telemetry.Errors():
+		log.Error().Err(runErr).Msg("worker observability server failed")
 	}
+	telemetry.SetDraining()
 	cancel()
 
 	drained := make(chan struct{})
@@ -285,6 +331,14 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("worker drain exceeded %s", shutdownPeriod)
 	}
 	return runErr
+}
+
+func shutdownWorkerTelemetry(runtime *observability.Runtime, timeoutSeconds int) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+	if err := runtime.Shutdown(ctx); err != nil {
+		log.Error().Err(err).Msg("worker observability shutdown failed")
+	}
 }
 
 func registerJobHandlers(dispatcher *queuepkg.Dispatcher, components workerComponents, runner taskRunner) error {

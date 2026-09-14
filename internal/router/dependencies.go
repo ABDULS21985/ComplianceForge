@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"reflect"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
@@ -18,6 +21,7 @@ import (
 	"github.com/complianceforge/platform/internal/handler"
 	"github.com/complianceforge/platform/internal/middleware"
 	emailpkg "github.com/complianceforge/platform/internal/pkg/email"
+	queuepkg "github.com/complianceforge/platform/internal/pkg/queue"
 	"github.com/complianceforge/platform/internal/pkg/secretbox"
 	"github.com/complianceforge/platform/internal/repository"
 	"github.com/complianceforge/platform/internal/service"
@@ -35,6 +39,9 @@ type RouterDependencies struct {
 	Risks                *handler.RiskHandler
 	Policies             *handler.PolicyHandler
 	Audits               *handler.AuditHandler
+	Incidents            *handler.IncidentHandler
+	Assets               *handler.AssetHandler
+	Permissions          *handler.PermissionHandler
 	Notifications        *handler.NotificationHandler
 	Integrations         *handler.IntegrationHandler
 	APIKeyAuthenticator  authdomain.APIKeyAuthenticator
@@ -51,7 +58,6 @@ type RouterDependencies struct {
 // composition slice. Keeping them in the dependency object makes their
 // disabled state explicit instead of creating hidden nil handlers in NewRouter.
 type DomainHandlers struct {
-	Incident         *handler.IncidentHandler
 	Vendor           *handler.VendorHandler
 	Dashboard        *handler.DashboardHandler
 	Report           *handler.ReportHandler
@@ -99,6 +105,11 @@ var (
 	_ handler.PolicyService                   = (*service.PolicyService)(nil)
 	_ service.AuditManagementRepository       = repository.AuditRepository(nil)
 	_ handler.AuditService                    = (*service.AuditService)(nil)
+	_ service.IncidentManagementRepository    = repository.IncidentRepository(nil)
+	_ handler.IncidentService                 = (*service.IncidentService)(nil)
+	_ service.AssetManagementRepository       = repository.AssetRepository(nil)
+	_ handler.AssetManagementService          = (*service.AssetService)(nil)
+	_ handler.PermissionService               = (*service.RBACAuthorizer)(nil)
 	_ handler.IntegrationSvc                  = (*service.IntegrationService)(nil)
 )
 
@@ -130,6 +141,30 @@ func BuildDependencies(
 	policyService := service.NewPolicyService(policyRepo, log.Logger)
 	var auditRepo service.AuditManagementRepository = repository.NewAuditRepository(pool)
 	auditService := service.NewAuditService(auditRepo, log.Logger)
+	outboxConfig, err := queuepkg.OutboxConfigFromEnvironment()
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("loading domain outbox configuration: %w", err)
+	}
+	domainOutbox, err := queuepkg.NewPostgresOutbox(pool, uuid.NewString(), outboxConfig)
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building domain outbox: %w", err)
+	}
+	incidentQueue := strings.TrimSpace(os.Getenv("WORKER_QUEUE_NAME"))
+	if incidentQueue == "" {
+		incidentQueue = "complianceforge.worker"
+	}
+	var incidentRepo service.IncidentManagementRepository
+	incidentRepo, err = repository.NewIncidentRepository(pool, domainOutbox, incidentQueue)
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building incident repository: %w", err)
+	}
+	incidentService := service.NewIncidentService(incidentRepo, log.Logger)
+	var assetRepo service.AssetManagementRepository
+	assetRepo, err = repository.NewAssetRepository(pool, domainOutbox, incidentQueue)
+	if err != nil {
+		return RouterDependencies{}, fmt.Errorf("building asset repository: %w", err)
+	}
+	assetService := service.NewAssetService(assetRepo, log.Logger)
 	integrationService, err := service.NewIntegrationService(pool, cfg.Encryption.IntegrationKey)
 	if err != nil {
 		return RouterDependencies{}, fmt.Errorf("building integration service: %w", err)
@@ -176,6 +211,9 @@ func BuildDependencies(
 		Risks:                handler.NewRiskHandler(riskService),
 		Policies:             handler.NewPolicyHandler(policyService),
 		Audits:               handler.NewAuditHandler(auditService),
+		Incidents:            handler.NewIncidentHandler(incidentService),
+		Assets:               handler.NewAssetHandler(assetService),
+		Permissions:          handler.NewPermissionHandler(authorizer),
 		Notifications:        handler.NewNotificationHandler(pool, notificationEngine, notificationProtector),
 		Integrations:         handler.NewIntegrationHandler(integrationService),
 		APIKeyAuthenticator:  integrationService,
@@ -196,7 +234,7 @@ func BuildDependencies(
 
 // Validate reports all missing required dependencies in one startup error.
 func (d RouterDependencies) Validate() error {
-	missing := make([]error, 0, 8)
+	missing := make([]error, 0, 18)
 	if d.Auth == nil || !d.Auth.Ready() {
 		missing = append(missing, errors.New("auth handler is required"))
 	}
@@ -217,6 +255,15 @@ func (d RouterDependencies) Validate() error {
 	}
 	if d.Audits == nil || !d.Audits.Ready() {
 		missing = append(missing, errors.New("audit handler is required"))
+	}
+	if d.Incidents == nil || !d.Incidents.Ready() {
+		missing = append(missing, errors.New("incident handler is required"))
+	}
+	if d.Assets == nil || !d.Assets.Ready() {
+		missing = append(missing, errors.New("asset handler is required"))
+	}
+	if d.Permissions == nil || !d.Permissions.Ready() {
+		missing = append(missing, errors.New("permission handler is required"))
 	}
 	if d.Notifications == nil || !d.Notifications.Ready() {
 		missing = append(missing, errors.New("notification handler is required"))

@@ -8,7 +8,7 @@ Configure these outside the repository before treating the workflows as a produc
 - Restrict GitHub Actions to approved actions pinned by full commit SHA. Require review for `.github/workflows/**`, Dockerfiles, migration/seed files, and `scripts/ci/**` through CODEOWNERS or an equivalent ruleset.
 - Configure the `release`, `staging`, and `production` environments with separate approvers and least-privilege secrets. The release job needs GitHub OIDC (`id-token: write`) and GHCR package write access.
 - Private repositories need GitHub Advanced Security for Dependency Review and an eligible GitHub plan for hosted artifact attestations. The checksum-pinned CLI scans still run without those products.
-- Supply base-image registry credentials or a pull-through cache with retention and malware controls. CI scanners need outbound access to GitHub release assets, the Go checksum/module services, npm advisory services, and the Trivy vulnerability database.
+- Supply `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` repository secrets or a pull-through cache with retention and malware controls for authenticated base-image pulls. CI scanners need outbound access to GitHub release assets, the Go checksum/module services, npm advisory services, and the Trivy vulnerability database. Pull-request builds from forks do not receive these secrets and therefore still need an unauthenticated-capacity plan or registry mirror.
 - Configure `KUBE_CONFIG_STAGING`, `KUBE_CONFIG_PRODUCTION`, deployment/namespace variables, and cluster RBAC so each environment credential can update only its named workloads. Prefer short-lived workload identity over long-lived kubeconfig material when the cluster provider supports it.
 
 ## Pull-request gates
@@ -18,15 +18,22 @@ The main CI workflow performs:
 - Go 1.26.8 compilation/tests, Go vet, golangci-lint 2.13.2, Gosec 2.28.0, and govulncheck 1.8.0.
 - Frontend lint/type/unit/E2E checks on supported Node.js 24 LTS.
 - Migration pair/continuity validation, complete seed-manifest validation, clean `up/down/up`, and double seed application.
-- Full-history Gitleaks 8.30.1 scanning and Trivy 0.74.0 source, secret, IaC, dependency, license, and image scanning.
+- Full-history Gitleaks 8.30.1 scanning and Trivy 0.74.0 source, secret, IaC, dependency, full installed-graph license, and image scanning. Frontend lifecycle scripts remain disabled while the graph is materialized for analysis.
 - SPDX JSON SBOM creation with Syft 1.51.1 for API, worker, migrator, and frontend images.
-- High/critical fixed-vulnerability image gates and retained JSON/SARIF evidence.
+- High/critical image vulnerability gates (including findings without an
+  upstream fix) and retained JSON/SARIF evidence.
 
 The Go lint job currently uses the action's changed-code ratchet: pull requests and
 pushes fail when they introduce a new finding, while pre-existing findings remain
 visible without blocking unrelated delivery. Run `golangci-lint run --timeout=5m
 ./...` periodically to measure and burn down the repository-wide baseline; remove
 `only-new-issues` only after that command is clean.
+
+Frontend ESLint has a temporary measured baseline of 771 warnings as of
+2026-09-14. Frontend Platform owns the burn-down, with a target of zero before
+the next production-readiness review. CI uses `--max-warnings=771`, so warning
+772 fails without changing rule severity or suppressing any rule. Reduce the
+number after every cleanup tranche and restore `--max-warnings=0` at zero.
 
 Third-party actions use immutable commit SHAs. Scanner release archives are HTTPS-only, version-pinned, and verified against upstream SHA-256 values in `scripts/ci/install-security-tools.sh`. The Go vulnerability client is pinned to the current release supported by the CI toolchain and is verified through Go's module checksum mechanism.
 
@@ -35,6 +42,11 @@ historical fingerprints for reviewed synthetic configuration-test fixtures;
 never add a path-wide, rule-wide, or regular-expression exemption there.
 
 The separate Dependency Review workflow blocks moderate-or-higher vulnerabilities across runtime and development scopes and enforces an explicit permissive-license allowlist for newly introduced dependencies. Security/Legal must approve changes to that allowlist; do not use per-package exceptions without an owner, expiry date, and recorded license analysis.
+
+The current Next.js image-optimization dependency has an unresolved LGPL review.
+See `docs/runbooks/sharp-libvips-license-review.md`. The dedicated Trivy
+license gate must remain visibly failing until Security/Legal records one of
+the documented decisions; zero CVE results do not override a license failure.
 
 ## Produce a release
 

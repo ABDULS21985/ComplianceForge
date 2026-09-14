@@ -32,25 +32,56 @@ func NewTranslator(localesDir, fallbackLang string) (*Translator, error) {
 		fallback:     fallbackLang,
 	}
 
-	files, err := filepath.Glob(filepath.Join(localesDir, "*.json"))
+	absDir, err := filepath.Abs(localesDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve locale directory: %w", err)
+	}
+	canonicalDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve canonical locale directory: %w", err)
+	}
+	root, err := os.OpenRoot(canonicalDir)
+	if err != nil {
+		return nil, fmt.Errorf("open locale directory: %w", err)
+	}
+	defer root.Close()
+
+	entries, err := os.ReadDir(canonicalDir)
 	if err != nil {
 		return nil, fmt.Errorf("scan locale directory: %w", err)
 	}
-	if len(files) == 0 {
-		log.Warn().Str("dir", localesDir).Msg("no locale files found")
+	localeFiles := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return nil, fmt.Errorf("inspect locale file %s: %w", entry.Name(), infoErr)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("locale file %s is not a regular file", entry.Name())
+		}
+		localeFiles = append(localeFiles, entry.Name())
+	}
+	sort.Strings(localeFiles)
+	if len(localeFiles) == 0 {
+		log.Warn().Str("dir", canonicalDir).Msg("no locale files found")
 	}
 
-	for _, fpath := range files {
-		lang := strings.TrimSuffix(filepath.Base(fpath), ".json")
+	for _, fileName := range localeFiles {
+		lang := strings.TrimSuffix(fileName, ".json")
 
-		data, err := os.ReadFile(fpath)
+		// Root.ReadFile ensures a replaced entry or concurrent rename cannot escape
+		// the canonical locale tree.
+		data, err := root.ReadFile(fileName)
 		if err != nil {
-			return nil, fmt.Errorf("read locale file %s: %w", fpath, err)
+			return nil, fmt.Errorf("read locale file %s: %w", fileName, err)
 		}
 
 		var nested map[string]interface{}
 		if err := json.Unmarshal(data, &nested); err != nil {
-			return nil, fmt.Errorf("parse locale file %s: %w", fpath, err)
+			return nil, fmt.Errorf("parse locale file %s: %w", fileName, err)
 		}
 
 		flat := make(map[string]interface{})

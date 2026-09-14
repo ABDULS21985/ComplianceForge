@@ -21,10 +21,10 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	ErrTokenNotFound      = fmt.Errorf("push token not found")
-	ErrTooManyDevices     = fmt.Errorf("maximum of 5 devices per user")
-	ErrPushSendFailed     = fmt.Errorf("failed to deliver push notification")
-	ErrQuietHoursActive   = fmt.Errorf("notification suppressed during quiet hours")
+	ErrTokenNotFound    = fmt.Errorf("push token not found")
+	ErrTooManyDevices   = fmt.Errorf("maximum of 5 devices per user")
+	ErrPushSendFailed   = fmt.Errorf("failed to deliver push notification")
+	ErrQuietHoursActive = fmt.Errorf("notification suppressed during quiet hours")
 )
 
 // ---------------------------------------------------------------------------
@@ -33,14 +33,14 @@ var (
 
 // PushToken represents a registered mobile device token.
 type PushToken struct {
-	ID         string  `json:"id"`
-	UserID     string  `json:"user_id"`
-	Platform   string  `json:"platform"` // ios, android, web
-	TokenHash  string  `json:"-"`
-	DeviceInfo string  `json:"device_info"`
-	IsActive   bool    `json:"is_active"`
-	LastUsedAt string  `json:"last_used_at"`
-	CreatedAt  string  `json:"created_at"`
+	ID         string `json:"id"`
+	UserID     string `json:"user_id"`
+	Platform   string `json:"platform"` // ios, android, web
+	TokenHash  string `json:"-"`
+	DeviceInfo string `json:"device_info"`
+	IsActive   bool   `json:"is_active"`
+	LastUsedAt string `json:"last_used_at"`
+	CreatedAt  string `json:"created_at"`
 }
 
 // PushNotification is the payload for a push notification.
@@ -48,7 +48,7 @@ type PushNotification struct {
 	Title    string                 `json:"title"`
 	Body     string                 `json:"body"`
 	Category string                 `json:"category"` // alert, reminder, approval, incident
-	Priority string                 `json:"priority"`  // critical, high, normal, low
+	Priority string                 `json:"priority"` // critical, high, normal, low
 	Data     map[string]interface{} `json:"data"`
 	Badge    int                    `json:"badge"`
 	Sound    string                 `json:"sound"`
@@ -64,19 +64,19 @@ type MobilePreferences struct {
 	IncidentsEnabled bool   `json:"incidents_enabled"`
 	QuietHoursStart  string `json:"quiet_hours_start"` // HH:MM
 	QuietHoursEnd    string `json:"quiet_hours_end"`
-	QuietHoursZone   string `json:"quiet_hours_zone"`  // e.g. Europe/Berlin
+	QuietHoursZone   string `json:"quiet_hours_zone"` // e.g. Europe/Berlin
 	UpdatedAt        string `json:"updated_at"`
 }
 
 // MobileDashboard is a condensed dashboard for mobile clients.
 type MobileDashboard struct {
-	OpenRisks        int     `json:"open_risks"`
-	CriticalRisks    int     `json:"critical_risks"`
-	OverdueItems     int     `json:"overdue_items"`
-	PendingApprovals int     `json:"pending_approvals"`
-	ActiveIncidents  int     `json:"active_incidents"`
-	ComplianceScore  float64 `json:"compliance_score"`
-	UpcomingDeadlines int    `json:"upcoming_deadlines"`
+	OpenRisks         int     `json:"open_risks"`
+	CriticalRisks     int     `json:"critical_risks"`
+	OverdueItems      int     `json:"overdue_items"`
+	PendingApprovals  int     `json:"pending_approvals"`
+	ActiveIncidents   int     `json:"active_incidents"`
+	ComplianceScore   float64 `json:"compliance_score"`
+	UpcomingDeadlines int     `json:"upcoming_deadlines"`
 }
 
 // MobileApproval is a condensed approval item for mobile.
@@ -368,9 +368,11 @@ func (s *PushService) isQuietHours(prefs *MobilePreferences) bool {
 }
 
 func parseHHMM(s string) (int, int) {
-	var h, m int
-	fmt.Sscanf(s, "%d:%d", &h, &m)
-	return h, m
+	parsed, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, 0
+	}
+	return parsed.Hour(), parsed.Minute()
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +442,8 @@ func (s *PushService) GetMobileDashboard(ctx context.Context, orgID, userID stri
 			(SELECT COUNT(*) FROM calendar_events WHERE organization_id = $1 AND status = 'overdue'),
 			(SELECT COUNT(*) FROM workflow_instances WHERE organization_id = $1 AND status = 'pending_approval'
 			   AND current_approver = $2),
-			(SELECT COUNT(*) FROM incidents WHERE organization_id = $1 AND status IN ('open','investigating')),
+			(SELECT COUNT(*) FROM incidents WHERE organization_id = $1 AND deleted_at IS NULL
+			 AND status IN ('reported','triaged','investigating','contained')),
 			COALESCE((SELECT AVG(compliance_score) FROM compliance_scores WHERE organization_id = $1), 0),
 			(SELECT COUNT(*) FROM calendar_events WHERE organization_id = $1 AND status = 'pending'
 			   AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days')
@@ -483,7 +486,8 @@ func (s *PushService) GetMobileIncidents(ctx context.Context, orgID string) ([]M
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, incident_ref, title, severity, status, reported_at
 		FROM incidents
-		WHERE organization_id = $1 AND status IN ('open','investigating')
+		WHERE organization_id = $1 AND deleted_at IS NULL
+		AND status IN ('reported','triaged','investigating','contained')
 		ORDER BY severity_ord(severity) ASC, reported_at DESC
 		LIMIT 20`, orgID)
 	if err != nil {

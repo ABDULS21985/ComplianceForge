@@ -28,6 +28,9 @@ jobs:
     name: Sign and attest ${{ matrix.component }}
     runs-on: ubuntu-latest
     environment: release
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     permissions:
       contents: read
       packages: write
@@ -56,6 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate immutable release tag
@@ -65,6 +69,27 @@ jobs:
             echo "release tag must be a full semantic version such as v1.4.2" >&2
             exit 1
           fi
+          if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            echo "release tag must already exist in Git" >&2
+            exit 1
+          fi
+          tag_commit=$(git rev-list -n 1 "$RELEASE_TAG")
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "release tag does not resolve to the workflow commit" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "release commit must be reachable from main" >&2
+            exit 1
+          fi
+
+      - name: Authenticate base-image pulls
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0

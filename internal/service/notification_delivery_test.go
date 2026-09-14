@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -126,6 +127,45 @@ func TestNotificationDeliveryIdentityAndDigestGrouping(t *testing.T) {
 	}
 }
 
+func TestDigestChunkingRetainsEveryNotification(t *testing.T) {
+	base := Notification{
+		OrgID: uuid.NewString(), RecipientUserID: uuid.NewString(), ChannelID: uuid.NewString(),
+		ChannelType: "slack", DigestFrequency: "hourly",
+		ScheduledFor: time.Date(2026, 9, 14, 13, 0, 0, 0, time.UTC),
+		CreatedAt:    time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
+	}
+	claimed := make([]Notification, 0, 5)
+	for index := 0; index < 5; index++ {
+		notification := base
+		notification.ID = uuid.NewString()
+		notification.Subject = "Digest event"
+		notification.TextBody = strings.Repeat("x", 1200)
+		claimed = append(claimed, notification)
+	}
+	groups := groupClaimedNotifications(claimed)
+	if len(groups) < 2 {
+		t.Fatalf("oversized Slack digest was not chunked: groups=%d", len(groups))
+	}
+	total := 0
+	seen := make(map[string]struct{}, len(claimed))
+	for _, group := range groups {
+		digest := buildDigestNotification(group)
+		if utf8.RuneCountInString(digest.Body) > 2400 {
+			t.Fatalf("digest chunk body contains %d runes", utf8.RuneCountInString(digest.Body))
+		}
+		for _, notification := range group.notifications {
+			if _, duplicate := seen[notification.ID]; duplicate {
+				t.Fatalf("notification %s appeared in multiple digest chunks", notification.ID)
+			}
+			seen[notification.ID] = struct{}{}
+			total++
+		}
+	}
+	if total != len(claimed) {
+		t.Fatalf("digest retained %d of %d notifications", total, len(claimed))
+	}
+}
+
 func TestNotificationDeliveryFailureClassification(t *testing.T) {
 	classified := classifyNotificationDeliveryError(notificationDeliveryError(
 		"configuration_invalid", true, errors.New("https://user:secret@example.test/token"),
@@ -141,7 +181,7 @@ func TestNotificationDeliveryFailureClassification(t *testing.T) {
 func TestNotificationDeliveryConfigFromEnvironment(t *testing.T) {
 	ownerID := uuid.NewString()
 	t.Setenv("NOTIFICATION_DELIVERY_CLAIM_BATCH", "25")
-	t.Setenv("NOTIFICATION_DELIVERY_LEASE", "45s")
+	t.Setenv("NOTIFICATION_DELIVERY_LEASE", "4m")
 	t.Setenv("NOTIFICATION_RETRY_BASE_DELAY", "2s")
 	t.Setenv("NOTIFICATION_RETRY_MAX_DELAY", "10m")
 	t.Setenv("NOTIFICATION_DELIVERY_POLL_INTERVAL", "5s")
@@ -149,7 +189,7 @@ func TestNotificationDeliveryConfigFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.OwnerID != ownerID || config.ClaimBatch != 25 || config.LeaseDuration != 45*time.Second || config.PollInterval != 5*time.Second {
+	if config.OwnerID != ownerID || config.ClaimBatch != 25 || config.LeaseDuration != 4*time.Minute || config.PollInterval != 5*time.Second {
 		t.Fatalf("config = %#v", config)
 	}
 	t.Setenv("NOTIFICATION_DELIVERY_LEASE", "5s")

@@ -1,34 +1,23 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import {
-  ClipboardCheck,
-  Plus,
-  Search,
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  AlertTriangle,
+  ClipboardCheck,
+  FilterX,
   Loader2,
+  LockKeyhole,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
 } from 'lucide-react';
-
-import { cn, formatDate, getStatusColor } from '@/lib/utils';
-import {
-  useAudits,
-  useCreateAudit,
-  useUsers,
-  useFrameworks,
-} from '@/lib/api-hooks';
-
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import type { Audit, AuditStatus, AuditType } from '@/types/audit';
+import { auditPersonName, humanizeAuditToken } from '@/lib/audit';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { cn, formatDate, getStatusColor } from '@/lib/utils';
 import {
   Select,
   SelectContent,
@@ -36,258 +25,551 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
+import { useAudits, useDeleteAudit } from '@/lib/api-hooks';
+import { AuditConfirmationDialog } from '@/components/audits/audit-confirmation-dialog';
+import { AuditEditorDialog } from '@/components/audits/audit-editor-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAuditPermissions } from '@/hooks/use-audit-permissions';
 import { useQuickCreate } from '@/lib/use-quick-create';
 
+const PAGE_SIZES = [10, 20, 50] as const;
 
-// ---------------------------------------------------------------------------
-// Validation schema
-// ---------------------------------------------------------------------------
-
-const createAuditSchema = z.object({
-  title: z.string().min(1, 'Title is required').max(200),
-  description: z.string().min(1, 'Description is required'),
-  audit_type: z.enum(['internal', 'external', 'certification'], {
-    required_error: 'Select an audit type',
-  }),
-  lead_auditor_id: z.string().min(1, 'Lead auditor is required'),
-  scope: z.string().min(1, 'Scope is required'),
-  scheduled_start_date: z.string().min(1, 'Start date is required'),
-  scheduled_end_date: z.string().min(1, 'End date is required'),
-  framework_id: z.string().optional(),
-});
-
-type CreateAuditValues = z.infer<typeof createAuditSchema>;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function auditTypeBadge(type: string) {
-  const map: Record<string, string> = {
-    internal: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-    external: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-    certification: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
-  };
-  return map[type] ?? 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+const AUDIT_TYPE_STYLES: Record<AuditType, string> = {
+  internal: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  external: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+  certification: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+};
 
 export default function AuditsPage() {
+  const access = useAuditPermissions();
   const [page, setPage] = React.useState(1);
-  const [pageSize] = React.useState(20);
+  const [pageSize, setPageSize] = React.useState<number>(20);
+  const [searchDraft, setSearchDraft] = React.useState('');
   const [search, setSearch] = React.useState('');
-  const [sheetOpen, setSheetOpen] = useQuickCreate('audit');
+  const [status, setStatus] = React.useState<AuditStatus | 'all'>('all');
+  const [auditType, setAuditType] = React.useState<AuditType | 'all'>('all');
+  const [createOpen, setCreateOpen] = useQuickCreate('audit');
+  const [editingAudit, setEditingAudit] = React.useState<Audit | null>(null);
+  const [deletingAudit, setDeletingAudit] = React.useState<Audit | null>(null);
+  const deleteAudit = useDeleteAudit();
 
-  const { data, isLoading, isError, error } = useAudits({
-    page,
-    page_size: pageSize,
-    search: search || undefined,
-  } as Record<string, unknown>);
-
-  const audits: Record<string, unknown>[] = (data as Record<string, unknown>)?.items as Record<string, unknown>[] ?? [];
-  const total = ((data as Record<string, unknown>)?.total as number) ?? 0;
-  const totalPages = ((data as Record<string, unknown>)?.total_pages as number) ?? 1;
-
-  // Summary counts
-  const planned = audits.filter((a) => a.status === 'planned').length;
-  const inProgress = audits.filter((a) => a.status === 'in_progress').length;
-  const completed = audits.filter((a) => a.status === 'completed').length;
-  const totalFindings = audits.reduce(
-    (sum, a) => sum + (((a.findings_count as number) ?? 0)),
-    0
+  const auditsQuery = useAudits(
+    {
+      page,
+      page_size: pageSize,
+      search: search || undefined,
+      status: status === 'all' ? undefined : status,
+      audit_type: auditType === 'all' ? undefined : auditType,
+    },
+    { enabled: access.canRead },
   );
-  const criticalOpen = audits.reduce(
-    (sum, a) => sum + (((a.critical_findings_open as number) ?? 0)),
-    0
+  const data = auditsQuery.data;
+  const audits = data?.items ?? [];
+  const totalPages = Math.max(data?.total_pages ?? 0, 1);
+
+  React.useEffect(() => {
+    if (!data || page <= totalPages) return;
+    const timer = window.setTimeout(() => setPage(totalPages), 0);
+    return () => window.clearTimeout(timer);
+  }, [data, page, totalPages]);
+
+  if (access.isLoading || !access.user) {
+    return <AuditListSkeleton label="Checking audit permissions" />;
+  }
+
+  if (access.isError) {
+    return (
+      <StateCard
+        icon={<LockKeyhole aria-hidden="true" className="h-9 w-9" />}
+        title="Audit access could not be verified"
+        description="The permissions service is temporarily unavailable. No audit data was loaded."
+        action={<Button onClick={() => void access.retry()}>Try again</Button>}
+        alert
+      />
+    );
+  }
+
+  if (!access.canRead) {
+    return (
+      <StateCard
+        icon={<LockKeyhole aria-hidden="true" className="h-9 w-9" />}
+        title="Audit management unavailable"
+        description="Your role does not grant read access to audits."
+      />
+    );
+  }
+
+  const plannedOnPage = audits.filter((audit) => audit.status === 'planned').length;
+  const activeOnPage = audits.filter((audit) => audit.status === 'in_progress').length;
+  const findingsOnPage = audits.reduce((total, audit) => total + audit.findings_count, 0);
+  const urgentOnPage = audits.reduce(
+    (total, audit) => total + audit.critical_findings_open + audit.high_findings_open,
+    0,
   );
+  const filtersActive = Boolean(search || status !== 'all' || auditType !== 'all');
+
+  function applySearch(event: React.FormEvent) {
+    event.preventDefault();
+    setSearch(searchDraft.trim());
+    setPage(1);
+  }
+
+  function resetFilters() {
+    setSearchDraft('');
+    setSearch('');
+    setStatus('all');
+    setAuditType('all');
+    setPage(1);
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Audit Management</h1>
-          <p className="text-muted-foreground">
-            Plan, execute, and track internal and external audits
+          <h1 className="text-3xl font-bold tracking-tight">Audit management</h1>
+          <p className="mt-1 text-muted-foreground">
+            Plan engagements, manage execution, and resolve findings.
           </p>
         </div>
-        <Button onClick={() => setSheetOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Plan Audit
-        </Button>
+        {access.canCreate && (
+          <Button className="w-full sm:w-auto" onClick={() => setCreateOpen(true)}>
+            <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+            Plan audit
+          </Button>
+        )}
       </div>
 
-      {/* Summary cards */}
-      <div className="grid gap-4 md:grid-cols-5">
-        <SummaryCard label="Planned" value={planned} icon={<ClipboardCheck className="h-4 w-4 text-blue-500" />} />
-        <SummaryCard label="In Progress" value={inProgress} icon={<Loader2 className="h-4 w-4 text-yellow-500" />} />
-        <SummaryCard label="Completed" value={completed} icon={<ClipboardCheck className="h-4 w-4 text-green-500" />} />
-        <SummaryCard label="Total Findings" value={totalFindings} icon={<AlertTriangle className="h-4 w-4 text-orange-500" />} />
+      <div
+        role="group"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Metrics for the current results page"
+      >
         <SummaryCard
-          label="Critical Findings Open"
-          value={criticalOpen}
-          icon={<AlertTriangle className="h-4 w-4 text-red-500" />}
-          highlight={criticalOpen > 0}
+          label="Planned on page"
+          value={plannedOnPage}
+          icon={<ClipboardCheck aria-hidden="true" className="h-4 w-4 text-blue-600" />}
+        />
+        <SummaryCard
+          label="In progress on page"
+          value={activeOnPage}
+          icon={<Loader2 aria-hidden="true" className="h-4 w-4 text-amber-600" />}
+        />
+        <SummaryCard
+          label="Findings on page"
+          value={findingsOnPage}
+          icon={<AlertTriangle aria-hidden="true" className="h-4 w-4 text-orange-600" />}
+        />
+        <SummaryCard
+          label="Critical/high open"
+          value={urgentOnPage}
+          highlight={urgentOnPage > 0}
+          icon={<AlertTriangle aria-hidden="true" className="h-4 w-4 text-red-600" />}
         />
       </div>
 
-      {/* Search */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search audits..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            className="pl-10"
-          />
-        </div>
-      </div>
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base">Find audits</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form
+            role="search"
+            className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_12rem_12rem_auto]"
+            onSubmit={applySearch}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="audit-search">Reference or title</Label>
+              <div className="relative">
+                <Search
+                  aria-hidden="true"
+                  className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  id="audit-search"
+                  maxLength={200}
+                  className="pl-9"
+                  value={searchDraft}
+                  onChange={(event) => setSearchDraft(event.target.value)}
+                  placeholder="Search up to 200 characters"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="audit-status-filter">Status</Label>
+              <Select
+                value={status}
+                onValueChange={(value) => {
+                  setStatus(value as AuditStatus | 'all');
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger id="audit-status-filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  {(['planned', 'in_progress', 'completed', 'closed', 'cancelled'] as const).map(
+                    (value) => (
+                      <SelectItem key={value} value={value}>
+                        {humanizeAuditToken(value)}
+                      </SelectItem>
+                    ),
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="audit-type-filter">Type</Label>
+              <Select
+                value={auditType}
+                onValueChange={(value) => {
+                  setAuditType(value as AuditType | 'all');
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger id="audit-type-filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All types</SelectItem>
+                  {(['internal', 'external', 'certification'] as const).map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {humanizeAuditToken(value)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end gap-2">
+              <Button type="submit">Search</Button>
+              {filtersActive && (
+                <Button type="button" variant="outline" onClick={resetFilters}>
+                  <FilterX aria-hidden="true" className="mr-2 h-4 w-4" />
+                  Reset
+                </Button>
+              )}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
 
-      {/* Table */}
       <Card>
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
+          {auditsQuery.isLoading ? (
+            <div role="status" aria-label="Loading audits" className="space-y-3 p-6">
+              {Array.from({ length: 5 }, (_, index) => (
+                <Skeleton key={index} className="h-12 w-full" />
               ))}
             </div>
-          ) : isError ? (
-            <div className="p-6 text-center text-destructive">
-              Failed to load audits: {(error as Error)?.message ?? 'Unknown error'}
+          ) : auditsQuery.isError ? (
+            <div role="alert" className="flex flex-col items-center gap-3 p-10 text-center">
+              <AlertTriangle aria-hidden="true" className="h-9 w-9 text-destructive" />
+              <p className="font-semibold">Audits could not be loaded</p>
+              <p className="max-w-xl text-sm text-muted-foreground">
+                The service did not return the audit list. Retry without losing your filters.
+              </p>
+              <Button variant="outline" onClick={() => void auditsQuery.refetch()}>
+                Retry
+              </Button>
             </div>
           ) : audits.length === 0 ? (
-            <div className="p-12 text-center text-muted-foreground">
-              <ClipboardCheck className="mx-auto mb-3 h-10 w-10" />
-              <p className="text-lg font-medium">No audits found</p>
-              <p className="text-sm">Create your first audit to get started.</p>
+            <div className="flex flex-col items-center gap-3 p-12 text-center">
+              <ClipboardCheck aria-hidden="true" className="h-10 w-10 text-muted-foreground" />
+              <p className="text-lg font-semibold">
+                {filtersActive ? 'No audits match these filters' : 'No audits have been planned'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {filtersActive
+                  ? 'Adjust or clear the filters to broaden the results.'
+                  : 'Create an audit plan to begin an assurance engagement.'}
+              </p>
+              {filtersActive ? (
+                <Button variant="outline" onClick={resetFilters}>
+                  Clear filters
+                </Button>
+              ) : access.canCreate ? (
+                <Button onClick={() => setCreateOpen(true)}>Plan first audit</Button>
+              ) : null}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="px-4 py-3 text-left font-medium">Ref</th>
-                    <th className="px-4 py-3 text-left font-medium">Title</th>
-                    <th className="px-4 py-3 text-left font-medium">Type</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-left font-medium">Lead Auditor</th>
-                    <th className="px-4 py-3 text-left font-medium">Start Date</th>
-                    <th className="px-4 py-3 text-left font-medium">End Date</th>
-                    <th className="px-4 py-3 text-left font-medium">Findings</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {audits.map((audit) => (
-                    <tr
-                      key={audit.id as string}
-                      className="border-b transition-colors hover:bg-muted/50"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                        {audit.audit_ref as string}
-                      </td>
-                      <td className="px-4 py-3 font-medium">
-                        <Link
-                          href={`/audits/${audit.id}`}
-                          className="text-primary hover:underline"
-                        >
-                          {audit.title as string}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge className={auditTypeBadge(audit.audit_type as string)}>
-                          {(audit.audit_type as string)?.replace('_', ' ')}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge className={getStatusColor(audit.status as string)}>
-                          {(audit.status as string)?.replace('_', ' ')}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        {(audit.lead_auditor as Record<string, string>)?.first_name}{' '}
-                        {(audit.lead_auditor as Record<string, string>)?.last_name ?? (audit.lead_auditor_id as string)?.slice(0, 8)}
-                      </td>
-                      <td className="px-4 py-3">{formatDate(audit.scheduled_start_date as string)}</td>
-                      <td className="px-4 py-3">{formatDate(audit.scheduled_end_date as string)}</td>
-                      <td className="px-4 py-3">
-                        <span className="font-medium">{(audit.findings_count as number) ?? 0}</span>
-                        {((audit.critical_findings_open as number) ?? 0) > 0 && (
-                          <span className="ml-1 text-red-600 font-semibold">
-                            / {audit.critical_findings_open as number} critical
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Pagination */}
-          {totalPages > 1 && (
             <>
-              <div className="border-t" />
-              <div className="flex items-center justify-between px-4 py-3">
-                <p className="text-sm text-muted-foreground">
-                  Showing page {page} of {totalPages} ({total} total)
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => p - 1)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => p + 1)}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full text-sm">
+                  <caption className="sr-only">Audits matching the active filters</caption>
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th scope="col" className="px-4 py-3 text-left font-medium">
+                        Audit
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">
+                        Type
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">
+                        Status
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">
+                        Lead auditor
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">
+                        Schedule
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left font-medium">
+                        Findings
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-right font-medium">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {audits.map((audit) => (
+                      <tr key={audit.id} className="border-b last:border-0 hover:bg-muted/30">
+                        <td className="px-4 py-3">
+                          <Link
+                            href={`/audits/${audit.id}`}
+                            className="font-medium text-primary hover:underline"
+                          >
+                            {audit.title}
+                          </Link>
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {audit.audit_ref}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge className={AUDIT_TYPE_STYLES[audit.audit_type]}>
+                            {humanizeAuditToken(audit.audit_type)}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge className={getStatusColor(audit.status)}>
+                            {humanizeAuditToken(audit.status)}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          {auditPersonName(audit.lead_auditor, audit.lead_auditor_id)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          {formatDate(audit.scheduled_start_date)} –{' '}
+                          {formatDate(audit.scheduled_end_date)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={cn(
+                              audit.critical_findings_open + audit.high_findings_open > 0 &&
+                                'font-semibold text-destructive',
+                            )}
+                          >
+                            {audit.findings_count} total ·{' '}
+                            {audit.critical_findings_open + audit.high_findings_open} critical/high
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <AuditActions
+                            audit={audit}
+                            canUpdate={access.canUpdate}
+                            canDelete={access.canDelete}
+                            onEdit={setEditingAudit}
+                            onDelete={setDeletingAudit}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="divide-y md:hidden">
+                {audits.map((audit) => (
+                  <article key={audit.id} className="space-y-3 p-4">
+                    <div className="flex flex-wrap gap-2">
+                      <Badge className={getStatusColor(audit.status)}>
+                        {humanizeAuditToken(audit.status)}
+                      </Badge>
+                      <Badge className={AUDIT_TYPE_STYLES[audit.audit_type]}>
+                        {humanizeAuditToken(audit.audit_type)}
+                      </Badge>
+                    </div>
+                    <div>
+                      <Link
+                        href={`/audits/${audit.id}`}
+                        className="font-semibold text-primary hover:underline"
+                      >
+                        {audit.title}
+                      </Link>
+                      <p className="font-mono text-xs text-muted-foreground">{audit.audit_ref}</p>
+                    </div>
+                    <dl className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <dt className="text-muted-foreground">Lead</dt>
+                        <dd>{auditPersonName(audit.lead_auditor, audit.lead_auditor_id)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Findings</dt>
+                        <dd>{audit.findings_count} total</dd>
+                      </div>
+                      <div className="col-span-2">
+                        <dt className="text-muted-foreground">Scheduled</dt>
+                        <dd>
+                          {formatDate(audit.scheduled_start_date)} –{' '}
+                          {formatDate(audit.scheduled_end_date)}
+                        </dd>
+                      </div>
+                    </dl>
+                    <AuditActions
+                      audit={audit}
+                      canUpdate={access.canUpdate}
+                      canDelete={access.canDelete}
+                      onEdit={setEditingAudit}
+                      onDelete={setDeletingAudit}
+                    />
+                  </article>
+                ))}
               </div>
             </>
+          )}
+
+          {data && data.total > 0 && (
+            <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                Page {page} of {totalPages} · {data.total} audit{data.total === 1 ? '' : 's'}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="audit-page-size" className="text-sm font-normal">
+                  Rows
+                </Label>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(value) => {
+                    setPageSize(Number(value));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger id="audit-page-size" className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZES.map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  aria-label="Previous audits page"
+                  disabled={page <= 1 || auditsQuery.isFetching}
+                  onClick={() => setPage((value) => value - 1)}
+                >
+                  <ChevronLeft aria-hidden="true" className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  aria-label="Next audits page"
+                  disabled={page >= totalPages || auditsQuery.isFetching}
+                  onClick={() => setPage((value) => value + 1)}
+                >
+                  <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Create Audit Sheet/Dialog */}
-      <CreateAuditSheet open={sheetOpen} onOpenChange={setSheetOpen} />
+      {access.canCreate && (
+        <AuditEditorDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          defaultLeadAuditorId={access.user.id}
+        />
+      )}
+      {access.canUpdate && editingAudit && (
+        <AuditEditorDialog
+          audit={editingAudit}
+          open={Boolean(editingAudit)}
+          onOpenChange={(open) => !open && setEditingAudit(null)}
+          defaultLeadAuditorId={access.user.id}
+        />
+      )}
+      {access.canDelete && deletingAudit && (
+        <AuditConfirmationDialog
+          open={Boolean(deletingAudit)}
+          onOpenChange={(open) => !open && setDeletingAudit(null)}
+          title="Delete audit plan?"
+          description={
+            <p>
+              This removes the audit plan from active records. Executed audits are retained by the
+              service and cannot be deleted.
+            </p>
+          }
+          confirmLabel="Delete audit"
+          confirmationText={deletingAudit.audit_ref}
+          destructive
+          onConfirm={() => deleteAudit.mutateAsync(deletingAudit.id)}
+        />
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Summary card component
-// ---------------------------------------------------------------------------
+function AuditActions({
+  audit,
+  canUpdate,
+  canDelete,
+  onEdit,
+  onDelete,
+}: {
+  audit: Audit;
+  canUpdate: boolean;
+  canDelete: boolean;
+  onEdit: (audit: Audit) => void;
+  onDelete: (audit: Audit) => void;
+}) {
+  const editable = !['closed', 'cancelled'].includes(audit.status);
+  const deletable = ['planned', 'cancelled'].includes(audit.status);
+  return (
+    <div className="flex justify-end gap-1">
+      <Button asChild size="sm" variant="outline">
+        <Link href={`/audits/${audit.id}`}>Open</Link>
+      </Button>
+      {canUpdate && editable && (
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={`Edit ${audit.audit_ref}`}
+          onClick={() => onEdit(audit)}
+        >
+          <Pencil aria-hidden="true" className="h-4 w-4" />
+        </Button>
+      )}
+      {canDelete && deletable && (
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={`Delete ${audit.audit_ref}`}
+          className="text-destructive hover:text-destructive"
+          onClick={() => onDelete(audit)}
+        >
+          <Trash2 aria-hidden="true" className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  );
+}
 
 function SummaryCard({
   label,
   value,
   icon,
-  highlight,
+  highlight = false,
 }: {
   label: string;
   value: number;
@@ -295,196 +577,56 @@ function SummaryCard({
   highlight?: boolean;
 }) {
   return (
-    <Card className={cn(highlight && 'border-red-300 dark:border-red-700')}>
+    <Card className={cn(highlight && 'border-destructive/50')}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium">{label}</CardTitle>
         {icon}
       </CardHeader>
       <CardContent>
-        <div className={cn('text-2xl font-bold', highlight && 'text-red-600 dark:text-red-400')}>
-          {value}
-        </div>
+        <div className={cn('text-2xl font-bold', highlight && 'text-destructive')}>{value}</div>
       </CardContent>
     </Card>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Create Audit Sheet (Dialog acting as side-sheet)
-// ---------------------------------------------------------------------------
-
-function CreateAuditSheet({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
-  const createAudit = useCreateAudit();
-  const { data: usersData } = useUsers({ page: 1, page_size: 100 } as Record<string, unknown>);
-  const { data: frameworksData } = useFrameworks({ page: 1, page_size: 100 });
-
-  const users: Record<string, unknown>[] =
-    (usersData as Record<string, unknown>)?.items as Record<string, unknown>[] ?? [];
-  const frameworks: Record<string, unknown>[] =
-    (frameworksData as Record<string, unknown>)?.items as Record<string, unknown>[] ?? [];
-
-  const form = useForm<CreateAuditValues>({
-    resolver: zodResolver(createAuditSchema),
-    defaultValues: {
-      title: '',
-      description: '',
-      audit_type: undefined,
-      lead_auditor_id: '',
-      scope: '',
-      scheduled_start_date: '',
-      scheduled_end_date: '',
-      framework_id: '',
-    },
-  });
-
-  const onSubmit = async (values: CreateAuditValues) => {
-    const payload = {
-      ...values,
-      framework_id: values.framework_id || undefined,
-    };
-    await createAudit.mutateAsync(payload);
-    form.reset();
-    onOpenChange(false);
-  };
-
+function AuditListSkeleton({ label }: { label: string }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Plan New Audit</DialogTitle>
-          <DialogDescription>
-            Fill in the details to schedule a new audit.
-          </DialogDescription>
-        </DialogHeader>
+    <div role="status" aria-label={label} className="space-y-5">
+      <Skeleton className="h-20 w-full" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <Skeleton key={index} className="h-28" />
+        ))}
+      </div>
+      <Skeleton className="h-80 w-full" />
+    </div>
+  );
+}
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          {/* Title */}
-          <div className="space-y-2">
-            <Label htmlFor="title">Title *</Label>
-            <Input id="title" {...form.register('title')} placeholder="e.g. ISO 27001 Annual Audit 2026" />
-            {form.formState.errors.title && (
-              <p className="text-sm text-destructive">{form.formState.errors.title.message}</p>
-            )}
-          </div>
-
-          {/* Description */}
-          <div className="space-y-2">
-            <Label htmlFor="description">Description *</Label>
-            <Textarea id="description" {...form.register('description')} placeholder="Describe the audit objectives..." rows={3} />
-            {form.formState.errors.description && (
-              <p className="text-sm text-destructive">{form.formState.errors.description.message}</p>
-            )}
-          </div>
-
-          {/* Audit Type */}
-          <div className="space-y-2">
-            <Label>Audit Type *</Label>
-            <Select
-              value={form.watch('audit_type')}
-              onValueChange={(v) => form.setValue('audit_type', v as CreateAuditValues['audit_type'], { shouldValidate: true })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select audit type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="internal">Internal</SelectItem>
-                <SelectItem value="external">External</SelectItem>
-                <SelectItem value="certification">Certification</SelectItem>
-              </SelectContent>
-            </Select>
-            {form.formState.errors.audit_type && (
-              <p className="text-sm text-destructive">{form.formState.errors.audit_type.message}</p>
-            )}
-          </div>
-
-          {/* Lead Auditor */}
-          <div className="space-y-2">
-            <Label>Lead Auditor *</Label>
-            <Select
-              value={form.watch('lead_auditor_id')}
-              onValueChange={(v) => form.setValue('lead_auditor_id', v, { shouldValidate: true })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select lead auditor" />
-              </SelectTrigger>
-              <SelectContent>
-                {users.map((u) => (
-                  <SelectItem key={u.id as string} value={u.id as string}>
-                    {u.first_name as string} {u.last_name as string}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {form.formState.errors.lead_auditor_id && (
-              <p className="text-sm text-destructive">{form.formState.errors.lead_auditor_id.message}</p>
-            )}
-          </div>
-
-          {/* Scope */}
-          <div className="space-y-2">
-            <Label htmlFor="scope">Scope *</Label>
-            <Textarea id="scope" {...form.register('scope')} placeholder="Define the audit scope..." rows={3} />
-            {form.formState.errors.scope && (
-              <p className="text-sm text-destructive">{form.formState.errors.scope.message}</p>
-            )}
-          </div>
-
-          {/* Dates */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="scheduled_start_date">Start Date *</Label>
-              <Input id="scheduled_start_date" type="date" {...form.register('scheduled_start_date')} />
-              {form.formState.errors.scheduled_start_date && (
-                <p className="text-sm text-destructive">{form.formState.errors.scheduled_start_date.message}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="scheduled_end_date">End Date *</Label>
-              <Input id="scheduled_end_date" type="date" {...form.register('scheduled_end_date')} />
-              {form.formState.errors.scheduled_end_date && (
-                <p className="text-sm text-destructive">{form.formState.errors.scheduled_end_date.message}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Framework (optional) */}
-          <div className="space-y-2">
-            <Label>Framework (optional)</Label>
-            <Select
-              value={form.watch('framework_id') ?? ''}
-              onValueChange={(v) => form.setValue('framework_id', v === '__none__' ? '' : v)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select framework" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">None</SelectItem>
-                {frameworks.map((fw) => (
-                  <SelectItem key={fw.id as string} value={fw.id as string}>
-                    {fw.name as string}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={createAudit.isPending}>
-              {createAudit.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create Audit
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+function StateCard({
+  icon,
+  title,
+  description,
+  action,
+  alert = false,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  action?: React.ReactNode;
+  alert?: boolean;
+}) {
+  return (
+    <Card className="mx-auto max-w-xl">
+      <CardContent
+        role={alert ? 'alert' : undefined}
+        className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground"
+      >
+        {icon}
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+        <p className="text-sm">{description}</p>
+        {action}
+      </CardContent>
+    </Card>
   );
 }

@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -210,7 +212,11 @@ func (h *OnboardingHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Reason string `json:"reason"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
 
 	if err := h.svc.CancelSubscription(r.Context(), orgID, body.Reason); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to cancel subscription", err.Error())

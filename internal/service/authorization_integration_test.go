@@ -74,6 +74,15 @@ func TestRBACAuthorizerWithNonSuperuserTenantContext(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO role_permissions (role_id,permission_id) VALUES ($1,$3),($2,$3)`, roleA, roleB, permissionID); err != nil {
 		t.Fatal(err)
 	}
+	superOnlyResource := "authz_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	var superOnlyPermissionID string
+	if err := pool.QueryRow(ctx, `INSERT INTO permissions (resource,action,description)
+		VALUES ($1,'read','Authorization super-admin catalogue test') RETURNING id`, superOnlyResource).Scan(&superOnlyPermissionID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM permissions WHERE id=$1`, superOnlyPermissionID)
+	}()
 	if _, err := pool.Exec(ctx, `INSERT INTO user_roles (user_id,role_id,organization_id) VALUES ($1,$2,$3),($4,$5,$6)`, userA, roleA, orgA, userB, roleB, orgB); err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +130,35 @@ func TestRBACAuthorizerWithNonSuperuserTenantContext(t *testing.T) {
 	}
 	if decision := authorize(orgA, superUser, orgA, "controls", "delete"); !decision.Allowed {
 		t.Fatalf("super-admin override denied: %#v", decision)
+	}
+
+	listPermissions := func(tenantID, subjectID, requestOrg string) map[string][]string {
+		t.Helper()
+		if _, err := connection.Exec(ctx, `SELECT set_config('app.current_tenant',$1,false)`, tenantID); err != nil {
+			t.Fatal(err)
+		}
+		permissions, err := authorizer.GetUserPermissions(database.WithQuerier(ctx, connection), requestOrg, subjectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return permissions
+	}
+	contains := func(values []string, wanted string) bool {
+		for _, value := range values {
+			if value == wanted {
+				return true
+			}
+		}
+		return false
+	}
+	if permissions := listPermissions(orgA, userA, orgA); !contains(permissions["controls"], "read") || contains(permissions[superOnlyResource], "read") {
+		t.Fatalf("tenant A effective permissions = %#v", permissions)
+	}
+	if permissions := listPermissions(orgA, userB, orgB); len(permissions) != 0 {
+		t.Fatalf("cross-tenant effective permissions escaped RLS: %#v", permissions)
+	}
+	if permissions := listPermissions(orgA, superUser, orgA); !contains(permissions[superOnlyResource], "read") {
+		t.Fatalf("super-admin permission catalogue missing unassigned grant: %#v", permissions)
 	}
 
 	if _, err := connection.Exec(ctx, `SELECT set_config('app.current_tenant','',false)`); err != nil {

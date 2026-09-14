@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,54 +19,54 @@ import (
 
 // EvidenceTemplate defines the evidence expected for a given control.
 type EvidenceTemplate struct {
-	ID                string                 `json:"id"`
-	OrgID             string                 `json:"organization_id"`
-	Name              string                 `json:"name"`
-	Description       string                 `json:"description"`
-	ControlCode       string                 `json:"control_code"`
-	FrameworkCode     string                 `json:"framework_code"`
-	EvidenceType      string                 `json:"evidence_type"` // document, screenshot, log, report, certificate, attestation
-	CollectionFreq    string                 `json:"collection_frequency"` // daily, weekly, monthly, quarterly, annually, on_demand
-	RetentionDays     int                    `json:"retention_days"`
-	ValidationRules   []ValidationRule       `json:"validation_rules"`
-	RequiredFields    map[string]interface{} `json:"required_fields"`
-	IsSystem          bool                   `json:"is_system"`
-	CreatedAt         string                 `json:"created_at"`
+	ID              string                 `json:"id"`
+	OrgID           string                 `json:"organization_id"`
+	Name            string                 `json:"name"`
+	Description     string                 `json:"description"`
+	ControlCode     string                 `json:"control_code"`
+	FrameworkCode   string                 `json:"framework_code"`
+	EvidenceType    string                 `json:"evidence_type"`        // document, screenshot, log, report, certificate, attestation
+	CollectionFreq  string                 `json:"collection_frequency"` // daily, weekly, monthly, quarterly, annually, on_demand
+	RetentionDays   int                    `json:"retention_days"`
+	ValidationRules []ValidationRule       `json:"validation_rules"`
+	RequiredFields  map[string]interface{} `json:"required_fields"`
+	IsSystem        bool                   `json:"is_system"`
+	CreatedAt       string                 `json:"created_at"`
 }
 
 // ValidationRule defines a single validation check applied to evidence.
 type ValidationRule struct {
-	RuleType  string `json:"rule_type"`  // file_not_empty, date_within, contains_text, file_type, file_size
-	Parameter string `json:"parameter"`  // e.g., "90" for days, "pdf,docx" for types, "1048576" for bytes
+	RuleType  string `json:"rule_type"` // file_not_empty, date_within, contains_text, file_type, file_size
+	Parameter string `json:"parameter"` // e.g., "90" for days, "pdf,docx" for types, "1048576" for bytes
 	Message   string `json:"message"`
 }
 
 // EvidenceRequirement is a specific evidence need generated from a template.
 type EvidenceRequirement struct {
-	ID                  string  `json:"id"`
-	OrgID               string  `json:"organization_id"`
-	TemplateID          string  `json:"template_id"`
-	ControlImplID       string  `json:"control_implementation_id"`
-	FrameworkID         string  `json:"framework_id"`
-	Title               string  `json:"title"`
-	Description         string  `json:"description"`
-	EvidenceType        string  `json:"evidence_type"`
-	Status              string  `json:"status"` // pending, collected, validated, failed, expired
-	CollectionFreq      string  `json:"collection_frequency"`
-	DueDate             *string `json:"due_date"`
-	LastCollectedAt     *string `json:"last_collected_at"`
-	NextCollectionDate  *string `json:"next_collection_date"`
-	AssignedTo          *string `json:"assigned_to"`
-	CreatedAt           string  `json:"created_at"`
+	ID                 string  `json:"id"`
+	OrgID              string  `json:"organization_id"`
+	TemplateID         string  `json:"template_id"`
+	ControlImplID      string  `json:"control_implementation_id"`
+	FrameworkID        string  `json:"framework_id"`
+	Title              string  `json:"title"`
+	Description        string  `json:"description"`
+	EvidenceType       string  `json:"evidence_type"`
+	Status             string  `json:"status"` // pending, collected, validated, failed, expired
+	CollectionFreq     string  `json:"collection_frequency"`
+	DueDate            *string `json:"due_date"`
+	LastCollectedAt    *string `json:"last_collected_at"`
+	NextCollectionDate *string `json:"next_collection_date"`
+	AssignedTo         *string `json:"assigned_to"`
+	CreatedAt          string  `json:"created_at"`
 }
 
 // EvidenceValidationResult holds the result of validating a piece of evidence.
 type EvidenceValidationResult struct {
-	EvidenceID    string             `json:"evidence_id"`
-	RequirementID string            `json:"requirement_id"`
-	IsValid       bool              `json:"is_valid"`
-	RuleResults   []RuleResult      `json:"rule_results"`
-	ValidatedAt   string            `json:"validated_at"`
+	EvidenceID    string       `json:"evidence_id"`
+	RequirementID string       `json:"requirement_id"`
+	IsValid       bool         `json:"is_valid"`
+	RuleResults   []RuleResult `json:"rule_results"`
+	ValidatedAt   string       `json:"validated_at"`
 }
 
 // RuleResult is the outcome of a single validation rule.
@@ -88,14 +89,14 @@ type EvidenceGap struct {
 
 // CollectionTask represents an upcoming evidence collection task.
 type CollectionTask struct {
-	RequirementID   string  `json:"requirement_id"`
-	Title           string  `json:"title"`
-	ControlCode     string  `json:"control_code"`
-	EvidenceType    string  `json:"evidence_type"`
-	DueDate         string  `json:"due_date"`
-	AssignedTo      *string `json:"assigned_to"`
-	DaysUntilDue    int     `json:"days_until_due"`
-	Priority        string  `json:"priority"`
+	RequirementID string  `json:"requirement_id"`
+	Title         string  `json:"title"`
+	ControlCode   string  `json:"control_code"`
+	EvidenceType  string  `json:"evidence_type"`
+	DueDate       string  `json:"due_date"`
+	AssignedTo    *string `json:"assigned_to"`
+	DaysUntilDue  int     `json:"days_until_due"`
+	Priority      string  `json:"priority"`
 }
 
 // TestSuite groups related evidence test cases.
@@ -112,29 +113,29 @@ type TestSuite struct {
 
 // TestCase is a single evidence validation test.
 type TestCase struct {
-	ID            string `json:"id"`
-	SuiteID       string `json:"suite_id"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	RequirementID string `json:"requirement_id"`
-	TestType      string `json:"test_type"` // existence, completeness, accuracy, timeliness
+	ID             string `json:"id"`
+	SuiteID        string `json:"suite_id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	RequirementID  string `json:"requirement_id"`
+	TestType       string `json:"test_type"` // existence, completeness, accuracy, timeliness
 	ExpectedResult string `json:"expected_result"`
-	SortOrder     int    `json:"sort_order"`
+	SortOrder      int    `json:"sort_order"`
 }
 
 // TestSuiteRun represents a completed test suite execution.
 type TestSuiteRun struct {
-	ID           string           `json:"id"`
-	SuiteID      string           `json:"suite_id"`
-	Status       string           `json:"status"` // running, passed, failed, error
-	TotalTests   int              `json:"total_tests"`
-	Passed       int              `json:"passed"`
-	Failed       int              `json:"failed"`
-	Errors       int              `json:"errors"`
-	Results      []TestCaseResult `json:"results"`
-	TriggeredBy  string           `json:"triggered_by"`
-	StartedAt    string           `json:"started_at"`
-	CompletedAt  *string          `json:"completed_at"`
+	ID          string           `json:"id"`
+	SuiteID     string           `json:"suite_id"`
+	Status      string           `json:"status"` // running, passed, failed, error
+	TotalTests  int              `json:"total_tests"`
+	Passed      int              `json:"passed"`
+	Failed      int              `json:"failed"`
+	Errors      int              `json:"errors"`
+	Results     []TestCaseResult `json:"results"`
+	TriggeredBy string           `json:"triggered_by"`
+	StartedAt   string           `json:"started_at"`
+	CompletedAt *string          `json:"completed_at"`
 }
 
 // TestCaseResult is the outcome of a single test case execution.
@@ -148,30 +149,30 @@ type TestCaseResult struct {
 
 // PreAuditCheck is a comprehensive pre-audit verification result.
 type PreAuditCheck struct {
-	FrameworkID      string            `json:"framework_id"`
-	FrameworkName    string            `json:"framework_name"`
-	OverallStatus    string            `json:"overall_status"` // ready, needs_attention, not_ready
-	TotalControls    int               `json:"total_controls"`
+	FrameworkID          string        `json:"framework_id"`
+	FrameworkName        string        `json:"framework_name"`
+	OverallStatus        string        `json:"overall_status"` // ready, needs_attention, not_ready
+	TotalControls        int           `json:"total_controls"`
 	ControlsWithEvidence int           `json:"controls_with_evidence"`
-	ControlsMissing  int               `json:"controls_missing_evidence"`
-	ExpiredEvidence  int               `json:"expired_evidence"`
-	FailedValidation int               `json:"failed_validation"`
-	ReadinessScore   float64           `json:"readiness_score"`
-	Gaps             []EvidenceGap     `json:"gaps"`
-	Recommendations  []string          `json:"recommendations"`
+	ControlsMissing      int           `json:"controls_missing_evidence"`
+	ExpiredEvidence      int           `json:"expired_evidence"`
+	FailedValidation     int           `json:"failed_validation"`
+	ReadinessScore       float64       `json:"readiness_score"`
+	Gaps                 []EvidenceGap `json:"gaps"`
+	Recommendations      []string      `json:"recommendations"`
 }
 
 // CreateEvidenceTemplateRequest holds input for creating a template.
 type CreateEvidenceTemplateRequest struct {
-	Name             string                 `json:"name"`
-	Description      string                 `json:"description"`
-	ControlCode      string                 `json:"control_code"`
-	FrameworkCode    string                 `json:"framework_code"`
-	EvidenceType     string                 `json:"evidence_type"`
-	CollectionFreq   string                 `json:"collection_frequency"`
-	RetentionDays    int                    `json:"retention_days"`
-	ValidationRules  []ValidationRule       `json:"validation_rules"`
-	RequiredFields   map[string]interface{} `json:"required_fields"`
+	Name            string                 `json:"name"`
+	Description     string                 `json:"description"`
+	ControlCode     string                 `json:"control_code"`
+	FrameworkCode   string                 `json:"framework_code"`
+	EvidenceType    string                 `json:"evidence_type"`
+	CollectionFreq  string                 `json:"collection_frequency"`
+	RetentionDays   int                    `json:"retention_days"`
+	ValidationRules []ValidationRule       `json:"validation_rules"`
+	RequiredFields  map[string]interface{} `json:"required_fields"`
 }
 
 // CreateTestSuiteRequest holds input for creating a test suite.
@@ -333,7 +334,15 @@ func (s *EvidenceTemplateService) ValidateEvidence(ctx context.Context, orgID, r
 
 		case "date_within":
 			days := 90
-			fmt.Sscanf(rule.Parameter, "%d", &days)
+			if rule.Parameter != "" {
+				parsedDays, parseErr := strconv.Atoi(rule.Parameter)
+				if parseErr != nil || parsedDays < 1 || parsedDays > 36500 {
+					rr.Passed = false
+					rr.Message = "Validation rule has an invalid date window"
+					break
+				}
+				days = parsedDays
+			}
 			cutoff := time.Now().AddDate(0, 0, -days)
 			if collectedAt.Before(cutoff) {
 				rr.Passed = false
@@ -367,8 +376,12 @@ func (s *EvidenceTemplateService) ValidateEvidence(ctx context.Context, orgID, r
 			}
 
 		case "file_size":
-			var maxBytes int64
-			fmt.Sscanf(rule.Parameter, "%d", &maxBytes)
+			maxBytes, parseErr := strconv.ParseInt(rule.Parameter, 10, 64)
+			if parseErr != nil || maxBytes < 1 || maxBytes > 1<<50 {
+				rr.Passed = false
+				rr.Message = "Validation rule has an invalid file-size limit"
+				break
+			}
 			if fileSizeBytes > maxBytes {
 				rr.Passed = false
 				rr.Message = fmt.Sprintf("File size %d exceeds maximum %d bytes", fileSizeBytes, maxBytes)

@@ -94,6 +94,18 @@ export default function OnboardPage() {
     },
   });
 
+  function getStepData(step: number): any {
+    switch (step) {
+      case 0: return orgProfile;
+      case 1: return { answers: industryAnswers };
+      case 2: return { frameworks: selectedFrameworks };
+      case 3: return { invites: teamInvites };
+      case 4: return { risk_appetite: riskAppetite, matrix_size: matrixSize };
+      case 5: return { control_statuses: controlStatuses };
+      default: return {};
+    }
+  }
+
   // Navigation
   const goNext = useCallback(() => {
     const stepData = getStepData(currentStep);
@@ -107,18 +119,6 @@ export default function OnboardPage() {
     skipStep.mutate(currentStep + 1);
     setCurrentStep((s) => Math.min(s + 1, STEPS.length - 1));
   };
-
-  function getStepData(step: number): any {
-    switch (step) {
-      case 0: return orgProfile;
-      case 1: return { answers: industryAnswers };
-      case 2: return { frameworks: selectedFrameworks };
-      case 3: return { invites: teamInvites };
-      case 4: return { risk_appetite: riskAppetite, matrix_size: matrixSize };
-      case 5: return { control_statuses: controlStatuses };
-      default: return {};
-    }
-  }
 
   function handleLaunch() {
     setLaunching(true);

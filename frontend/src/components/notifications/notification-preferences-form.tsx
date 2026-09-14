@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, Clock3, Loader2, Mail, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
@@ -20,7 +20,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 
@@ -63,9 +69,7 @@ function toDraft(preference: NotificationPreference): PreferenceDraft {
 
 export function NotificationPreferencesForm() {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<PreferenceDraft>(() =>
-    toDraft(DEFAULT_NOTIFICATION_PREFERENCE)
-  );
+  const [draftOverride, setDraftOverride] = useState<PreferenceDraft | null>(null);
   const [validationError, setValidationError] = useState('');
 
   const preferenceQuery = useQuery({
@@ -74,16 +78,19 @@ export function NotificationPreferencesForm() {
     staleTime: 60_000,
   });
 
-  useEffect(() => {
-    if (preferenceQuery.data?.data) setDraft(toDraft(preferenceQuery.data.data));
-  }, [preferenceQuery.data]);
+  const serverDraft = toDraft(preferenceQuery.data?.data ?? DEFAULT_NOTIFICATION_PREFERENCE);
+  const draft = draftOverride ?? serverDraft;
+
+  function updateDraft(update: (current: PreferenceDraft) => PreferenceDraft) {
+    setDraftOverride((current) => update(current ?? serverDraft));
+  }
 
   const updateMutation = useMutation({
     mutationFn: (input: UpdateNotificationPreferenceInput) =>
       api.notifications.updatePreferences(input),
     onSuccess: (response) => {
       queryClient.setQueryData(['notifications', 'preferences'], response);
-      setDraft(toDraft(response.data));
+      setDraftOverride(toDraft(response.data));
       toast.success('Notification preferences saved');
     },
     onError: (error) => {
@@ -134,7 +141,9 @@ export function NotificationPreferencesForm() {
     return (
       <Card>
         <CardContent className="space-y-4 py-8 text-center">
-          <p role="alert">{formatApiError(preferenceQuery.error, 'Notification preferences could not be loaded.')}</p>
+          <p role="alert">
+            {formatApiError(preferenceQuery.error, 'Notification preferences could not be loaded.')}
+          </p>
           <Button type="button" variant="outline" onClick={() => void preferenceQuery.refetch()}>
             Try again
           </Button>
@@ -147,24 +156,35 @@ export function NotificationPreferencesForm() {
     <form onSubmit={submit} className="space-y-6">
       <fieldset className="grid gap-4 lg:grid-cols-3" disabled={updateMutation.isPending}>
         <legend className="sr-only">Delivery channels</legend>
-        {([
-          ['email_enabled', 'Email', 'Send messages to my email address.', Mail],
-          ['in_app_enabled', 'In app', 'Show messages in my notification center.', Bell],
-          ['slack_enabled', 'Slack', 'Send messages through a configured Slack channel.', MessageSquare],
-        ] as const).map(([field, title, description, Icon]) => (
+        {(
+          [
+            ['email_enabled', 'Email', 'Send messages to my email address.', Mail],
+            ['in_app_enabled', 'In app', 'Show messages in my notification center.', Bell],
+            [
+              'slack_enabled',
+              'Slack',
+              'Send messages through a configured Slack channel.',
+              MessageSquare,
+            ],
+          ] as const
+        ).map(([field, title, description, Icon]) => (
           <Card key={field}>
             <CardContent className="flex items-start justify-between gap-4 py-5">
               <div className="flex gap-3">
                 <Icon aria-hidden="true" className="mt-0.5 h-5 w-5 text-primary" />
                 <div>
-                  <Label htmlFor={field} className="font-medium">{title}</Label>
+                  <Label htmlFor={field} className="font-medium">
+                    {title}
+                  </Label>
                   <p className="mt-1 text-sm text-muted-foreground">{description}</p>
                 </div>
               </div>
               <Switch
                 id={field}
                 checked={draft[field]}
-                onCheckedChange={(checked) => setDraft((current) => ({ ...current, [field]: checked }))}
+                onCheckedChange={(checked) =>
+                  updateDraft((current) => ({ ...current, [field]: checked }))
+                }
                 aria-label={`${title} notifications`}
               />
             </CardContent>
@@ -185,11 +205,13 @@ export function NotificationPreferencesForm() {
             <Select
               value={draft.digest_frequency}
               onValueChange={(value: DigestFrequency) =>
-                setDraft((current) => ({ ...current, digest_frequency: value }))
+                updateDraft((current) => ({ ...current, digest_frequency: value }))
               }
               disabled={updateMutation.isPending}
             >
-              <SelectTrigger id="digest-frequency"><SelectValue /></SelectTrigger>
+              <SelectTrigger id="digest-frequency">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="immediate">Immediate</SelectItem>
                 <SelectItem value="hourly">Hourly digest</SelectItem>
@@ -202,7 +224,8 @@ export function NotificationPreferencesForm() {
           <div className="space-y-2 md:col-span-2">
             <p className="text-sm font-medium">Quiet hours</p>
             <p className="text-xs text-muted-foreground">
-              Leave both times empty if quiet hours have never been configured. The current API cannot clear an existing schedule once saved.
+              Leave both times empty if quiet hours have never been configured. The current API
+              cannot clear an existing schedule once saved.
             </p>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-2">
@@ -211,7 +234,12 @@ export function NotificationPreferencesForm() {
                   id="quiet-start"
                   type="time"
                   value={draft.quiet_hours_start ?? ''}
-                  onChange={(event) => setDraft((current) => ({ ...current, quiet_hours_start: event.target.value }))}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      quiet_hours_start: event.target.value,
+                    }))
+                  }
                   disabled={updateMutation.isPending}
                 />
               </div>
@@ -221,7 +249,9 @@ export function NotificationPreferencesForm() {
                   id="quiet-end"
                   type="time"
                   value={draft.quiet_hours_end ?? ''}
-                  onChange={(event) => setDraft((current) => ({ ...current, quiet_hours_end: event.target.value }))}
+                  onChange={(event) =>
+                    updateDraft((current) => ({ ...current, quiet_hours_end: event.target.value }))
+                  }
                   disabled={updateMutation.isPending}
                 />
               </div>
@@ -231,24 +261,37 @@ export function NotificationPreferencesForm() {
                   id="quiet-timezone"
                   list="quiet-timezones"
                   value={draft.quiet_hours_timezone ?? ''}
-                  onChange={(event) => setDraft((current) => ({ ...current, quiet_hours_timezone: event.target.value }))}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      quiet_hours_timezone: event.target.value,
+                    }))
+                  }
                   placeholder="Europe/London"
                   autoComplete="off"
                   disabled={updateMutation.isPending}
                 />
                 <datalist id="quiet-timezones">
-                  {[localTimeZone(), ...TIMEZONE_SUGGESTIONS].filter((item, index, list) => list.indexOf(item) === index).map((timezone) => (
-                    <option key={timezone} value={timezone} />
-                  ))}
+                  {[localTimeZone(), ...TIMEZONE_SUGGESTIONS]
+                    .filter((item, index, list) => list.indexOf(item) === index)
+                    .map((timezone) => (
+                      <option key={timezone} value={timezone} />
+                    ))}
                 </datalist>
               </div>
             </div>
           </div>
 
-          {validationError && <p role="alert" className="text-sm text-destructive md:col-span-2">{validationError}</p>}
+          {validationError && (
+            <p role="alert" className="text-sm text-destructive md:col-span-2">
+              {validationError}
+            </p>
+          )}
           <div className="flex items-center justify-end md:col-span-2">
             <Button type="submit" disabled={updateMutation.isPending}>
-              {updateMutation.isPending && <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />}
+              {updateMutation.isPending && (
+                <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
+              )}
               Save preferences
             </Button>
           </div>

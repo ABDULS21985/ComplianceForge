@@ -16,7 +16,7 @@ func TestTopologyForCreatesBoundedRetryAndTerminalQueues(t *testing.T) {
 	if topology.RetryQueue != "complianceforge.worker.retry" || topology.DeadLetterQueue != "complianceforge.worker.dead" || topology.QuarantineQueue != "complianceforge.worker.quarantine" {
 		t.Fatalf("unexpected queue names: %+v", topology)
 	}
-	if topology.PrimaryArguments["x-queue-type"] != "quorum" || topology.PrimaryArguments["x-delivery-limit"] != int32(config.MaxAttempts+2) {
+	if topology.PrimaryArguments["x-queue-type"] != "quorum" || topology.PrimaryArguments["x-delivery-limit"] != int64(config.MaxAttempts)+2 {
 		t.Fatalf("primary durability arguments missing: %+v", topology.PrimaryArguments)
 	}
 	if topology.PrimaryArguments["x-dead-letter-exchange"] != config.DeadLetterExchange {

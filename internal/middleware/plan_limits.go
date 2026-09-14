@@ -24,9 +24,11 @@ func PlanLimits(pool *pgxpool.Pool, resource string) func(http.Handler) http.Han
 					Msg("plan limits check: missing organization context")
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				if err := json.NewEncoder(w).Encode(map[string]interface{}{
 					"error": "missing organization context",
-				})
+				}); err != nil {
+					log.Error().Err(err).Msg("write missing organization response")
+				}
 				return
 			}
 
@@ -81,13 +83,15 @@ func PlanLimits(pool *pgxpool.Pool, resource string) func(http.Handler) http.Han
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusPaymentRequired)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				if err := json.NewEncoder(w).Encode(map[string]interface{}{
 					"error":       "plan_limit_exceeded",
 					"resource":    resource,
 					"current":     currentCount,
 					"max":         maxAllowed,
 					"upgrade_url": "/subscription/plans",
-				})
+				}); err != nil {
+					log.Error().Err(err).Str("resource", resource).Msg("write plan limit response")
+				}
 				return
 			}
 

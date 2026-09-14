@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // QueueService preserves the simple byte-oriented API while RabbitMQService
@@ -30,6 +31,7 @@ type EnvelopeHandler func(context.Context, Envelope) error
 type RabbitMQService struct {
 	config       Config
 	deduplicator Deduplicator
+	observer     Observer
 
 	mu               sync.Mutex
 	connection       *amqp.Connection
@@ -58,7 +60,23 @@ func NewRabbitMQServiceWithConfig(config Config, deduplicator Deduplicator) (*Ra
 		}
 		deduplicator = memoryStore
 	}
-	return &RabbitMQService{config: config, deduplicator: deduplicator, publishGate: make(chan struct{}, 1)}, nil
+	return &RabbitMQService{config: config, deduplicator: deduplicator, observer: noopObserver{}, publishGate: make(chan struct{}, 1)}, nil
+}
+
+// SetObserver installs operational metrics before publishing or consuming.
+func (r *RabbitMQService) SetObserver(observer Observer) {
+	if observer == nil {
+		observer = noopObserver{}
+	}
+	r.mu.Lock()
+	r.observer = observer
+	r.mu.Unlock()
+}
+
+func (r *RabbitMQService) observerSnapshot() Observer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.observer
 }
 
 type legacyPayload struct {
@@ -89,12 +107,23 @@ func (r *RabbitMQService) Subscribe(ctx context.Context, queueName string, handl
 	})
 }
 
-func (r *RabbitMQService) PublishEnvelope(ctx context.Context, queueName string, envelope Envelope) error {
+func (r *RabbitMQService) PublishEnvelope(ctx context.Context, queueName string, envelope Envelope) (publishErr error) {
+	started := time.Now()
+	defer func() {
+		outcome := "success"
+		if publishErr != nil {
+			outcome = "error"
+		}
+		r.observerSnapshot().ObserveQueueOperation("publish", outcome, time.Since(started))
+	}()
 	topology, err := TopologyFor(queueName, r.config)
 	if err != nil {
 		return err
 	}
 	envelope = envelope.normalized()
+	ctx, span := startQueueSpan(ctx, envelope, "publish", trace.SpanKindProducer)
+	defer func() { finishQueueSpan(span, publishErr) }()
+	envelope = InjectTraceContext(ctx, envelope)
 	if err := envelope.Validate(); err != nil {
 		return fmt.Errorf("validate queue envelope: %w", err)
 	}
@@ -139,6 +168,7 @@ func (r *RabbitMQService) SubscribeEnvelope(ctx context.Context, queueName strin
 			backoff = r.config.ReconnectMin
 		}
 		log.Warn().Err(err).Str("queue", queueName).Dur("retry_in", backoff).Msg("queue consumer disconnected; reconnecting")
+		r.observerSnapshot().ObserveQueueReconnect("consumer")
 		if err := waitForContext(ctx, backoff); err != nil {
 			return nil
 		}
@@ -191,8 +221,14 @@ func (r *RabbitMQService) consumeOnce(ctx context.Context, topology Topology, ha
 	}
 }
 
-func (r *RabbitMQService) processDelivery(ctx context.Context, topology Topology, delivery amqp.Delivery, handler EnvelopeHandler) error {
+func (r *RabbitMQService) processDelivery(ctx context.Context, topology Topology, delivery amqp.Delivery, handler EnvelopeHandler) (processErr error) {
+	started := time.Now()
+	outcome := "error"
+	defer func() {
+		r.observerSnapshot().ObserveQueueOperation("consume", outcome, time.Since(started))
+	}()
 	if len(delivery.Body) > r.config.MaxMessageBytes {
+		outcome = "quarantine"
 		return r.quarantineDelivery(ctx, topology, delivery, fmt.Errorf("message exceeds %d-byte limit", r.config.MaxMessageBytes))
 	}
 	envelope, err := decodeEnvelope(delivery.Body)
@@ -203,8 +239,13 @@ func (r *RabbitMQService) processDelivery(ctx context.Context, topology Topology
 		err = envelope.Validate()
 	}
 	if err != nil {
+		outcome = "quarantine"
 		return r.quarantineDelivery(ctx, topology, delivery, err)
 	}
+	ctx = ExtractTraceContext(ctx, envelope)
+	ctx, span := startQueueSpan(ctx, envelope, "process", trace.SpanKindConsumer)
+	defer func() { finishQueueSpan(span, processErr) }()
+	r.observerSnapshot().ObserveQueueMessageAge(time.Since(envelope.CreatedAt))
 
 	deliveryEnvelope := envelope
 	status, err := r.deduplicator.Begin(ctx, deliveryEnvelope)
@@ -213,8 +254,10 @@ func (r *RabbitMQService) processDelivery(ctx context.Context, topology Topology
 	}
 	switch status {
 	case DeduplicationComplete:
+		outcome = "deduplicated"
 		return ackDelivery(delivery)
 	case DeduplicationInProgress:
+		outcome = "in_progress"
 		return nackDelivery(delivery, true, ErrDeduplicationInProgress)
 	}
 
@@ -223,11 +266,13 @@ func (r *RabbitMQService) processDelivery(ctx context.Context, topology Topology
 		if err := r.deduplicator.Complete(ctx, deliveryEnvelope); err != nil {
 			return nackDelivery(delivery, true, fmt.Errorf("complete message deduplication: %w", err))
 		}
+		outcome = "success"
 		return ackDelivery(delivery)
 	}
 
 	route := failureRoute(envelope.Attempt, r.config.MaxAttempts, handlerErr)
 	if route == FailureRetry {
+		outcome = "retry"
 		envelope.Attempt++
 		envelope.Metadata = metadataWithFailure(envelope.Metadata, "last_failure", failureReason(handlerErr))
 		if err := r.publishEnvelopeTo(ctx, topology, r.config.RetryExchange, topology.RoutingKey, envelope); err != nil {
@@ -239,6 +284,7 @@ func (r *RabbitMQService) processDelivery(ctx context.Context, topology Topology
 	}
 
 	envelope.Metadata = metadataWithFailure(envelope.Metadata, "terminal_failure", failureReason(handlerErr))
+	outcome = "dead_letter"
 	if err := r.publishEnvelopeTo(ctx, topology, r.config.DeadLetterExchange, topology.RoutingKey, envelope); err != nil {
 		_ = r.deduplicator.Forget(ctx, deliveryEnvelope)
 		return nackDelivery(delivery, true, fmt.Errorf("publish dead letter: %w", err))
@@ -394,11 +440,30 @@ func (r *RabbitMQService) publishWithReconnect(ctx context.Context, topology Top
 			return err
 		}
 		log.Warn().Err(err).Str("exchange", exchange).Str("routing_key", routingKey).Dur("retry_in", backoff).Msg("queue publish failed; reconnecting")
+		r.observerSnapshot().ObserveQueueReconnect("publisher")
 		if err := waitForContext(ctx, backoff); err != nil {
 			return err
 		}
 		backoff = nextBackoff(backoff, r.config.ReconnectMax)
 	}
+}
+
+// HealthCheck reports the state of the worker's existing RabbitMQ connection.
+// It deliberately does not dial: readiness probes must remain bounded by their
+// request context and must not create connections or contend with reconnects.
+func (r *RabbitMQService) HealthCheck(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return ErrClosed
+	}
+	if r.connection == nil || r.connection.IsClosed() {
+		return ErrClosed
+	}
+	return nil
 }
 
 func (r *RabbitMQService) publishConfirmed(ctx context.Context, channel *amqp.Channel, returns <-chan amqp.Return, exchange, routingKey string, publishing amqp.Publishing) error {

@@ -131,13 +131,15 @@ security-tools:
 security-scan: security-tools docker-build-all
 	mkdir -p $(SECURITY_REPORT_DIR)/sbom
 	PATH=$(SECURITY_TOOLS_DIR):$$PATH gitleaks git . --redact --no-banner --exit-code 1 --report-format sarif --report-path $(SECURITY_REPORT_DIR)/gitleaks.sarif
-	PATH=$(SECURITY_TOOLS_DIR):$$PATH gosec -exclude=G104 -fmt=sarif -out=$(SECURITY_REPORT_DIR)/gosec.sarif ./...
-	PATH=$(SECURITY_TOOLS_DIR):$$PATH govulncheck -json ./... > $(SECURITY_REPORT_DIR)/govulncheck.json
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH gosec -fmt=sarif -out=$(SECURITY_REPORT_DIR)/gosec.sarif ./...
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH govulncheck -format text -show version ./... > $(SECURITY_REPORT_DIR)/govulncheck.txt
+	cd frontend && npm ci --ignore-scripts --no-audit
 	cd frontend && npm audit --audit-level=high --json > $(SECURITY_REPORT_DIR)/npm-audit.json
-	PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy fs . --scanners vuln,misconfig,secret,license --license-full --skip-dirs .git --skip-dirs frontend/node_modules --skip-dirs frontend/.next --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-filesystem.json
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy fs . --scanners vuln,misconfig,secret,license --license-full --include-dev-deps --skip-dirs .git --skip-dirs frontend/node_modules --skip-dirs frontend/.next --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-filesystem.json
+	PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy fs frontend --scanners license --license-full --include-dev-deps --skip-dirs .next --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-licenses.json
 	@set -e; for component in api worker migrator frontend; do \
 		PATH=$(SECURITY_TOOLS_DIR):$$PATH syft complianceforge-$$component:scan --output spdx-json=$(SECURITY_REPORT_DIR)/sbom/$$component.spdx.json; \
-		PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy image complianceforge-$$component:scan --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-$$component.json; \
+		PATH=$(SECURITY_TOOLS_DIR):$$PATH trivy image complianceforge-$$component:scan --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output $(SECURITY_REPORT_DIR)/trivy-$$component.json; \
 	done
 
 ## backup-db: create an encrypted, verified PostgreSQL logical backup
@@ -151,6 +153,10 @@ restore-db:
 ## restore-drill: create, verify, and remove an isolated PostgreSQL restore target
 restore-drill:
 	./scripts/postgres-restore-drill.sh
+
+## observability-validate: validate Prometheus, OTel Collector, and Grafana configuration
+observability-validate:
+	./scripts/validate-observability.sh
 
 ## coverage-report: generate and open Go HTML coverage report
 coverage-report:

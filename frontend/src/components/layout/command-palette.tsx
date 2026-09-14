@@ -53,13 +53,6 @@ export function CommandPalette({
     return () => window.clearTimeout(timer);
   }, [query]);
 
-  useEffect(() => {
-    if (!open) {
-      setQuery('');
-      setDebouncedQuery('');
-    }
-  }, [open]);
-
   const autocompleteQuery = useQuery({
     queryKey: ['global-search', 'autocomplete', debouncedQuery],
     queryFn: () => api.search.autocomplete(debouncedQuery),
@@ -71,12 +64,22 @@ export function CommandPalette({
 
   const navigate = (href: string, item?: NavigationItem) => {
     if (item) recordRecent(item.id);
+    setQuery('');
+    setDebouncedQuery('');
     onOpenChange(false);
     router.push(href);
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setQuery('');
+      setDebouncedQuery('');
+    }
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogTitle className="sr-only">Search and navigate</DialogTitle>
         <DialogDescription className="sr-only">

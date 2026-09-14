@@ -1,3 +1,7 @@
+import type { PermissionMap } from '@/types/access';
+
+export type { PermissionMap } from '@/types/access';
+
 export type NavigationIconName =
   | 'LayoutDashboard'
   | 'GitPullRequest'
@@ -29,8 +33,6 @@ export type NavigationIconName =
   | 'Bell'
   | 'PlugZap'
   | 'Settings';
-
-export type PermissionMap = Record<string, readonly string[]>;
 
 export interface NavigationContext {
   isSuperAdmin?: boolean;
@@ -64,11 +66,11 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
     label: 'Workspace',
     defaultOpen: true,
     items: [
-      { id: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard', keywords: ['home', 'overview'] },
-      { id: 'workflows', label: 'My Workflows', href: '/workflows', icon: 'GitPullRequest', keywords: ['approvals', 'tasks'] },
-      { id: 'calendar', label: 'Compliance Calendar', href: '/calendar', icon: 'CalendarDays', keywords: ['deadlines', 'schedule'] },
-      { id: 'activity', label: 'Activity', href: '/activity', icon: 'History', keywords: ['audit trail', 'recent'] },
-      { id: 'notification-center', label: 'Notifications', href: '/notifications', icon: 'Inbox', keywords: ['alerts', 'inbox', 'unread'], permission: { resource: 'user', action: 'read' } },
+      { id: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard', keywords: ['home', 'overview'], permission: { resource: 'reports' } },
+      { id: 'workflows', label: 'My Workflows', href: '/workflows', icon: 'GitPullRequest', keywords: ['approvals', 'tasks'], permission: { resource: 'policies' } },
+      { id: 'calendar', label: 'Compliance Calendar', href: '/calendar', icon: 'CalendarDays', keywords: ['deadlines', 'schedule'], permission: { resource: 'audits' } },
+      { id: 'activity', label: 'Activity', href: '/activity', icon: 'History', keywords: ['audit trail', 'recent'], permission: { resource: 'reports' } },
+      { id: 'notification-center', label: 'Notifications', href: '/notifications', icon: 'Inbox', keywords: ['alerts', 'inbox', 'unread'], permission: { resource: 'users', action: 'read' } },
     ],
   },
   {
@@ -76,46 +78,46 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
     label: 'Compliance & Assurance',
     defaultOpen: true,
     items: [
-      { id: 'frameworks', label: 'Frameworks', href: '/frameworks', icon: 'Library', keywords: ['standards', 'controls'], permission: { resource: 'framework' } },
-      { id: 'policies', label: 'Policies', href: '/policies', icon: 'ScrollText', keywords: ['documents', 'attestation'], permission: { resource: 'policy' } },
-      { id: 'evidence', label: 'Evidence', href: '/evidence', icon: 'FolderCheck', keywords: ['artifacts', 'collection'], permission: { resource: 'evidence' } },
-      { id: 'audits', label: 'Audits', href: '/audits', icon: 'ClipboardCheck', keywords: ['findings', 'assurance'], permission: { resource: 'audit' } },
-      { id: 'exceptions', label: 'Exceptions', href: '/exceptions', icon: 'ShieldOff', keywords: ['waivers', 'acceptance'], permission: { resource: 'policy' } },
-      { id: 'remediation', label: 'Remediation', href: '/remediation', icon: 'Wrench', keywords: ['actions', 'findings'], permission: { resource: 'control' } },
+      { id: 'frameworks', label: 'Frameworks', href: '/frameworks', icon: 'Library', keywords: ['standards', 'controls'], permission: { resource: 'frameworks' } },
+      { id: 'policies', label: 'Policies', href: '/policies', icon: 'ScrollText', keywords: ['documents', 'attestation'], permission: { resource: 'policies' } },
+      { id: 'evidence', label: 'Evidence', href: '/evidence', icon: 'FolderCheck', keywords: ['artifacts', 'collection'], permission: { resource: 'controls' } },
+      { id: 'audits', label: 'Audits', href: '/audits', icon: 'ClipboardCheck', keywords: ['findings', 'assurance'], permission: { resource: 'audits' } },
+      { id: 'exceptions', label: 'Exceptions', href: '/exceptions', icon: 'ShieldOff', keywords: ['waivers', 'acceptance'], permission: { resource: 'risks' } },
+      { id: 'remediation', label: 'Remediation', href: '/remediation', icon: 'Wrench', keywords: ['actions', 'findings'], permission: { resource: 'controls' } },
     ],
   },
   {
     id: 'risk-resilience',
     label: 'Risk & Resilience',
     items: [
-      { id: 'risks', label: 'Risk Register', href: '/risks', icon: 'AlertTriangle', keywords: ['treatment', 'residual'], permission: { resource: 'risk' } },
-      { id: 'incidents', label: 'Incidents', href: '/incidents', icon: 'AlertOctagon', keywords: ['breach', 'security'], permission: { resource: 'incident' } },
-      { id: 'monitoring', label: 'Continuous Monitoring', href: '/monitoring', icon: 'Activity', keywords: ['drift', 'alerts'], permission: { resource: 'control' } },
-      { id: 'bia', label: 'Business Impact', href: '/bia', icon: 'Zap', keywords: ['continuity', 'recovery'], permission: { resource: 'risk' } },
-      { id: 'nis2', label: 'NIS2', href: '/nis2', icon: 'ShieldCheck', keywords: ['directive', 'cyber'], permission: { resource: 'incident' } },
-      { id: 'regulatory', label: 'Regulatory Change', href: '/regulatory', icon: 'Scale', keywords: ['obligations', 'change'], permission: { resource: 'framework' } },
+      { id: 'risks', label: 'Risk Register', href: '/risks', icon: 'AlertTriangle', keywords: ['treatment', 'residual'], permission: { resource: 'risks' } },
+      { id: 'incidents', label: 'Incidents', href: '/incidents', icon: 'AlertOctagon', keywords: ['breach', 'security'], permission: { resource: 'incidents' } },
+      { id: 'monitoring', label: 'Continuous Monitoring', href: '/monitoring', icon: 'Activity', keywords: ['drift', 'alerts'], permission: { resource: 'controls' } },
+      { id: 'bia', label: 'Business Impact', href: '/bia', icon: 'Zap', keywords: ['continuity', 'recovery'], permission: { resource: 'risks' } },
+      { id: 'nis2', label: 'NIS2', href: '/nis2', icon: 'ShieldCheck', keywords: ['directive', 'cyber'], permission: { resource: 'controls' } },
+      { id: 'regulatory', label: 'Regulatory Change', href: '/regulatory', icon: 'Scale', keywords: ['obligations', 'change'], permission: { resource: 'frameworks' } },
     ],
   },
   {
     id: 'ecosystem-data',
     label: 'Third Parties & Data',
     items: [
-      { id: 'vendors', label: 'Vendors', href: '/vendors', icon: 'Building2', keywords: ['third party', 'supplier'], permission: { resource: 'vendor' } },
-      { id: 'vendor-assessments', label: 'Vendor Assessments', href: '/vendor-assessments', icon: 'ClipboardList', keywords: ['questionnaires', 'due diligence'], permission: { resource: 'vendor' } },
-      { id: 'assets', label: 'Assets', href: '/assets', icon: 'Server', keywords: ['inventory', 'systems'] },
-      { id: 'data', label: 'Data Governance', href: '/data', icon: 'Database', keywords: ['ropa', 'processing'] },
-      { id: 'dsr', label: 'Data Subject Requests', href: '/dsr', icon: 'UserCheck', keywords: ['privacy', 'gdpr'] },
+      { id: 'vendors', label: 'Vendors', href: '/vendors', icon: 'Building2', keywords: ['third party', 'supplier'], permission: { resource: 'vendors' } },
+      { id: 'vendor-assessments', label: 'Vendor Assessments', href: '/vendor-assessments', icon: 'ClipboardList', keywords: ['questionnaires', 'due diligence'], permission: { resource: 'vendors' } },
+      { id: 'assets', label: 'Assets', href: '/assets', icon: 'Server', keywords: ['inventory', 'systems'], permission: { resource: 'assets' } },
+      { id: 'data', label: 'Data Governance', href: '/data', icon: 'Database', keywords: ['ropa', 'processing'], permission: { resource: 'incidents' } },
+      { id: 'dsr', label: 'Data Subject Requests', href: '/dsr', icon: 'UserCheck', keywords: ['privacy', 'gdpr'], permission: { resource: 'incidents' } },
     ],
   },
   {
     id: 'leadership',
     label: 'Leadership & Insights',
     items: [
-      { id: 'board', label: 'Board Governance', href: '/board', icon: 'Users', keywords: ['executive', 'decisions'], permission: { resource: 'report' }, fallbackRoles: ['org_admin', 'ciso', 'compliance_manager', 'risk_manager'] },
-      { id: 'analytics', label: 'Analytics', href: '/analytics', icon: 'LineChart', keywords: ['trends', 'metrics'], permission: { resource: 'report' } },
-      { id: 'reports', label: 'Reports', href: '/reports', icon: 'BarChart3', keywords: ['export', 'insights'], permission: { resource: 'report' } },
-      { id: 'knowledge', label: 'Knowledge Base', href: '/knowledge', icon: 'BookOpen', keywords: ['guidance', 'articles'] },
-      { id: 'marketplace', label: 'Framework Marketplace', href: '/marketplace', icon: 'Store', keywords: ['catalog', 'standards'], permission: { resource: 'framework' } },
+      { id: 'board', label: 'Board Governance', href: '/board', icon: 'Users', keywords: ['executive', 'decisions'], permission: { resource: 'reports' }, fallbackRoles: ['org_admin', 'ciso', 'compliance_manager', 'risk_manager'] },
+      { id: 'analytics', label: 'Analytics', href: '/analytics', icon: 'LineChart', keywords: ['trends', 'metrics'], permission: { resource: 'reports' } },
+      { id: 'reports', label: 'Reports', href: '/reports', icon: 'BarChart3', keywords: ['export', 'insights'], permission: { resource: 'reports' } },
+      { id: 'knowledge', label: 'Knowledge Base', href: '/knowledge', icon: 'BookOpen', keywords: ['guidance', 'articles'], permission: { resource: 'policies' } },
+      { id: 'marketplace', label: 'Framework Marketplace', href: '/marketplace', icon: 'Store', keywords: ['catalog', 'standards'], permission: { resource: 'frameworks' } },
     ],
   },
   {
@@ -124,7 +126,7 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
     items: [
       { id: 'notifications', label: 'Notification Administration', href: '/settings/notifications', icon: 'Bell', keywords: ['alerts', 'rules', 'channels', 'templates'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
       { id: 'integrations', label: 'Integration Hub', href: '/settings/integrations', icon: 'PlugZap', keywords: ['connectors', 'sso', 'api keys'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
-      { id: 'settings', label: 'Organization Settings', href: '/settings', icon: 'Settings', keywords: ['users', 'roles', 'configuration'], permission: { resource: 'organization', action: 'update' }, fallbackRoles: ['org_admin'] },
+      { id: 'settings', label: 'Organization Settings', href: '/settings', icon: 'Settings', keywords: ['users', 'roles', 'configuration'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
     ],
   },
 ] as const;

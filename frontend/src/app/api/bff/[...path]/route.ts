@@ -6,16 +6,17 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 interface RouteContext {
-  params: { path: string[] };
+  params: Promise<{ path: string[] }>;
 }
 
-function proxy(request: NextRequest, context: RouteContext) {
-  return proxyAuthenticatedRequest(request, context.params.path);
+async function handleRequest(request: NextRequest, context: RouteContext) {
+  const { path } = await context.params;
+  return proxyAuthenticatedRequest(request, path);
 }
 
-export const DELETE = proxy;
-export const GET = proxy;
-export const HEAD = proxy;
-export const PATCH = proxy;
-export const POST = proxy;
-export const PUT = proxy;
+export const DELETE = handleRequest;
+export const GET = handleRequest;
+export const HEAD = handleRequest;
+export const PATCH = handleRequest;
+export const POST = handleRequest;
+export const PUT = handleRequest;

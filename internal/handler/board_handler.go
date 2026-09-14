@@ -74,22 +74,22 @@ type BoardMeetingFilters struct {
 
 // BoardMeeting represents a board meeting.
 type BoardMeeting struct {
-	ID             string            `json:"id"`
-	OrganizationID string            `json:"organization_id"`
-	Title          string            `json:"title" validate:"required"`
-	Description    string            `json:"description"`
-	Type           string            `json:"type"` // regular, extraordinary, committee
-	Status         string            `json:"status"` // scheduled, in_progress, completed, cancelled
-	ScheduledAt    string            `json:"scheduled_at"`
-	Location       string            `json:"location,omitempty"`
-	Attendees      []string          `json:"attendees,omitempty"`
-	AgendaItems    []AgendaItem      `json:"agenda_items,omitempty"`
-	Minutes        string            `json:"minutes,omitempty"`
-	PackGenerated  bool              `json:"pack_generated"`
-	PackURL        string            `json:"pack_url,omitempty"`
-	CreatedBy      string            `json:"created_by"`
-	CreatedAt      string            `json:"created_at"`
-	UpdatedAt      string            `json:"updated_at"`
+	ID             string       `json:"id"`
+	OrganizationID string       `json:"organization_id"`
+	Title          string       `json:"title" validate:"required"`
+	Description    string       `json:"description"`
+	Type           string       `json:"type"`   // regular, extraordinary, committee
+	Status         string       `json:"status"` // scheduled, in_progress, completed, cancelled
+	ScheduledAt    string       `json:"scheduled_at"`
+	Location       string       `json:"location,omitempty"`
+	Attendees      []string     `json:"attendees,omitempty"`
+	AgendaItems    []AgendaItem `json:"agenda_items,omitempty"`
+	Minutes        string       `json:"minutes,omitempty"`
+	PackGenerated  bool         `json:"pack_generated"`
+	PackURL        string       `json:"pack_url,omitempty"`
+	CreatedBy      string       `json:"created_by"`
+	CreatedAt      string       `json:"created_at"`
+	UpdatedAt      string       `json:"updated_at"`
 }
 
 // AgendaItem represents an item on the meeting agenda.
@@ -128,21 +128,21 @@ type BoardDecisionFilters struct {
 
 // BoardDecision represents a board decision.
 type BoardDecision struct {
-	ID             string          `json:"id"`
-	OrganizationID string          `json:"organization_id"`
-	MeetingID      string          `json:"meeting_id,omitempty"`
-	Title          string          `json:"title" validate:"required"`
-	Description    string          `json:"description"`
-	Category       string          `json:"category,omitempty"` // risk, compliance, budget, strategy, policy
-	Status         string          `json:"status"` // proposed, approved, rejected, deferred, implemented
-	DecidedAt      string          `json:"decided_at,omitempty"`
-	DueDate        string          `json:"due_date,omitempty"`
-	AssigneeID     string          `json:"assignee_id,omitempty"`
+	ID             string           `json:"id"`
+	OrganizationID string           `json:"organization_id"`
+	MeetingID      string           `json:"meeting_id,omitempty"`
+	Title          string           `json:"title" validate:"required"`
+	Description    string           `json:"description"`
+	Category       string           `json:"category,omitempty"` // risk, compliance, budget, strategy, policy
+	Status         string           `json:"status"`             // proposed, approved, rejected, deferred, implemented
+	DecidedAt      string           `json:"decided_at,omitempty"`
+	DueDate        string           `json:"due_date,omitempty"`
+	AssigneeID     string           `json:"assignee_id,omitempty"`
 	Actions        []DecisionAction `json:"actions,omitempty"`
-	Votes          []BoardVote     `json:"votes,omitempty"`
-	CreatedBy      string          `json:"created_by"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
+	Votes          []BoardVote      `json:"votes,omitempty"`
+	CreatedBy      string           `json:"created_by"`
+	CreatedAt      string           `json:"created_at"`
+	UpdatedAt      string           `json:"updated_at"`
 }
 
 // DecisionAction represents an action item from a board decision.
@@ -176,7 +176,7 @@ type BoardReport struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organization_id"`
 	Title          string `json:"title"`
-	Type           string `json:"type"` // compliance_summary, risk_overview, incident_report, quarterly_review
+	Type           string `json:"type"`   // compliance_summary, risk_overview, incident_report, quarterly_review
 	Status         string `json:"status"` // generating, completed, error
 	FileURL        string `json:"file_url,omitempty"`
 	GeneratedBy    string `json:"generated_by"`
@@ -208,26 +208,26 @@ type BoardDashboard struct {
 
 // NIS2GovernanceReport provides NIS2-specific governance data.
 type NIS2GovernanceReport struct {
-	ManagementBodyTraining   bool           `json:"management_body_training"`
-	LastTrainingDate         string         `json:"last_training_date,omitempty"`
-	RiskOversightInPlace     bool           `json:"risk_oversight_in_place"`
-	CyberSecurityReviews     int            `json:"cyber_security_reviews_count"`
-	IncidentReportingProcess bool           `json:"incident_reporting_process"`
-	SupplyChainOversight     bool           `json:"supply_chain_oversight"`
-	GovernanceScore          float64        `json:"governance_score"`
-	Gaps                     []string       `json:"gaps,omitempty"`
-	Recommendations          []string       `json:"recommendations,omitempty"`
+	ManagementBodyTraining   bool              `json:"management_body_training"`
+	LastTrainingDate         string            `json:"last_training_date,omitempty"`
+	RiskOversightInPlace     bool              `json:"risk_oversight_in_place"`
+	CyberSecurityReviews     int               `json:"cyber_security_reviews_count"`
+	IncidentReportingProcess bool              `json:"incident_reporting_process"`
+	SupplyChainOversight     bool              `json:"supply_chain_oversight"`
+	GovernanceScore          float64           `json:"governance_score"`
+	Gaps                     []string          `json:"gaps,omitempty"`
+	Recommendations          []string          `json:"recommendations,omitempty"`
 	ComplianceStatus         map[string]string `json:"compliance_status,omitempty"`
 }
 
 // BoardPortalOverview is the overview data for the board portal.
 type BoardPortalOverview struct {
-	MemberName        string `json:"member_name"`
-	Role              string `json:"role"`
-	UpcomingMeetings  int    `json:"upcoming_meetings"`
-	PendingDecisions  int    `json:"pending_decisions"`
-	UnreadReports     int    `json:"unread_reports"`
-	LastLoginAt       string `json:"last_login_at,omitempty"`
+	MemberName       string `json:"member_name"`
+	Role             string `json:"role"`
+	UpcomingMeetings int    `json:"upcoming_meetings"`
+	PendingDecisions int    `json:"pending_decisions"`
+	UnreadReports    int    `json:"unread_reports"`
+	LastLoginAt      string `json:"last_login_at,omitempty"`
 }
 
 // ---------- handler ----------
@@ -435,10 +435,7 @@ func (h *BoardHandler) DownloadMeetingPack(w http.ResponseWriter, r *http.Reques
 	}
 
 	if len(file.FileData) > 0 {
-		w.Header().Set("Content-Type", file.ContentType)
-		w.Header().Set("Content-Disposition", "attachment; filename=\""+file.FileName+"\"")
-		w.WriteHeader(http.StatusOK)
-		w.Write(file.FileData)
+		writeAttachment(w, file.FileName, file.ContentType, file.FileData)
 		return
 	}
 
@@ -679,10 +676,7 @@ func (h *BoardPortalHandler) GetMeetingPack(w http.ResponseWriter, r *http.Reque
 	}
 
 	if len(file.FileData) > 0 {
-		w.Header().Set("Content-Type", file.ContentType)
-		w.Header().Set("Content-Disposition", "attachment; filename=\""+file.FileName+"\"")
-		w.WriteHeader(http.StatusOK)
-		w.Write(file.FileData)
+		writeAttachment(w, file.FileName, file.ContentType, file.FileData)
 		return
 	}
 

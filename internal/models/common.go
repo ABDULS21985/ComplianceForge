@@ -91,19 +91,25 @@ const (
 type IncidentSeverity string
 
 const (
-	IncidentSeverityCritical IncidentSeverity = "Critical"
-	IncidentSeverityHigh     IncidentSeverity = "High"
-	IncidentSeverityMedium   IncidentSeverity = "Medium"
-	IncidentSeverityLow      IncidentSeverity = "Low"
+	IncidentSeverityCritical IncidentSeverity = "critical"
+	IncidentSeverityHigh     IncidentSeverity = "high"
+	IncidentSeverityMedium   IncidentSeverity = "medium"
+	IncidentSeverityLow      IncidentSeverity = "low"
 )
 
 // IncidentStatus tracks the resolution lifecycle of a security incident.
 type IncidentStatus string
 
 const (
-	IncidentStatusOpen          IncidentStatus = "Open"
-	IncidentStatusInvestigating IncidentStatus = "Investigating"
-	IncidentStatusContained     IncidentStatus = "Contained"
-	IncidentStatusResolved      IncidentStatus = "Resolved"
-	IncidentStatusClosed        IncidentStatus = "Closed"
+	IncidentStatusReported      IncidentStatus = "reported"
+	IncidentStatusTriaged       IncidentStatus = "triaged"
+	IncidentStatusInvestigating IncidentStatus = "investigating"
+	IncidentStatusContained     IncidentStatus = "contained"
+	IncidentStatusResolved      IncidentStatus = "resolved"
+	IncidentStatusClosed        IncidentStatus = "closed"
+	IncidentStatusCancelled     IncidentStatus = "cancelled"
+
+	// IncidentStatusOpen is retained as a source-compatible alias. New API and
+	// database contracts expose the precise initial state, reported.
+	IncidentStatusOpen IncidentStatus = IncidentStatusReported
 )

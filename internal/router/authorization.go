@@ -34,6 +34,7 @@ var protectedResourceAliases = map[string]string{
 	"policies":           "policies",
 	"audits":             "audits",
 	"incidents":          "incidents",
+	"assets":             "assets",
 	"vendors":            "vendors",
 	"dashboard":          "reports",
 	"reports":            "reports",
@@ -79,6 +80,7 @@ var supportedResourceActions = map[string]map[string]bool{
 	"policies":      {"create": true, "read": true, "update": true, "delete": true, "approve": true, "assign": true, "export": true},
 	"audits":        {"create": true, "read": true, "update": true, "delete": true, "approve": true, "assign": true, "export": true},
 	"incidents":     {"create": true, "read": true, "update": true, "delete": true, "approve": true, "assign": true, "export": true},
+	"assets":        {"create": true, "read": true, "update": true, "delete": true, "export": true},
 	"vendors":       {"create": true, "read": true, "update": true, "delete": true, "approve": true, "export": true},
 	"reports":       {"create": true, "read": true, "export": true},
 	"users":         {"create": true, "read": true, "update": true, "delete": true, "assign": true},
@@ -143,9 +145,32 @@ func permissionForProtectedRequest(method, path string) (routePermission, bool) 
 	if segment == "policies" && containsActionSegment(lowerPath, "decision") {
 		action = "approve"
 	}
+	if segment == "incidents" {
+		switch {
+		case containsActionSegment(lowerPath, "assignments", "unassign") && method != http.MethodGet && method != http.MethodHead:
+			action = "assign"
+		case containsActionSegment(lowerPath, "close", "breach-assessment", "notify-dpa"):
+			action = "approve"
+		case containsActionSegment(lowerPath, "status", "transitions", "cancel", "reopen", "escalate"):
+			action = "update"
+		}
+	}
 	// An acknowledgement is the authenticated principal's own read receipt.
 	// Requiring policy update would prevent read-only employees from complying.
 	if segment == "policies" && containsActionSegment(lowerPath, "acknowledge") {
+		action = "read"
+	}
+	// Notification reads, read receipts, acknowledgements, and preferences are
+	// scoped by the handler to the authenticated principal. Requiring users:update
+	// would prevent read-only employees from managing their own inbox.
+	if segment == "notifications" {
+		action = "read"
+	}
+	// Effective permissions are the principal's own navigation and action
+	// grants, not access-policy administration. Keep the endpoint available to
+	// ordinary authenticated employees that can read their own user profile.
+	if segment == "access" && lowerPath == "access/my-permissions" {
+		resource = "users"
 		action = "read"
 	}
 

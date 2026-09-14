@@ -29,8 +29,8 @@ func NewExcelizeGenerator(companyName, classification string) *ExcelizeGenerator
 // --- Internal helpers ---
 
 // headerStyle returns a bold white-on-indigo header style.
-func (g *ExcelizeGenerator) headerStyle(f *excelize.File) int {
-	style, _ := f.NewStyle(&excelize.Style{
+func (g *ExcelizeGenerator) headerStyle(f *excelize.File) (int, error) {
+	style, err := f.NewStyle(&excelize.Style{
 		Font:      &excelize.Font{Bold: true, Color: "#FFFFFF", Size: 10, Family: "Calibri"},
 		Fill:      excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#1E3A8A"}},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
@@ -41,16 +41,19 @@ func (g *ExcelizeGenerator) headerStyle(f *excelize.File) int {
 			{Type: "bottom", Color: "#D1D5DB", Style: 1},
 		},
 	})
-	return style
+	if err != nil {
+		return 0, fmt.Errorf("create header style: %w", err)
+	}
+	return style, nil
 }
 
 // dataStyle returns a standard data cell style.
-func (g *ExcelizeGenerator) dataStyle(f *excelize.File, even bool) int {
+func (g *ExcelizeGenerator) dataStyle(f *excelize.File, even bool) (int, error) {
 	bg := "#FFFFFF"
 	if even {
 		bg = "#F8FAFC"
 	}
-	style, _ := f.NewStyle(&excelize.Style{
+	style, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Size: 10, Family: "Calibri"},
 		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{bg}},
 		Border: []excelize.Border{
@@ -61,113 +64,196 @@ func (g *ExcelizeGenerator) dataStyle(f *excelize.File, even bool) int {
 		},
 		Alignment: &excelize.Alignment{Vertical: "center", WrapText: true},
 	})
-	return style
+	if err != nil {
+		return 0, fmt.Errorf("create data style: %w", err)
+	}
+	return style, nil
 }
 
 // titleStyle returns a large bold title style.
-func (g *ExcelizeGenerator) titleStyle(f *excelize.File) int {
-	style, _ := f.NewStyle(&excelize.Style{
+func (g *ExcelizeGenerator) titleStyle(f *excelize.File) (int, error) {
+	style, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true, Size: 16, Color: "#1E3A8A", Family: "Calibri"},
 	})
-	return style
+	if err != nil {
+		return 0, fmt.Errorf("create title style: %w", err)
+	}
+	return style, nil
 }
 
 // kpiValueStyle returns a style for KPI values.
-func (g *ExcelizeGenerator) kpiValueStyle(f *excelize.File) int {
-	style, _ := f.NewStyle(&excelize.Style{
+func (g *ExcelizeGenerator) kpiValueStyle(f *excelize.File) (int, error) {
+	style, err := f.NewStyle(&excelize.Style{
 		Font:      &excelize.Font{Bold: true, Size: 14, Color: "#1E3A8A", Family: "Calibri"},
 		Alignment: &excelize.Alignment{Horizontal: "center"},
 	})
-	return style
+	if err != nil {
+		return 0, fmt.Errorf("create KPI value style: %w", err)
+	}
+	return style, nil
 }
 
-func (g *ExcelizeGenerator) kpiLabelStyle(f *excelize.File) int {
-	style, _ := f.NewStyle(&excelize.Style{
+func (g *ExcelizeGenerator) kpiLabelStyle(f *excelize.File) (int, error) {
+	style, err := f.NewStyle(&excelize.Style{
 		Font:      &excelize.Font{Size: 9, Color: "#6B7280", Family: "Calibri"},
 		Alignment: &excelize.Alignment{Horizontal: "center"},
 	})
-	return style
+	if err != nil {
+		return 0, fmt.Errorf("create KPI label style: %w", err)
+	}
+	return style, nil
 }
 
 // redStyle for critical/overdue values.
-func (g *ExcelizeGenerator) redStyle(f *excelize.File) int {
-	style, _ := f.NewStyle(&excelize.Style{
+func (g *ExcelizeGenerator) redStyle(f *excelize.File) (int, error) {
+	style, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true, Size: 10, Color: "#DC2626", Family: "Calibri"},
 	})
-	return style
+	if err != nil {
+		return 0, fmt.Errorf("create critical-value style: %w", err)
+	}
+	return style, nil
 }
 
 // greenStyle for good values.
-func (g *ExcelizeGenerator) greenStyle(f *excelize.File) int {
-	style, _ := f.NewStyle(&excelize.Style{
+func (g *ExcelizeGenerator) greenStyle(f *excelize.File) (int, error) {
+	style, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true, Size: 10, Color: "#16A34A", Family: "Calibri"},
 	})
-	return style
+	if err != nil {
+		return 0, fmt.Errorf("create success-value style: %w", err)
+	}
+	return style, nil
 }
 
-func (g *ExcelizeGenerator) addSummarySheet(f *excelize.File, sheet string, title string, kpis []struct{ Label, Value string }) {
-	f.NewSheet(sheet)
-	titleSty := g.titleStyle(f)
-	kpiVal := g.kpiValueStyle(f)
-	kpiLbl := g.kpiLabelStyle(f)
+func (g *ExcelizeGenerator) addSummarySheet(f *excelize.File, sheet string, title string, kpis []struct{ Label, Value string }) error {
+	if _, err := f.NewSheet(sheet); err != nil {
+		return fmt.Errorf("create summary sheet %q: %w", sheet, err)
+	}
+	titleSty, err := g.titleStyle(f)
+	if err != nil {
+		return err
+	}
+	kpiVal, err := g.kpiValueStyle(f)
+	if err != nil {
+		return err
+	}
+	kpiLbl, err := g.kpiLabelStyle(f)
+	if err != nil {
+		return err
+	}
 
-	f.SetCellValue(sheet, "A1", title)
-	f.SetCellStyle(sheet, "A1", "A1", titleSty)
-	f.MergeCell(sheet, "A1", "D1")
+	if err := f.SetCellValue(sheet, "A1", title); err != nil {
+		return fmt.Errorf("set summary title: %w", err)
+	}
+	if err := f.SetCellStyle(sheet, "A1", "A1", titleSty); err != nil {
+		return fmt.Errorf("style summary title: %w", err)
+	}
+	if err := f.MergeCell(sheet, "A1", "D1"); err != nil {
+		return fmt.Errorf("merge summary title cells: %w", err)
+	}
 
-	f.SetCellValue(sheet, "A2", fmt.Sprintf("Generated: %s | %s | %s",
-		time.Now().UTC().Format("02 Jan 2006 15:04 UTC"), g.companyName, g.classification))
-	f.MergeCell(sheet, "A2", "D2")
+	if err := f.SetCellValue(sheet, "A2", fmt.Sprintf("Generated: %s | %s | %s",
+		time.Now().UTC().Format("02 Jan 2006 15:04 UTC"), g.companyName, g.classification)); err != nil {
+		return fmt.Errorf("set summary metadata: %w", err)
+	}
+	if err := f.MergeCell(sheet, "A2", "D2"); err != nil {
+		return fmt.Errorf("merge summary metadata cells: %w", err)
+	}
 
 	// KPI row
 	row := 4
 	for i, kpi := range kpis {
-		col, _ := excelize.ColumnNumberToName(i + 1)
+		col, err := excelize.ColumnNumberToName(i + 1)
+		if err != nil {
+			return fmt.Errorf("resolve KPI column: %w", err)
+		}
 		cell1 := fmt.Sprintf("%s%d", col, row)
 		cell2 := fmt.Sprintf("%s%d", col, row+1)
-		f.SetCellValue(sheet, cell1, kpi.Value)
-		f.SetCellStyle(sheet, cell1, cell1, kpiVal)
-		f.SetCellValue(sheet, cell2, kpi.Label)
-		f.SetCellStyle(sheet, cell2, cell2, kpiLbl)
-		f.SetColWidth(sheet, col, col, 25)
+		if err := f.SetCellValue(sheet, cell1, kpi.Value); err != nil {
+			return fmt.Errorf("set KPI value: %w", err)
+		}
+		if err := f.SetCellStyle(sheet, cell1, cell1, kpiVal); err != nil {
+			return fmt.Errorf("style KPI value: %w", err)
+		}
+		if err := f.SetCellValue(sheet, cell2, kpi.Label); err != nil {
+			return fmt.Errorf("set KPI label: %w", err)
+		}
+		if err := f.SetCellStyle(sheet, cell2, cell2, kpiLbl); err != nil {
+			return fmt.Errorf("style KPI label: %w", err)
+		}
+		if err := f.SetColWidth(sheet, col, col, 25); err != nil {
+			return fmt.Errorf("set KPI column width: %w", err)
+		}
 	}
+	return nil
 }
 
-func (g *ExcelizeGenerator) addDataSheet(f *excelize.File, sheet string, headers []string, widths []float64, rows [][]interface{}) {
-	f.NewSheet(sheet)
-	hdrSty := g.headerStyle(f)
-	evenSty := g.dataStyle(f, true)
-	oddSty := g.dataStyle(f, false)
+func (g *ExcelizeGenerator) addDataSheet(f *excelize.File, sheet string, headers []string, widths []float64, rows [][]interface{}) error {
+	if _, err := f.NewSheet(sheet); err != nil {
+		return fmt.Errorf("create data sheet %q: %w", sheet, err)
+	}
+	hdrSty, err := g.headerStyle(f)
+	if err != nil {
+		return err
+	}
+	evenSty, err := g.dataStyle(f, true)
+	if err != nil {
+		return err
+	}
+	oddSty, err := g.dataStyle(f, false)
+	if err != nil {
+		return err
+	}
 
 	// Set column widths
 	for i, w := range widths {
-		col, _ := excelize.ColumnNumberToName(i + 1)
-		f.SetColWidth(sheet, col, col, w)
+		col, err := excelize.ColumnNumberToName(i + 1)
+		if err != nil {
+			return fmt.Errorf("resolve data column: %w", err)
+		}
+		if err := f.SetColWidth(sheet, col, col, w); err != nil {
+			return fmt.Errorf("set data column width: %w", err)
+		}
 	}
 
 	// Frozen header row
-	f.SetPanes(sheet, &excelize.Panes{
+	if err := f.SetPanes(sheet, &excelize.Panes{
 		Freeze:      true,
 		Split:       false,
 		XSplit:      0,
 		YSplit:      1,
 		TopLeftCell: "A2",
 		ActivePane:  "bottomLeft",
-	})
+	}); err != nil {
+		return fmt.Errorf("freeze data header: %w", err)
+	}
 
 	// Headers
 	for i, h := range headers {
-		col, _ := excelize.ColumnNumberToName(i + 1)
+		col, err := excelize.ColumnNumberToName(i + 1)
+		if err != nil {
+			return fmt.Errorf("resolve header column: %w", err)
+		}
 		cell := fmt.Sprintf("%s1", col)
-		f.SetCellValue(sheet, cell, h)
-		f.SetCellStyle(sheet, cell, cell, hdrSty)
+		if err := f.SetCellValue(sheet, cell, h); err != nil {
+			return fmt.Errorf("set data header: %w", err)
+		}
+		if err := f.SetCellStyle(sheet, cell, cell, hdrSty); err != nil {
+			return fmt.Errorf("style data header: %w", err)
+		}
 	}
 
 	// Auto filter
 	if len(headers) > 0 {
-		lastCol, _ := excelize.ColumnNumberToName(len(headers))
+		lastCol, err := excelize.ColumnNumberToName(len(headers))
+		if err != nil {
+			return fmt.Errorf("resolve final filter column: %w", err)
+		}
 		lastRow := len(rows) + 1
-		f.AutoFilter(sheet, fmt.Sprintf("A1:%s%d", lastCol, lastRow), nil)
+		if err := f.AutoFilter(sheet, fmt.Sprintf("A1:%s%d", lastCol, lastRow), nil); err != nil {
+			return fmt.Errorf("set data filter: %w", err)
+		}
 	}
 
 	// Data rows
@@ -178,12 +264,20 @@ func (g *ExcelizeGenerator) addDataSheet(f *excelize.File, sheet string, headers
 			sty = oddSty
 		}
 		for colIdx, val := range row {
-			col, _ := excelize.ColumnNumberToName(colIdx + 1)
+			col, err := excelize.ColumnNumberToName(colIdx + 1)
+			if err != nil {
+				return fmt.Errorf("resolve value column: %w", err)
+			}
 			cell := fmt.Sprintf("%s%d", col, excelRow)
-			f.SetCellValue(sheet, cell, val)
-			f.SetCellStyle(sheet, cell, cell, sty)
+			if err := f.SetCellValue(sheet, cell, val); err != nil {
+				return fmt.Errorf("set data value: %w", err)
+			}
+			if err := f.SetCellStyle(sheet, cell, cell, sty); err != nil {
+				return fmt.Errorf("style data value: %w", err)
+			}
 		}
 	}
+	return nil
 }
 
 func (g *ExcelizeGenerator) toBytes(f *excelize.File) ([]byte, error) {
@@ -202,12 +296,14 @@ func (g *ExcelizeGenerator) GenerateComplianceReport(data interface{}) ([]byte, 
 	defer f.Close()
 
 	// Summary sheet
-	g.addSummarySheet(f, "Summary", "Compliance Status Report", []struct{ Label, Value string }{
+	if err := g.addSummarySheet(f, "Summary", "Compliance Status Report", []struct{ Label, Value string }{
 		{"Overall Score", fmt.Sprintf("%.1f%%", reportData["overall_score"])},
 		{"Frameworks", fmt.Sprintf("%v", reportData["frameworks_count"])},
 		{"Total Controls", fmt.Sprintf("%v", reportData["total_controls"])},
 		{"Overdue Remediations", fmt.Sprintf("%v", reportData["overdue_remediations"])},
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("build compliance summary: %w", err)
+	}
 
 	// Framework Scores sheet
 	if scores, ok := reportData["framework_scores"].([]interface{}); ok {
@@ -225,7 +321,9 @@ func (g *ExcelizeGenerator) GenerateComplianceReport(data interface{}) ([]byte, 
 				})
 			}
 		}
-		g.addDataSheet(f, "Framework Scores", headers, widths, rows)
+		if err := g.addDataSheet(f, "Framework Scores", headers, widths, rows); err != nil {
+			return nil, fmt.Errorf("build framework-scores sheet: %w", err)
+		}
 	}
 
 	// Gap Analysis sheet
@@ -242,11 +340,15 @@ func (g *ExcelizeGenerator) GenerateComplianceReport(data interface{}) ([]byte, 
 				})
 			}
 		}
-		g.addDataSheet(f, "Gap Analysis", headers, widths, rows)
+		if err := g.addDataSheet(f, "Gap Analysis", headers, widths, rows); err != nil {
+			return nil, fmt.Errorf("build gap-analysis sheet: %w", err)
+		}
 	}
 
 	// Remove default "Sheet1"
-	f.DeleteSheet("Sheet1")
+	if err := f.DeleteSheet("Sheet1"); err != nil {
+		return nil, fmt.Errorf("remove default compliance sheet: %w", err)
+	}
 
 	return g.toBytes(f)
 }
@@ -256,12 +358,14 @@ func (g *ExcelizeGenerator) GenerateRiskReport(data interface{}) ([]byte, error)
 	f := excelize.NewFile()
 	defer f.Close()
 
-	g.addSummarySheet(f, "Summary", "Risk Register Report", []struct{ Label, Value string }{
+	if err := g.addSummarySheet(f, "Summary", "Risk Register Report", []struct{ Label, Value string }{
 		{"Total Risks", fmt.Sprintf("%v", reportData["total_risks"])},
 		{"Critical", fmt.Sprintf("%v", reportData["critical_count"])},
 		{"Avg Residual Score", fmt.Sprintf("%.1f", reportData["avg_residual_score"])},
 		{"Treatment Rate", fmt.Sprintf("%.0f%%", reportData["treatment_completion_rate"])},
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("build risk summary: %w", err)
+	}
 
 	if risks, ok := reportData["top_risks"].([]interface{}); ok {
 		headers := []string{"Ref", "Title", "Category", "Source", "Inherent Score", "Residual Score", "Residual Level", "Financial Impact (€)", "Status", "Owner"}
@@ -276,10 +380,14 @@ func (g *ExcelizeGenerator) GenerateRiskReport(data interface{}) ([]byte, error)
 				})
 			}
 		}
-		g.addDataSheet(f, "Risk Register", headers, widths, rows)
+		if err := g.addDataSheet(f, "Risk Register", headers, widths, rows); err != nil {
+			return nil, fmt.Errorf("build risk-register sheet: %w", err)
+		}
 	}
 
-	f.DeleteSheet("Sheet1")
+	if err := f.DeleteSheet("Sheet1"); err != nil {
+		return nil, fmt.Errorf("remove default risk sheet: %w", err)
+	}
 	return g.toBytes(f)
 }
 
@@ -288,12 +396,14 @@ func (g *ExcelizeGenerator) GenerateAuditReport(data interface{}) ([]byte, error
 	f := excelize.NewFile()
 	defer f.Close()
 
-	g.addSummarySheet(f, "Summary", "Audit Findings Report", []struct{ Label, Value string }{
+	if err := g.addSummarySheet(f, "Summary", "Audit Findings Report", []struct{ Label, Value string }{
 		{"Total Findings", fmt.Sprintf("%v", reportData["total_findings"])},
 		{"Critical", fmt.Sprintf("%v", reportData["critical_findings"])},
 		{"Open", fmt.Sprintf("%v", reportData["open_findings"])},
 		{"Resolved", fmt.Sprintf("%v", reportData["resolved_findings"])},
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("build audit summary: %w", err)
+	}
 
 	if findings, ok := reportData["findings"].([]interface{}); ok {
 		headers := []string{"Ref", "Title", "Audit", "Severity", "Status", "Type", "Due Date", "Responsible", "Root Cause"}
@@ -308,10 +418,14 @@ func (g *ExcelizeGenerator) GenerateAuditReport(data interface{}) ([]byte, error
 				})
 			}
 		}
-		g.addDataSheet(f, "Findings", headers, widths, rows)
+		if err := g.addDataSheet(f, "Findings", headers, widths, rows); err != nil {
+			return nil, fmt.Errorf("build findings sheet: %w", err)
+		}
 	}
 
-	f.DeleteSheet("Sheet1")
+	if err := f.DeleteSheet("Sheet1"); err != nil {
+		return nil, fmt.Errorf("remove default audit sheet: %w", err)
+	}
 	return g.toBytes(f)
 }
 
@@ -319,11 +433,15 @@ func (g *ExcelizeGenerator) GenerateCustomReport(data interface{}, sections []st
 	f := excelize.NewFile()
 	defer f.Close()
 
-	g.addSummarySheet(f, "Summary", "Custom Report", []struct{ Label, Value string }{
+	if err := g.addSummarySheet(f, "Summary", "Custom Report", []struct{ Label, Value string }{
 		{"Sections", fmt.Sprintf("%d", len(sections))},
 		{"Generated", time.Now().UTC().Format("02 Jan 2006")},
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("build custom-report summary: %w", err)
+	}
 
-	f.DeleteSheet("Sheet1")
+	if err := f.DeleteSheet("Sheet1"); err != nil {
+		return nil, fmt.Errorf("remove default custom-report sheet: %w", err)
+	}
 	return g.toBytes(f)
 }

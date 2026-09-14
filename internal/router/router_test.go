@@ -29,6 +29,8 @@ const (
 	testControlID   = "40000000-0000-0000-0000-000000000010"
 	testPolicyID    = "90000000-0000-0000-0000-000000000010"
 	testAuditID     = "a0000000-0000-0000-0000-000000000010"
+	testIncidentID  = "b0000000-0000-0000-0000-000000000010"
+	testAssetID     = "c1000000-0000-0000-0000-000000000010"
 )
 
 type routerAuthService struct {
@@ -101,6 +103,15 @@ type routerOrganizationService struct {
 
 type routerComplianceService struct{}
 
+type routerPermissionService struct{}
+
+func (routerPermissionService) GetUserPermissions(context.Context, string, string) (map[string][]string, error) {
+	return map[string][]string{
+		"audits":   {"read"},
+		"settings": {"read"},
+	}, nil
+}
+
 type routerRiskService struct{ risk *models.Risk }
 
 type routerPolicyService struct {
@@ -127,6 +138,69 @@ func (routerPolicyService) ListCategories(context.Context, string) ([]models.Pol
 type routerAuditService struct {
 	handler.AuditService
 	audit *models.Audit
+}
+
+type routerIncidentService struct {
+	handler.IncidentService
+	incident *models.Incident
+}
+
+type routerAssetService struct{ asset *models.Asset }
+
+func (s routerAssetService) Create(_ context.Context, organizationID, actorID string, input models.AssetCreateInput) (*models.Asset, error) {
+	item := *s.asset
+	item.OrganizationID, item.CreatedBy, item.Name, item.AssetType = organizationID, actorID, input.Name, input.AssetType
+	return &item, nil
+}
+
+func (s routerAssetService) GetByID(context.Context, string, string) (*models.Asset, error) {
+	return s.asset, nil
+}
+
+func (s routerAssetService) Update(context.Context, string, string, string, models.AssetPatch) (*models.Asset, error) {
+	return s.asset, nil
+}
+
+func (routerAssetService) Delete(context.Context, string, string, string, *int64) error { return nil }
+
+func (s routerAssetService) List(context.Context, string, models.AssetListFilter) ([]models.Asset, int, error) {
+	return []models.Asset{*s.asset}, 1, nil
+}
+
+func (routerAssetService) Stats(context.Context, string) (*models.AssetStats, error) {
+	return &models.AssetStats{Total: 1, Active: 1, ByType: map[string]int{"data": 1}}, nil
+}
+
+func (routerAssetService) ListEvents(context.Context, string, string, models.PaginationRequest) ([]models.AssetLifecycleEvent, int, error) {
+	return []models.AssetLifecycleEvent{}, 0, nil
+}
+
+func (s routerIncidentService) Create(context.Context, string, string, models.IncidentCreateInput) (*models.Incident, error) {
+	return s.incident, nil
+}
+
+func (s routerIncidentService) GetByID(context.Context, string, string) (*models.Incident, error) {
+	return s.incident, nil
+}
+
+func (s routerIncidentService) List(context.Context, string, models.IncidentListFilter) ([]models.Incident, int, error) {
+	return []models.Incident{*s.incident}, 1, nil
+}
+
+func (routerIncidentService) ListBreachDue(context.Context, string, int, int) ([]models.Incident, error) {
+	return []models.Incident{}, nil
+}
+
+func (routerIncidentService) Statistics(context.Context, string) (*models.IncidentStatistics, error) {
+	return &models.IncidentStatistics{ByStatus: map[models.IncidentStatus]int{}, BySeverity: map[models.IncidentSeverity]int{}}, nil
+}
+
+func (routerIncidentService) ListEvents(context.Context, string, string, models.PaginationRequest) ([]models.IncidentEvent, int, error) {
+	return []models.IncidentEvent{}, 0, nil
+}
+
+func (routerIncidentService) ListAssignments(context.Context, string, string, bool) ([]models.IncidentAssignment, error) {
+	return []models.IncidentAssignment{}, nil
 }
 
 func (s routerAuditService) Create(context.Context, string, string, models.AuditCreateInput) (*models.Audit, error) {
@@ -275,6 +349,12 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"unconfigured policy handler", func(d *RouterDependencies) { d.Policies = handler.NewPolicyHandler(nil) }, "policy handler is required"},
 		{"audit handler", func(d *RouterDependencies) { d.Audits = nil }, "audit handler is required"},
 		{"unconfigured audit handler", func(d *RouterDependencies) { d.Audits = handler.NewAuditHandler(nil) }, "audit handler is required"},
+		{"incident handler", func(d *RouterDependencies) { d.Incidents = nil }, "incident handler is required"},
+		{"unconfigured incident handler", func(d *RouterDependencies) { d.Incidents = handler.NewIncidentHandler(nil) }, "incident handler is required"},
+		{"asset handler", func(d *RouterDependencies) { d.Assets = nil }, "asset handler is required"},
+		{"unconfigured asset handler", func(d *RouterDependencies) { d.Assets = handler.NewAssetHandler(nil) }, "asset handler is required"},
+		{"permission handler", func(d *RouterDependencies) { d.Permissions = nil }, "permission handler is required"},
+		{"unconfigured permission handler", func(d *RouterDependencies) { d.Permissions = handler.NewPermissionHandler(nil) }, "permission handler is required"},
 		{"notification handler", func(d *RouterDependencies) { d.Notifications = nil }, "notification handler is required"},
 		{"unconfigured notification handler", func(d *RouterDependencies) { d.Notifications = handler.NewNotificationHandler(nil, nil) }, "notification handler is required"},
 		{"integration handler", func(d *RouterDependencies) { d.Integrations = nil }, "integration handler is required"},
@@ -390,6 +470,14 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 		{name: "list policies", method: http.MethodGet, path: "/api/v1/policies", authorized: true, wantStatus: http.StatusOK},
 		{name: "create policy", method: http.MethodPost, path: "/api/v1/policies", body: `{"title":"Security policy","initial_version":{"content_text":"Policy content"}}`, authorized: true, wantStatus: http.StatusCreated},
 		{name: "policy categories", method: http.MethodGet, path: "/api/v1/policies/categories", authorized: true, wantStatus: http.StatusOK},
+		{name: "effective permissions", method: http.MethodGet, path: "/api/v1/access/my-permissions", authorized: true, wantStatus: http.StatusOK},
+		{name: "list incidents", method: http.MethodGet, path: "/api/v1/incidents", authorized: true, wantStatus: http.StatusOK},
+		{name: "create incident", method: http.MethodPost, path: "/api/v1/incidents", body: `{"title":"Database exposure","description":"A production snapshot was exposed","category":"privacy","severity":"high"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "incident statistics", method: http.MethodGet, path: "/api/v1/incidents/statistics", authorized: true, wantStatus: http.StatusOK},
+		{name: "list assets", method: http.MethodGet, path: "/api/v1/assets", authorized: true, wantStatus: http.StatusOK},
+		{name: "create asset", method: http.MethodPost, path: "/api/v1/assets", body: `{"name":"Customer database","asset_type":"data"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "asset statistics", method: http.MethodGet, path: "/api/v1/assets/stats", authorized: true, wantStatus: http.StatusOK},
+		{name: "asset history", method: http.MethodGet, path: "/api/v1/assets/" + testAssetID + "/events", authorized: true, wantStatus: http.StatusOK},
 	}
 
 	for _, tt := range tests {
@@ -425,6 +513,7 @@ func TestAutomationRoutesEnforceAPIKeyScopes(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "granted resource", path: "/api/v1/automation/controls", withKey: true, wantStatus: http.StatusOK},
+		{name: "audit requires its exact scope", path: "/api/v1/automation/audits", withKey: true, wantStatus: http.StatusForbidden},
 		{name: "missing resource scope", path: "/api/v1/automation/risks", withKey: true, wantStatus: http.StatusForbidden},
 		{name: "missing credential", path: "/api/v1/automation/controls", wantStatus: http.StatusUnauthorized},
 	}
@@ -440,6 +529,61 @@ func TestAutomationRoutesEnforceAPIKeyScopes(t *testing.T) {
 				t.Fatalf("status=%d body=%s, want %d", response.Code, response.Body.String(), test.wantStatus)
 			}
 		})
+	}
+}
+
+func TestIncidentAutomationRoutesAreReadOnly(t *testing.T) {
+	dependencies := testRouterDependencies()
+	dependencies.APIKeyAuthenticator = routerAPIKeyAuthenticator{permissions: []string{"read:incidents"}}
+	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v1/automation/incidents", "/api/v1/automation/incidents/statistics", "/api/v1/automation/incidents/" + testIncidentID + "/timeline"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("X-API-Key", "cf_live_test")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/automation/incidents", strings.NewReader(`{}`))
+	request.Header.Set("X-API-Key", "cf_live_test")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("automation incident mutation status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAssetAutomationRoutesAreReadOnly(t *testing.T) {
+	dependencies := testRouterDependencies()
+	dependencies.APIKeyAuthenticator = routerAPIKeyAuthenticator{permissions: []string{"read:assets"}}
+	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/api/v1/automation/assets",
+		"/api/v1/automation/assets/stats",
+		"/api/v1/automation/assets/" + testAssetID,
+		"/api/v1/automation/assets/" + testAssetID + "/events",
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("X-API-Key", "cf_live_test")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/automation/assets", strings.NewReader(`{}`))
+	request.Header.Set("X-API-Key", "cf_live_test")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("automation asset mutation status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -514,6 +658,18 @@ func testRouterDependencies() RouterDependencies {
 		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testAuditID}, OrganizationID: testOrgID},
 		AuditRef:    "AUD-0001", Title: "Annual audit", Type: models.AuditTypeInternal, Status: models.AuditStatusPlanned,
 	}
+	incident := &models.Incident{
+		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testIncidentID}, OrganizationID: testOrgID},
+		IncidentRef: "INC-000001", Title: "Database exposure", Description: "Production snapshot exposed",
+		Category: "privacy", Severity: models.IncidentSeverityHigh, Status: models.IncidentStatusReported,
+		ReporterID: testUserID, Version: 1,
+	}
+	asset := &models.Asset{
+		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testAssetID}, OrganizationID: testOrgID},
+		AssetRef:    "AST-000001", Name: "Customer database", AssetType: models.AssetTypeData,
+		Criticality: models.AssetCriticalityCritical, Classification: models.AssetClassificationRestricted,
+		Status: models.AssetStatusActive, Version: 1, CreatedBy: testUserID, Tags: []string{},
+	}
 	return RouterDependencies{
 		Auth:                handler.NewAuthHandler(&routerAuthService{user: user}),
 		Organizations:       handler.NewOrganizationHandler(&routerOrganizationService{organization: organization}),
@@ -522,6 +678,9 @@ func testRouterDependencies() RouterDependencies {
 		Risks:               handler.NewRiskHandler(routerRiskService{risk: risk}),
 		Policies:            handler.NewPolicyHandler(routerPolicyService{policy: policy}),
 		Audits:              handler.NewAuditHandler(routerAuditService{audit: audit}),
+		Incidents:           handler.NewIncidentHandler(routerIncidentService{incident: incident}),
+		Assets:              handler.NewAssetHandler(routerAssetService{asset: asset}),
+		Permissions:         handler.NewPermissionHandler(routerPermissionService{}),
 		Notifications:       handler.NewNotificationHandler(dummyPool, notificationEngine, notificationProtector),
 		Integrations:        handler.NewIntegrationHandler(integrationService),
 		APIKeyAuthenticator: routerAPIKeyAuthenticator{permissions: []string{"read:controls"}},

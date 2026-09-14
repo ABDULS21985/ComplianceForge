@@ -6,12 +6,13 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 interface RouteContext {
-  params: { path: string[] };
+  params: Promise<{ path: string[] }>;
 }
 
-function proxy(request: NextRequest, context: RouteContext) {
-  return proxyPortalRequest(request, context.params.path);
+async function handleRequest(request: NextRequest, context: RouteContext) {
+  const { path } = await context.params;
+  return proxyPortalRequest(request, path);
 }
 
-export const GET = proxy;
-export const POST = proxy;
+export const GET = handleRequest;
+export const POST = handleRequest;

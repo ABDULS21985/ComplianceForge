@@ -112,7 +112,10 @@ export default function BrandingSettingsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchConfig(); }, [fetchConfig]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchConfig(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchConfig]);
 
   const updateField = <K extends keyof BrandingConfig>(key: K, value: BrandingConfig[K]) => {
     setConfig((prev) => ({ ...prev, [key]: value }));

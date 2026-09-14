@@ -8,6 +8,10 @@ DROP INDEX IF EXISTS idx_notifications_expired_lease;
 DROP INDEX IF EXISTS idx_notifications_delivery_due;
 DROP INDEX IF EXISTS uq_notifications_delivery_key;
 
+ALTER TABLE notification_rules
+    DROP CONSTRAINT IF EXISTS chk_notification_rules_escalation,
+    DROP CONSTRAINT IF EXISTS chk_notification_rules_cooldown;
+
 ALTER TABLE notifications
     DROP CONSTRAINT IF EXISTS chk_notifications_escalation_parent,
     DROP CONSTRAINT IF EXISTS chk_notifications_dead_state,

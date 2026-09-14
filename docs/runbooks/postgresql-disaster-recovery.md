@@ -35,7 +35,7 @@ export POSTGRES_BACKUP_RETENTION_DAYS=30
 ./scripts/postgres-backup.sh
 ```
 
-The final archive path is the only stdout value, which makes it safe to capture in a scheduler. Operational logs go to stderr. A backup is accepted only when the database migration state is clean and `pg_restore --list` can read the archive. Local artifacts are written with mode-restricting `umask 077`, checksum metadata, schema version, timestamps, and an atomic final rename.
+The final archive path is the only stdout value, which makes it safe to capture in a scheduler. Operational logs go to stderr. A backup is accepted only when the database migration state is clean and `pg_restore --list` can read the archive. Local artifacts are written with mode-restricting `umask 077`, checksum metadata, schema version, timestamps, and an atomic final rename. RPO age is conservatively measured from backup/snapshot start rather than dump completion; an unsuccessful run removes its incomplete local archive and sidecars.
 
 For KMS or HSM encryption, set `POSTGRES_BACKUP_ENCRYPTION=hook` and `POSTGRES_BACKUP_ENCRYPT_HOOK` to an executable. The hook is invoked as:
 

@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const ContextKeyRequestID contextKey = "request_id"
@@ -38,7 +39,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 		duration := time.Since(start)
 
-		log.Info().
+		event := log.Info().
 			Str("request_id", requestID).
 			Str("method", r.Method).
 			Str("path", redactedRequestPath(r.URL.Path)).
@@ -46,8 +47,11 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			Dur("duration", duration).
 			Str("client_ip", truncateLogField(GetClientIPFromContext(r.Context()), 64)).
 			Str("user_agent", truncateLogField(r.UserAgent(), 256)).
-			Int("bytes_written", ww.BytesWritten()).
-			Msg("request completed")
+			Int("bytes_written", ww.BytesWritten())
+		if spanContext := trace.SpanContextFromContext(r.Context()); spanContext.IsValid() {
+			event = event.Str("trace_id", spanContext.TraceID().String()).Str("span_id", spanContext.SpanID().String())
+		}
+		event.Msg("request completed")
 	})
 }
 

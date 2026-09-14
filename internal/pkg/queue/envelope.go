@@ -148,8 +148,10 @@ func decodeEnvelope(body []byte) (Envelope, error) {
 
 func publishingForEnvelope(envelope Envelope, body []byte) amqp.Publishing {
 	headers := amqp.Table{
-		"x-schema-version": int32(envelope.SchemaVersion),
-		"x-attempt":        int32(envelope.Attempt),
+		// AMQP field tables support signed 64-bit integers. Envelope validation
+		// still constrains these values to the interoperable signed 32-bit range.
+		"x-schema-version": int64(envelope.SchemaVersion),
+		"x-attempt":        int64(envelope.Attempt),
 	}
 	if envelope.TenantID != "" {
 		headers["x-tenant-id"] = envelope.TenantID

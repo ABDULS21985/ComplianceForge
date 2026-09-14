@@ -25,7 +25,7 @@ import (
 const (
 	defaultNotificationTenantBatch = 100
 	defaultNotificationClaimBatch  = 100
-	defaultNotificationLease       = time.Minute
+	defaultNotificationLease       = 3 * time.Minute
 	defaultNotificationRetryBase   = 30 * time.Second
 	defaultNotificationRetryMax    = time.Hour
 	defaultNotificationPoll        = 10 * time.Second
@@ -92,8 +92,8 @@ func (config NotificationDeliveryConfig) Validate() error {
 	if config.ClaimBatch < 1 || config.ClaimBatch > 500 {
 		return fmt.Errorf("notification claim batch must be between 1 and 500")
 	}
-	if config.LeaseDuration < 30*time.Second || config.LeaseDuration > 15*time.Minute {
-		return fmt.Errorf("notification delivery lease must be between 30 seconds and 15 minutes")
+	if config.LeaseDuration < 3*time.Minute || config.LeaseDuration > 15*time.Minute {
+		return fmt.Errorf("notification delivery lease must be between three and 15 minutes")
 	}
 	if config.RetryBaseDelay < time.Second || config.RetryMaxDelay < config.RetryBaseDelay || config.RetryMaxDelay > 24*time.Hour {
 		return fmt.Errorf("notification retry delays must be ordered between one second and 24 hours")
@@ -375,9 +375,69 @@ func groupClaimedNotifications(claimed []Notification) []claimedNotificationGrou
 			}
 			return notifications[i].CreatedAt.Before(notifications[j].CreatedAt)
 		})
+		if len(notifications) > 0 && notifications[0].DigestFrequency != "immediate" &&
+			notifications[0].ChannelType != "in_app" && notifications[0].ChannelType != "webhook" {
+			groups = append(groups, splitClaimedDigestGroup(key, notifications)...)
+			continue
+		}
 		groups = append(groups, claimedNotificationGroup{key: key, notifications: notifications})
 	}
 	return groups
+}
+
+func splitClaimedDigestGroup(key string, notifications []Notification) []claimedNotificationGroup {
+	if len(notifications) == 0 {
+		return nil
+	}
+	maximumRunes := 128 * 1024
+	if notifications[0].ChannelType == "slack" {
+		// Slack incoming webhooks cap the rendered message at roughly 3,000
+		// characters. Leave room for the digest heading and block syntax.
+		maximumRunes = 2400
+	}
+	var groups []claimedNotificationGroup
+	start, used := 0, 0
+	for index, notification := range notifications {
+		entrySize := utf8.RuneCountInString(notificationDigestEntry(notification)) + 2
+		if index > start && used+entrySize > maximumRunes {
+			groups = append(groups, claimedNotificationGroup{
+				key:           digestChunkKey(key, notifications[start:index]),
+				notifications: notifications[start:index],
+			})
+			start, used = index, 0
+		}
+		used += entrySize
+	}
+	groups = append(groups, claimedNotificationGroup{
+		key:           digestChunkKey(key, notifications[start:]),
+		notifications: notifications[start:],
+	})
+	return groups
+}
+
+func digestChunkKey(groupKey string, notifications []Notification) string {
+	identities := make([]string, 0, len(notifications)+1)
+	identities = append(identities, groupKey)
+	for _, notification := range notifications {
+		identities = append(identities, notification.ID)
+	}
+	return notificationDeliveryKey(identities...)
+}
+
+func notificationDigestEntry(notification Notification) string {
+	body := notification.TextBody
+	if body == "" {
+		body = notification.Body
+	}
+	maximumBodyRunes := 8000
+	if notification.ChannelType == "slack" {
+		maximumBodyRunes = 1500
+	}
+	body = truncateNotificationText(body, maximumBodyRunes)
+	if strings.TrimSpace(body) == "" {
+		return notification.Subject
+	}
+	return notification.Subject + "\n" + body
 }
 
 func (ne *NotificationEngine) deliverClaimedGroup(
@@ -394,11 +454,15 @@ func (ne *NotificationEngine) deliverClaimedGroup(
 	if first.DigestFrequency != "immediate" && first.ChannelType != "in_app" && first.ChannelType != "webhook" {
 		deliverable = buildDigestNotification(group)
 	}
-	_, channelConfig, loadErr := ne.getChannelConfig(ctx, first.OrgID, first.ChannelID)
-	deliveryErr := loadErr
+	channelConfig := make(map[string]any)
+	var deliveryErr error
+	if first.ChannelType != "in_app" || first.ChannelID != "" {
+		_, channelConfig, deliveryErr = ne.getChannelConfig(ctx, first.OrgID, first.ChannelID)
+	}
 	if deliveryErr == nil {
 		deliveryErr = ne.Dispatch(ctx, deliverable, channelConfig)
 	}
+	failure := classifyNotificationDeliveryError(deliveryErr)
 
 	var stateErrors []error
 	for _, notification := range group.notifications {
@@ -408,17 +472,19 @@ func (ne *NotificationEngine) deliverClaimedGroup(
 			}
 			continue
 		}
-		failure := classifyNotificationDeliveryError(deliveryErr)
 		if err := ne.failNotificationDelivery(ctx, notification, failure, config, now); err != nil {
 			stateErrors = append(stateErrors, err)
 		}
 	}
 	if deliveryErr != nil {
-		// The raw provider/configuration error is logged for operators but is never
-		// persisted; database storage receives only the bounded classification.
-		log.Warn().Err(deliveryErr).
+		// Provider and configuration errors can contain credentials, URLs or
+		// recipient data. Logs and database storage therefore receive only a
+		// bounded classification, never the raw error text.
+		log.Warn().
 			Str("organization_id", first.OrgID).
 			Str("channel_type", first.ChannelType).
+			Str("failure_code", failure.Code).
+			Bool("permanent", failure.Permanent).
 			Int("notification_count", len(group.notifications)).
 			Msg("notification delivery attempt failed")
 	}
@@ -433,23 +499,14 @@ func buildDigestNotification(group claimedNotificationGroup) Notification {
 		label = strings.ToUpper(label[:1]) + label[1:]
 	}
 	subject := fmt.Sprintf("[ComplianceForge] %s digest (%d notifications)", label, len(group.notifications))
-	var textBody, htmlBody strings.Builder
-	htmlBody.WriteString("<h2>")
-	htmlBody.WriteString(htmltemplate.HTMLEscapeString(subject))
-	htmlBody.WriteString("</h2><ol>")
+	var textBody strings.Builder
 	for _, notification := range group.notifications {
-		textBody.WriteString(notification.Subject)
-		textBody.WriteByte('\n')
-		textBody.WriteString(notification.TextBody)
+		textBody.WriteString(notificationDigestEntry(notification))
 		textBody.WriteString("\n\n")
-		htmlBody.WriteString("<li><strong>")
-		htmlBody.WriteString(htmltemplate.HTMLEscapeString(notification.Subject))
-		htmlBody.WriteString("</strong><br>")
-		htmlBody.WriteString(htmltemplate.HTMLEscapeString(notification.TextBody))
-		htmlBody.WriteString("</li>")
 	}
-	htmlBody.WriteString("</ol>")
-	text := truncateNotificationText(strings.TrimSpace(textBody.String()), 2800)
+	text := strings.TrimSpace(textBody.String())
+	htmlBody := "<h2>" + htmltemplate.HTMLEscapeString(subject) + "</h2><pre>" +
+		htmltemplate.HTMLEscapeString(text) + "</pre>"
 	return Notification{
 		ID:              uuid.NewSHA1(uuid.NameSpaceOID, []byte("notification-digest|"+group.key)).String(),
 		OrgID:           first.OrgID,
@@ -460,7 +517,7 @@ func buildDigestNotification(group claimedNotificationGroup) Notification {
 		Subject:         subject,
 		Body:            text,
 		TextBody:        text,
-		HTMLBody:        htmlBody.String(),
+		HTMLBody:        htmlBody,
 		CreatedAt:       first.ScheduledFor,
 	}
 }
@@ -569,8 +626,8 @@ func (ne *NotificationEngine) failNotificationDelivery(
 	}
 	result, err := database.QuerierFromContext(ctx, ne.pool).Exec(ctx, `
 		UPDATE notifications
-		SET status='failed',error_message=$1,failure_code=$2,next_retry_at=$3,
-		    dead_at=CASE WHEN $4 THEN $5 ELSE NULL END,
+		SET status='failed',error_message=$1::text,failure_code=$2::varchar,next_retry_at=$3::timestamptz,
+		    dead_at=CASE WHEN $4::boolean THEN $5::timestamptz ELSE NULL::timestamptz END,
 		    lease_owner=NULL,lease_token=NULL,leased_until=NULL
 		WHERE id=$6 AND organization_id=$7 AND lease_owner=$8 AND lease_token=$9`,
 		storedMessage, failure.Code, nextRetry, terminal, now,
@@ -707,8 +764,8 @@ func (ne *NotificationEngine) createDueEscalations(ctx context.Context, tenantID
 				    (organization_id,rule_id,event_id,event_type,event_payload,recipient_user_id,
 				     channel_type,channel_id,subject,body,body_text,body_html,status,max_retries,
 				     delivery_key,digest_frequency,scheduled_for,parent_notification_id,metadata,created_at)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,$14,'immediate',NOW(),$15,
-				        jsonb_build_object('escalation',true,'parent_notification_id',$15::text),NOW())
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,$14,'immediate',NOW(),$15::uuid,
+				        jsonb_build_object('escalation',true,'parent_notification_id',($15::uuid)::text),NOW())
 				ON CONFLICT (organization_id,delivery_key) DO NOTHING`,
 				candidate.OrgID, candidate.RuleID, escalationEventID, candidate.EventType,
 				candidate.EventPayload, candidate.RecipientUserID, channelType, channelID,

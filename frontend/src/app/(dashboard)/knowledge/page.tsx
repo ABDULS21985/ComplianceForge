@@ -110,7 +110,10 @@ export default function KnowledgeBasePage() {
     }
   }, [category, searchQuery]);
 
-  useEffect(() => { fetchArticles(); }, [fetchArticles]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchArticles(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchArticles]);
 
   // Load recommended
   useEffect(() => {

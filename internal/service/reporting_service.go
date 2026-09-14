@@ -339,7 +339,9 @@ func (s *ReportingService) GenerateExecutiveSummary(ctx context.Context, orgID s
 	// TODO: Count open findings across all audits for auditSummary.OpenFindings.
 
 	// Incident data.
-	incidents, _, err := s.incidentRepo.List(ctx, orgID, 1, 1000)
+	incidents, _, err := s.incidentRepo.List(ctx, orgID, models.IncidentListFilter{
+		PaginationRequest: models.PaginationRequest{Page: 1, PageSize: 1000},
+	})
 	if err != nil {
 		s.logger.Warn().Err(err).Msg("failed to get incidents for executive summary")
 	}
@@ -349,7 +351,7 @@ func (s *ReportingService) GenerateExecutiveSummary(ctx context.Context, orgID s
 	resolvedCount := 0
 	for _, inc := range incidents {
 		switch inc.Status {
-		case models.IncidentStatusOpen, models.IncidentStatusInvestigating, models.IncidentStatusContained:
+		case models.IncidentStatusReported, models.IncidentStatusTriaged, models.IncidentStatusInvestigating, models.IncidentStatusContained:
 			incidentSummary.Open++
 		case models.IncidentStatusResolved, models.IncidentStatusClosed:
 			incidentSummary.Resolved++
