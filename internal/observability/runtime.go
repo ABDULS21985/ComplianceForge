@@ -25,6 +25,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/complianceforge/platform/internal/apiresponse"
 	"github.com/complianceforge/platform/internal/config"
 )
 
@@ -166,7 +167,7 @@ func (r *Runtime) authorizeMetrics(next http.Handler) http.Handler {
 		if !found || !strings.EqualFold(scheme, "Bearer") || len(provided) != len(r.metricsToken) || subtle.ConstantTimeCompare(provided, r.metricsToken) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
 			w.Header().Set("Cache-Control", "no-store")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			apiresponse.WriteError(w, http.StatusUnauthorized, "metrics_authentication_required", "Metrics authentication required", "Provide a valid bearer token.", "")
 			return
 		}
 		next.ServeHTTP(w, request)

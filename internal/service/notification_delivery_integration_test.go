@@ -37,7 +37,7 @@ func (sender *concurrentEmailRecorder) snapshot() []emailpkg.Message {
 }
 
 // TestNotificationDeliveryWithNonSuperuserRLS is opt-in because it creates a
-// temporary NOSUPERUSER/NOBYPASSRLS role. It covers global tenant discovery,
+// temporary NOSUPERUSER/NOBYPASSRLS role. It covers paged registry discovery,
 // tenant-scoped SKIP LOCKED claims, concurrent workers, fencing, acknowledgement
 // isolation, bounded retries/dead state, and redacted persisted failures.
 func TestNotificationDeliveryWithNonSuperuserRLS(t *testing.T) {
@@ -56,11 +56,12 @@ func TestNotificationDeliveryWithNonSuperuserRLS(t *testing.T) {
 	var migrationReady bool
 	if err := admin.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM information_schema.columns
-		WHERE table_schema='public' AND table_name='notifications' AND column_name='lease_token')`).Scan(&migrationReady); err != nil {
+		WHERE table_schema='public' AND table_name='notifications' AND column_name='lease_token')
+		AND to_regprocedure('public.evidence_due_tenants(integer,uuid)') IS NOT NULL`).Scan(&migrationReady); err != nil {
 		t.Fatal(err)
 	}
 	if !migrationReady {
-		t.Fatal("notification reliability migration 000044 is not applied")
+		t.Fatal("notification reliability 000044 and active tenant registry 000056 are required")
 	}
 
 	orgA, orgB := uuid.NewString(), uuid.NewString()
@@ -116,7 +117,7 @@ func TestNotificationDeliveryWithNonSuperuserRLS(t *testing.T) {
 	grants := "GRANT USAGE ON SCHEMA public TO " + quotedRole + ";" +
 		"GRANT SELECT ON users,notification_channels,notification_rules,notifications TO " + quotedRole + ";" +
 		"GRANT INSERT,UPDATE ON notifications TO " + quotedRole + ";" +
-		"GRANT EXECUTE ON FUNCTION notification_due_tenants(INTEGER) TO " + quotedRole
+		"GRANT EXECUTE ON FUNCTION evidence_due_tenants(INTEGER,UUID) TO " + quotedRole
 	if _, err := admin.Exec(ctx, grants); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestNotificationDeliveryWithNonSuperuserRLS(t *testing.T) {
 	engineB := NewNotificationEngine(appPool, NewEventBus(), sender)
 	configFor := func(owner string) NotificationDeliveryConfig {
 		return NotificationDeliveryConfig{
-			OwnerID: owner, TenantBatch: 10, ClaimBatch: 1, LeaseDuration: 3 * time.Minute,
+			OwnerID: owner, TenantBatch: 1, ClaimBatch: 1, LeaseDuration: 3 * time.Minute,
 			RetryBaseDelay: time.Second, RetryMaxDelay: time.Minute, PollInterval: time.Second,
 		}
 	}

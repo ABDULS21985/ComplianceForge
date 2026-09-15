@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -46,20 +47,36 @@ type UserRepository interface {
 	IsSessionActive(ctx context.Context, orgID, userID, accessTokenHash string) (bool, error)
 }
 
+// AuthenticationIdentityLifecycle gates primary authentication with the
+// tenant's identity policy and completes one-time MFA/passkey ceremonies. It
+// is optional only for backwards-compatible unit construction; production
+// composition supplies it whenever identity lifecycle routes are enabled.
+type AuthenticationIdentityLifecycle interface {
+	BeginLoginMFA(context.Context, string, string, models.IdentityRequestMetadata) (*models.IdentityMFAChallengeResponse, error)
+	VerifyLoginMFA(context.Context, models.IdentityMFAProofInput, models.IdentityRequestMetadata) (*models.IdentityAuthenticationResult, error)
+	FinishPasskeyAuthentication(context.Context, models.IdentityPasskeyAuthenticationFinishInput, models.IdentityRequestMetadata) (*models.IdentityAuthenticationResult, error)
+	RequestEmailVerification(context.Context, models.IdentityEmailRequest, models.IdentityRequestMetadata) error
+}
+
 // AuthService handles authentication, registration, and revocable sessions.
 type AuthService struct {
-	userRepo  UserRepository
-	jwtConfig config.JWTConfig
-	logger    zerolog.Logger
+	userRepo          UserRepository
+	identityLifecycle AuthenticationIdentityLifecycle
+	jwtConfig         config.JWTConfig
+	logger            zerolog.Logger
 }
 
 // NewAuthService constructs a new AuthService.
-func NewAuthService(userRepo UserRepository, jwtCfg config.JWTConfig, logger zerolog.Logger) *AuthService {
-	return &AuthService{
+func NewAuthService(userRepo UserRepository, jwtCfg config.JWTConfig, logger zerolog.Logger, identityLifecycle ...AuthenticationIdentityLifecycle) *AuthService {
+	service := &AuthService{
 		userRepo:  userRepo,
 		jwtConfig: jwtCfg,
 		logger:    logger.With().Str("service", "auth").Logger(),
 	}
+	if len(identityLifecycle) > 0 {
+		service.identityLifecycle = identityLifecycle[0]
+	}
+	return service
 }
 
 // Login authenticates a user and persists a revocable token session.
@@ -79,21 +96,20 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (*TokenPair, 
 		s.logger.Warn().Str("email", email).Msg("invalid password attempt")
 		return nil, ErrInvalidCredentials
 	}
+	if s.identityLifecycle != nil {
+		challenge, challengeErr := s.identityLifecycle.BeginLoginMFA(ctx, user.OrganizationID, user.ID, req.Metadata)
+		if challengeErr != nil {
+			return nil, challengeErr
+		}
+		if challenge != nil {
+			return &TokenPair{User: user, MFARequired: true, MFAChallenge: challenge}, nil
+		}
+	}
 
-	tokens, err := s.generateTokenPair(user)
+	tokens, err := s.issueAuthenticatedSession(ctx, user, models.IdentityMethodPassword, nil, req.Metadata)
 	if err != nil {
-		s.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to generate token pair")
+		s.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to establish login session")
 		return nil, err
-	}
-	if err := s.persistSession(ctx, user, tokens); err != nil {
-		s.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to persist login session")
-		return nil, fmt.Errorf("creating login session: %w", err)
-	}
-
-	now := time.Now().UTC()
-	user.LastLoginAt = &now
-	if err := s.userRepo.UpdateLastLogin(ctx, user.OrganizationID, user.ID, now); err != nil {
-		s.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to update last login")
 	}
 
 	s.logger.Info().Str("user_id", user.ID).Str("email", email).Msg("user logged in successfully")
@@ -132,22 +148,73 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (*Token
 		Role:         models.UserRoleViewer,
 		Language:     "en",
 	}
+	if s.identityLifecycle != nil {
+		user.Status = models.UserStatusPendingVerification
+	}
 
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		s.logger.Error().Err(err).Str("email", req.Email).Msg("failed to create user")
 		return nil, err
 	}
 
-	tokens, err := s.generateTokenPair(user)
+	if s.identityLifecycle != nil {
+		if err := s.identityLifecycle.RequestEmailVerification(ctx, models.IdentityEmailRequest{
+			OrganizationID: user.OrganizationID,
+			Email:          user.Email,
+		}, req.Metadata); err != nil {
+			s.logger.Error().Err(err).Str("user_id", user.ID).Msg("registration created but verification delivery could not be queued")
+			return nil, fmt.Errorf("queueing registration verification: %w", err)
+		}
+		s.logger.Info().Str("user_id", user.ID).Msg("user registered pending email verification")
+		return &TokenPair{User: user, EmailVerificationRequired: true}, nil
+	}
+
+	tokens, err := s.issueAuthenticatedSession(ctx, user, models.IdentityMethodPassword, nil, req.Metadata)
 	if err != nil {
 		return nil, err
-	}
-	if err := s.persistSession(ctx, user, tokens); err != nil {
-		return nil, fmt.Errorf("creating registration session: %w", err)
 	}
 
 	s.logger.Info().Str("user_id", user.ID).Str("email", req.Email).Msg("user registered successfully")
 	return tokens, nil
+}
+
+// CompleteLoginMFA exchanges a consumed, tenant-bound MFA challenge for a
+// normal revocable session. No JWT is issued until the lifecycle service has
+// atomically accepted the one-time proof.
+func (s *AuthService) CompleteLoginMFA(ctx context.Context, input models.IdentityMFAProofInput, metadata models.IdentityRequestMetadata) (*TokenPair, error) {
+	if s.identityLifecycle == nil {
+		return nil, ErrInvalidCredentials
+	}
+	result, err := s.identityLifecycle.VerifyLoginMFA(ctx, input, metadata)
+	if err != nil {
+		return nil, err
+	}
+	return s.issueIdentityAuthentication(ctx, result, metadata)
+}
+
+// CompletePasskeyAuthentication completes WebAuthn verification before
+// creating the same revocable JWT session used by password/MFA login.
+func (s *AuthService) CompletePasskeyAuthentication(ctx context.Context, input models.IdentityPasskeyAuthenticationFinishInput, metadata models.IdentityRequestMetadata) (*TokenPair, error) {
+	if s.identityLifecycle == nil {
+		return nil, ErrInvalidCredentials
+	}
+	result, err := s.identityLifecycle.FinishPasskeyAuthentication(ctx, input, metadata)
+	if err != nil {
+		return nil, err
+	}
+	return s.issueIdentityAuthentication(ctx, result, metadata)
+}
+
+func (s *AuthService) issueIdentityAuthentication(ctx context.Context, result *models.IdentityAuthenticationResult, metadata models.IdentityRequestMetadata) (*TokenPair, error) {
+	if result == nil || result.OrganizationID == "" || result.UserID == "" {
+		return nil, ErrInvalidCredentials
+	}
+	user, err := s.userRepo.GetByID(ctx, result.OrganizationID, result.UserID)
+	if err != nil || !user.IsActive() {
+		return nil, ErrInvalidCredentials
+	}
+	authenticatedAt := result.AuthenticatedAt.UTC()
+	return s.issueAuthenticatedSession(ctx, user, result.AuthenticationMethod, &authenticatedAt, metadata)
 }
 
 // RefreshToken validates and atomically rotates a persisted refresh token.
@@ -163,11 +230,11 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (*T
 		return nil, ErrInvalidToken
 	}
 
-	tokens, err := s.generateTokenPair(user)
+	tokens, err := s.generateTokenPair(user, claims.MFAVerified)
 	if err != nil {
 		return nil, err
 	}
-	nextSession := sessionFromTokens(user, tokens)
+	nextSession := sessionFromTokens(user, tokens, models.IdentityMethodPassword, nil, models.IdentityRequestMetadata{})
 	rotated, err := s.userRepo.RotateSession(
 		ctx,
 		user.OrganizationID,
@@ -261,16 +328,17 @@ func (s *AuthService) parseToken(tokenString, expectedType string) (*Claims, err
 	return claims, nil
 }
 
-func (s *AuthService) generateTokenPair(user *models.User) (*TokenPair, error) {
+func (s *AuthService) generateTokenPair(user *models.User, sessionMFAVerified ...bool) (*TokenPair, error) {
 	now := time.Now().UTC()
 	accessExpiry := now.Add(time.Duration(s.jwtConfig.ExpiryHours) * time.Hour)
 	refreshExpiry := now.Add(7 * 24 * time.Hour)
+	mfaVerified := len(sessionMFAVerified) > 0 && sessionMFAVerified[0]
 
-	accessToken, err := s.signToken(user, authdomain.TokenTypeAccess, now, accessExpiry)
+	accessToken, err := s.signToken(user, authdomain.TokenTypeAccess, now, accessExpiry, mfaVerified)
 	if err != nil {
 		return nil, err
 	}
-	refreshToken, err := s.signToken(user, authdomain.TokenTypeRefresh, now, refreshExpiry)
+	refreshToken, err := s.signToken(user, authdomain.TokenTypeRefresh, now, refreshExpiry, mfaVerified)
 	if err != nil {
 		return nil, err
 	}
@@ -284,13 +352,14 @@ func (s *AuthService) generateTokenPair(user *models.User) (*TokenPair, error) {
 	}, nil
 }
 
-func (s *AuthService) signToken(user *models.User, tokenType string, issuedAt, expiresAt time.Time) (string, error) {
+func (s *AuthService) signToken(user *models.User, tokenType string, issuedAt, expiresAt time.Time, mfaVerified bool) (string, error) {
 	claims := &Claims{
 		UserID:         user.ID,
 		OrganizationID: user.OrganizationID,
 		Role:           string(user.Role),
 		Email:          user.Email,
 		TokenType:      tokenType,
+		MFAVerified:    mfaVerified,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Audience:  jwt.ClaimStrings{authdomain.TokenAudience},
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
@@ -304,18 +373,67 @@ func (s *AuthService) signToken(user *models.User, tokenType string, issuedAt, e
 }
 
 func (s *AuthService) persistSession(ctx context.Context, user *models.User, tokens *TokenPair) error {
-	return s.userRepo.CreateSession(ctx, sessionFromTokens(user, tokens))
+	return s.userRepo.CreateSession(ctx, sessionFromTokens(user, tokens, models.IdentityMethodPassword, nil, models.IdentityRequestMetadata{}))
 }
 
-func sessionFromTokens(user *models.User, tokens *TokenPair) *models.UserSession {
-	return &models.UserSession{
-		ID:               uuid.NewString(),
-		UserID:           user.ID,
-		OrganizationID:   user.OrganizationID,
-		TokenHash:        hashAuthToken(tokens.AccessToken),
-		RefreshTokenHash: hashAuthToken(tokens.RefreshToken),
-		ExpiresAt:        tokens.RefreshExpiresAt,
+func sessionFromTokens(user *models.User, tokens *TokenPair, method models.IdentityMethod, mfaVerifiedAt *time.Time, metadata models.IdentityRequestMetadata) *models.UserSession {
+	if method == "" {
+		method = models.IdentityMethodPassword
 	}
+	metadata = normalizeAuthenticationMetadata(metadata)
+	return &models.UserSession{
+		ID:                   uuid.NewString(),
+		UserID:               user.ID,
+		OrganizationID:       user.OrganizationID,
+		TokenHash:            hashAuthToken(tokens.AccessToken),
+		RefreshTokenHash:     hashAuthToken(tokens.RefreshToken),
+		IPAddress:            strings.TrimSpace(metadata.IPAddress),
+		UserAgent:            strings.TrimSpace(metadata.UserAgent),
+		DeviceName:           strings.TrimSpace(metadata.DeviceName),
+		AuthenticationMethod: method,
+		MFAVerifiedAt:        mfaVerifiedAt,
+		ExpiresAt:            tokens.RefreshExpiresAt,
+	}
+}
+
+func normalizeAuthenticationMetadata(metadata models.IdentityRequestMetadata) models.IdentityRequestMetadata {
+	metadata.IPAddress = strings.TrimSpace(metadata.IPAddress)
+	if metadata.IPAddress != "" && net.ParseIP(metadata.IPAddress) == nil {
+		metadata.IPAddress = ""
+	}
+	metadata.UserAgent = truncateAuthenticationRunes(strings.TrimSpace(strings.ToValidUTF8(metadata.UserAgent, "")), 500)
+	metadata.DeviceName = strings.TrimSpace(strings.ToValidUTF8(metadata.DeviceName, ""))
+	deviceRunes := []rune(metadata.DeviceName)
+	if len(deviceRunes) < 2 {
+		metadata.DeviceName = ""
+	} else if len(deviceRunes) > 120 {
+		metadata.DeviceName = string(deviceRunes[:120])
+	}
+	return metadata
+}
+
+func truncateAuthenticationRunes(value string, maximum int) string {
+	runes := []rune(value)
+	if len(runes) <= maximum {
+		return value
+	}
+	return string(runes[:maximum])
+}
+
+func (s *AuthService) issueAuthenticatedSession(ctx context.Context, user *models.User, method models.IdentityMethod, mfaVerifiedAt *time.Time, metadata models.IdentityRequestMetadata) (*TokenPair, error) {
+	tokens, err := s.generateTokenPair(user, mfaVerifiedAt != nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.userRepo.CreateSession(ctx, sessionFromTokens(user, tokens, method, mfaVerifiedAt, metadata)); err != nil {
+		return nil, fmt.Errorf("creating authenticated session: %w", err)
+	}
+	now := time.Now().UTC()
+	user.LastLoginAt = &now
+	if err := s.userRepo.UpdateLastLogin(ctx, user.OrganizationID, user.ID, now); err != nil {
+		s.logger.Error().Err(err).Str("user_id", user.ID).Msg("failed to update last login")
+	}
+	return tokens, nil
 }
 
 func hashAuthToken(token string) string {

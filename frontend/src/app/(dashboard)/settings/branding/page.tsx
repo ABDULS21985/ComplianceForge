@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '@/lib/api';
+import Image from 'next/image';
+import { isForbiddenResourceError } from '@/lib/resource-errors';
+import { ResourceState } from '@/components/data/resource-state';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,20 +53,20 @@ const FONT_OPTIONS = [
   'Inter', 'Roboto', 'Open Sans', 'Lato', 'Poppins', 'Nunito', 'Source Sans Pro', 'Montserrat', 'Raleway', 'IBM Plex Sans',
 ];
 
-const RADIUS_OPTIONS: { value: string; label: string; preview: string }[] = [
+const RADIUS_OPTIONS: { value: BrandingConfig['corner_radius']; label: string; preview: string }[] = [
   { value: 'none', label: 'None', preview: 'rounded-none' },
   { value: 'small', label: 'Small', preview: 'rounded' },
   { value: 'medium', label: 'Medium', preview: 'rounded-lg' },
   { value: 'large', label: 'Large', preview: 'rounded-xl' },
 ];
 
-const DENSITY_OPTIONS = [
+const DENSITY_OPTIONS: { value: BrandingConfig['density']; label: string }[] = [
   { value: 'compact', label: 'Compact' },
   { value: 'comfortable', label: 'Comfortable' },
   { value: 'spacious', label: 'Spacious' },
 ];
 
-const SIDEBAR_STYLES = [
+const SIDEBAR_STYLES: { value: BrandingConfig['sidebar_style']; label: string; description: string }[] = [
   { value: 'full', label: 'Full Width', description: 'Expanded sidebar with labels' },
   { value: 'compact', label: 'Compact', description: 'Narrower sidebar' },
   { value: 'icons_only', label: 'Icons Only', description: 'Minimal icon sidebar' },
@@ -79,6 +82,8 @@ export default function BrandingSettingsPage() {
   const [config, setConfig] = useState<BrandingConfig>(DEFAULT_CONFIG);
   const [savedConfig, setSavedConfig] = useState<BrandingConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -95,17 +100,23 @@ export default function BrandingSettingsPage() {
   const fetchConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setForbidden(false);
     try {
       const data = (await api.branding.get()) as BrandingConfig;
       const merged = { ...DEFAULT_CONFIG, ...data };
       setConfig(merged);
       setSavedConfig(merged);
+      setHasLoaded(true);
       setDomainInput(merged.custom_domain ?? '');
       if (merged.domain_status === 'active') setDomainStep('active');
       else if (merged.domain_status === 'verified') setDomainStep('active');
       else if (merged.domain_status === 'pending_verification') setDomainStep('dns');
       else setDomainStep('enter');
-    } catch {
+    } catch (cause: unknown) {
+      if (isForbiddenResourceError(cause)) {
+        setHasLoaded(false);
+        setForbidden(true);
+      }
       setError('Failed to load branding settings.');
     } finally {
       setLoading(false);
@@ -201,13 +212,22 @@ export default function BrandingSettingsPage() {
   const hasChanges = JSON.stringify(config) !== JSON.stringify(savedConfig);
 
   // Loading state
-  if (loading) {
+  if (loading && !hasLoaded) {
     return (
-      <div className="p-6 space-y-6 animate-pulse">
-        <div className="h-8 bg-gray-200 rounded w-48" />
-        <div className="h-64 bg-gray-100 rounded-xl" />
-        <div className="h-48 bg-gray-100 rounded-xl" />
-      </div>
+      <ResourceState kind="loading" loadingLayout="detail" title="Loading branding settings" />
+    );
+  }
+
+  if (forbidden) return <ResourceState kind="forbidden" title="Branding settings access unavailable" />;
+
+  if (error && !hasLoaded) {
+    return (
+      <ResourceState
+        kind="error"
+        title="Branding settings could not be loaded"
+        description={error}
+        onRetry={() => void fetchConfig()}
+      />
     );
   }
 
@@ -219,23 +239,27 @@ export default function BrandingSettingsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Branding Settings</h1>
           <p className="text-sm text-gray-500 mt-1">Customize the look and feel of your GRC platform</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
+            type="button"
             onClick={() => setShowPreview(!showPreview)}
-            className="px-4 py-2 text-sm font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+            aria-expanded={showPreview}
+            className="min-h-11 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             {showPreview ? 'Hide Preview' : 'Preview'}
           </button>
           <button
+            type="button"
             onClick={handleReset}
-            className="px-4 py-2 text-sm font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+            className="min-h-11 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Reset to Default
           </button>
           <button
+            type="button"
             onClick={handleSave}
             disabled={saving || !hasChanges}
-            className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="min-h-11 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
@@ -244,13 +268,13 @@ export default function BrandingSettingsPage() {
 
       {/* Status messages */}
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm">
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-800 p-3 rounded-lg text-sm">
           {error}
-          <button onClick={() => setError(null)} className="ml-2 font-medium underline">Dismiss</button>
+          <button type="button" onClick={() => setError(null)} className="ml-2 min-h-11 rounded px-2 font-medium underline">Dismiss</button>
         </div>
       )}
       {success && (
-        <div className="bg-green-50 border border-green-200 text-green-700 p-3 rounded-lg text-sm">
+        <div role="status" aria-live="polite" className="bg-green-50 border border-green-300 text-green-800 p-3 rounded-lg text-sm">
           Branding settings saved successfully.
         </div>
       )}
@@ -268,15 +292,17 @@ export default function BrandingSettingsPage() {
                 { field: 'favicon_url' as const, label: 'Favicon', ref: faviconRef },
               ]).map(({ field, label, ref }) => (
                 <div key={field}>
-                  <label className="text-xs font-medium text-gray-600 mb-1.5 block">{label}</label>
-                  <div
+                  <p className="text-xs font-medium text-gray-600 mb-1.5">{label}</p>
+                  <button
+                    type="button"
+                    aria-label={`Upload ${label}`}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={handleDrop(field)}
                     onClick={() => ref.current?.click()}
-                    className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors min-h-[100px] flex flex-col items-center justify-center"
+                    className="flex min-h-[100px] w-full cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-4 text-center transition-colors motion-reduce:transition-none hover:border-indigo-400 hover:bg-indigo-50/30"
                   >
                     {config[field] ? (
-                      <img src={config[field]} alt={label} className="max-h-12 max-w-full object-contain" />
+                      <Image unoptimized src={config[field]} alt="" width={160} height={48} className="max-h-12 max-w-full object-contain" />
                     ) : (
                       <svg className="w-8 h-8 text-gray-300 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -287,9 +313,10 @@ export default function BrandingSettingsPage() {
                     ) : (
                       <span className="text-xs text-gray-400 mt-1">Drop or click</span>
                     )}
-                  </div>
+                  </button>
                   <input
                     ref={ref}
+                    aria-label={`${label} image file`}
                     type="file"
                     accept="image/*"
                     className="hidden"
@@ -360,7 +387,9 @@ export default function BrandingSettingsPage() {
                   {RADIUS_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
-                      onClick={() => updateField('corner_radius', opt.value as any)}
+                      type="button"
+                      aria-pressed={config.corner_radius === opt.value}
+                      onClick={() => updateField('corner_radius', opt.value)}
                       className={`flex-1 py-2 text-xs font-medium border rounded-lg transition-colors ${
                         config.corner_radius === opt.value
                           ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
@@ -390,7 +419,7 @@ export default function BrandingSettingsPage() {
                         type="radio"
                         name="sidebar_style"
                         checked={config.sidebar_style === s.value}
-                        onChange={() => updateField('sidebar_style', s.value as any)}
+                        onChange={() => updateField('sidebar_style', s.value)}
                         className="w-3.5 h-3.5 text-indigo-600"
                       />
                       <div>
@@ -409,7 +438,9 @@ export default function BrandingSettingsPage() {
                   {DENSITY_OPTIONS.map((d) => (
                     <button
                       key={d.value}
-                      onClick={() => updateField('density', d.value as any)}
+                      type="button"
+                      aria-pressed={config.density === d.value}
+                      onClick={() => updateField('density', d.value)}
                       className={`flex-1 py-2 text-xs font-medium border rounded-lg transition-colors ${
                         config.density === d.value
                           ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
@@ -430,13 +461,17 @@ export default function BrandingSettingsPage() {
                 <div className="text-xs text-gray-500">Display attribution in the footer</div>
               </div>
               <button
+                type="button"
+                role="switch"
+                aria-checked={config.show_powered_by}
+                aria-label="Show Powered by ComplianceForge"
                 onClick={() => updateField('show_powered_by', !config.show_powered_by)}
-                className={`relative w-11 h-6 rounded-full transition-colors ${
+                className={`relative min-h-11 w-11 rounded-full transition-colors motion-reduce:transition-none ${
                   config.show_powered_by ? 'bg-indigo-600' : 'bg-gray-300'
                 }`}
               >
                 <span
-                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  className={`absolute left-0.5 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white shadow transition-transform motion-reduce:transition-none ${
                     config.show_powered_by ? 'translate-x-5' : ''
                   }`}
                 />
@@ -573,7 +608,7 @@ export default function BrandingSettingsPage() {
                       }}
                     >
                       {config.logo_url ? (
-                        <img src={config.logo_url} alt="" className="w-full h-4 object-contain mb-1" />
+                        <Image unoptimized src={config.logo_url} alt="" width={64} height={16} className="mb-1 h-4 w-full object-contain" />
                       ) : (
                         <div className="w-full h-4 rounded bg-white/20 mb-1" />
                       )}

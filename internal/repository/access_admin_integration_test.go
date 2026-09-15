@@ -93,6 +93,8 @@ func TestAccessAdministrationWithNonSuperuserTenants(t *testing.T) {
 	defer cleanup()
 	grant := "GRANT USAGE ON SCHEMA public TO " + quotedRole +
 		"; GRANT SELECT ON organizations,users,permissions TO " + quotedRole +
+		"; GRANT UPDATE ON organizations TO " + quotedRole +
+		"; GRANT SELECT ON effective_user_roles,access_sod_rules,access_sod_exceptions TO " + quotedRole +
 		"; GRANT SELECT,INSERT,UPDATE,DELETE ON roles,role_permissions,user_roles TO " + quotedRole +
 		"; GRANT SELECT,INSERT ON role_change_events,queue_outbox TO " + quotedRole
 	if _, err := pool.Exec(ctx, grant); err != nil {

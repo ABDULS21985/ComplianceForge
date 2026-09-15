@@ -35,37 +35,37 @@ type RegulatoryService interface {
 
 // RegulatoryChangeFilters holds filter parameters for listing regulatory changes.
 type RegulatoryChangeFilters struct {
-	Status     string `json:"status"`
-	Severity   string `json:"severity"`
-	Region     string `json:"region"`
-	Category   string `json:"category"`
-	Search     string `json:"search"`
+	Status   string `json:"status"`
+	Severity string `json:"severity"`
+	Region   string `json:"region"`
+	Category string `json:"category"`
+	Search   string `json:"search"`
 }
 
 // RegulatoryChange represents a regulatory change event.
 type RegulatoryChange struct {
-	ID              string   `json:"id"`
-	Title           string   `json:"title"`
-	Summary         string   `json:"summary"`
-	SourceID        string   `json:"source_id"`
-	SourceName      string   `json:"source_name"`
-	Region          string   `json:"region"`
-	Category        string   `json:"category"` // data_privacy, cybersecurity, financial, environmental, health
-	Severity        string   `json:"severity"` // critical, high, medium, low, informational
-	Status          string   `json:"status"`   // new, assessed, responded, archived
-	EffectiveDate   string   `json:"effective_date,omitempty"`
-	PublishedDate   string   `json:"published_date"`
+	ID                 string   `json:"id"`
+	Title              string   `json:"title"`
+	Summary            string   `json:"summary"`
+	SourceID           string   `json:"source_id"`
+	SourceName         string   `json:"source_name"`
+	Region             string   `json:"region"`
+	Category           string   `json:"category"` // data_privacy, cybersecurity, financial, environmental, health
+	Severity           string   `json:"severity"` // critical, high, medium, low, informational
+	Status             string   `json:"status"`   // new, assessed, responded, archived
+	EffectiveDate      string   `json:"effective_date,omitempty"`
+	PublishedDate      string   `json:"published_date"`
 	AffectedFrameworks []string `json:"affected_frameworks,omitempty"`
-	URL             string   `json:"url,omitempty"`
-	CreatedAt       string   `json:"created_at"`
+	URL                string   `json:"url,omitempty"`
+	CreatedAt          string   `json:"created_at"`
 }
 
 // RegulatoryChangeDetail extends RegulatoryChange with full text and assessment.
 type RegulatoryChangeDetail struct {
 	RegulatoryChange
-	FullText       string            `json:"full_text,omitempty"`
-	Assessment     *ImpactAssessment `json:"assessment,omitempty"`
-	ResponsePlan   *RegulatoryResponsePlan `json:"response_plan,omitempty"`
+	FullText     string                  `json:"full_text,omitempty"`
+	Assessment   *ImpactAssessment       `json:"assessment,omitempty"`
+	ResponsePlan *RegulatoryResponsePlan `json:"response_plan,omitempty"`
 }
 
 // ImpactAssessmentRequest is the payload for POST /regulatory/changes/{id}/assess.
@@ -90,16 +90,16 @@ type ImpactAssessment struct {
 
 // RegulatoryResponsePlan is the response plan for a regulatory change.
 type RegulatoryResponsePlan struct {
-	ID             string                 `json:"id"`
-	ChangeID       string                 `json:"change_id"`
-	OrganizationID string                 `json:"organization_id"`
-	Title          string                 `json:"title" validate:"required"`
-	Status         string                 `json:"status"` // draft, in_progress, completed
-	Actions        []RegulatoryAction     `json:"actions,omitempty"`
-	DueDate        string                 `json:"due_date,omitempty"`
-	CreatedBy      string                 `json:"created_by"`
-	CreatedAt      string                 `json:"created_at"`
-	UpdatedAt      string                 `json:"updated_at"`
+	ID             string             `json:"id"`
+	ChangeID       string             `json:"change_id"`
+	OrganizationID string             `json:"organization_id"`
+	Title          string             `json:"title" validate:"required"`
+	Status         string             `json:"status"` // draft, in_progress, completed
+	Actions        []RegulatoryAction `json:"actions,omitempty"`
+	DueDate        string             `json:"due_date,omitempty"`
+	CreatedBy      string             `json:"created_by"`
+	CreatedAt      string             `json:"created_at"`
+	UpdatedAt      string             `json:"updated_at"`
 }
 
 // RegulatoryAction is an action item within a regulatory response plan.
@@ -140,13 +140,13 @@ type RegulatorySubscription struct {
 
 // RegulatoryDashboard provides aggregate regulatory intelligence metrics.
 type RegulatoryDashboard struct {
-	TotalChanges      int            `json:"total_changes"`
-	NewChanges        int            `json:"new_changes"`
-	PendingAssessment int            `json:"pending_assessment"`
-	CriticalChanges   int            `json:"critical_changes"`
-	ByRegion          map[string]int `json:"by_region"`
-	ByCategory        map[string]int `json:"by_category"`
-	BySeverity        map[string]int `json:"by_severity"`
+	TotalChanges      int                `json:"total_changes"`
+	NewChanges        int                `json:"new_changes"`
+	PendingAssessment int                `json:"pending_assessment"`
+	CriticalChanges   int                `json:"critical_changes"`
+	ByRegion          map[string]int     `json:"by_region"`
+	ByCategory        map[string]int     `json:"by_category"`
+	BySeverity        map[string]int     `json:"by_severity"`
 	UpcomingDeadlines []RegulatoryChange `json:"upcoming_deadlines"`
 }
 
@@ -204,7 +204,7 @@ func (h *RegulatoryHandler) ListChanges(w http.ResponseWriter, r *http.Request) 
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{
 		"data": changes,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -230,7 +230,7 @@ func (h *RegulatoryHandler) GetChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", detail)
 }
 
 // AssessImpact handles POST /regulatory/changes/{id}/assess.
@@ -255,7 +255,7 @@ func (h *RegulatoryHandler) AssessImpact(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, assessment)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", assessment)
 }
 
 // GetAssessment handles GET /regulatory/changes/{id}/assessment.
@@ -273,7 +273,7 @@ func (h *RegulatoryHandler) GetAssessment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, assessment)
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", assessment)
 }
 
 // CreateResponsePlan handles POST /regulatory/changes/{id}/respond.
@@ -302,7 +302,7 @@ func (h *RegulatoryHandler) CreateResponsePlan(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, plan)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", plan)
 }
 
 // ListSources handles GET /regulatory/sources.
@@ -315,7 +315,7 @@ func (h *RegulatoryHandler) ListSources(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": sources})
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{"data": sources})
 }
 
 // AddSource handles POST /regulatory/sources.
@@ -339,7 +339,7 @@ func (h *RegulatoryHandler) AddSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, source)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", source)
 }
 
 // ListSubscriptions handles GET /regulatory/subscriptions.
@@ -352,7 +352,7 @@ func (h *RegulatoryHandler) ListSubscriptions(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": subs})
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{"data": subs})
 }
 
 // Subscribe handles POST /regulatory/subscriptions.
@@ -371,7 +371,7 @@ func (h *RegulatoryHandler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, sub)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", sub)
 }
 
 // GetDashboard handles GET /regulatory/dashboard.
@@ -384,7 +384,7 @@ func (h *RegulatoryHandler) GetDashboard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": dashboard})
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{"data": dashboard})
 }
 
 // GetTimeline handles GET /regulatory/timeline.
@@ -404,5 +404,5 @@ func (h *RegulatoryHandler) GetTimeline(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": events})
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{"data": events})
 }

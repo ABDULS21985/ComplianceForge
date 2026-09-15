@@ -1,5 +1,3 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   buildQuickCreateRoute,
   getSafePostAuthRedirect,
@@ -8,11 +6,15 @@ import {
   QUICK_CREATE_ROUTES,
   ROUTES,
 } from '@/lib/routes';
+import { describe, expect, it } from 'vitest';
 
 describe('route contracts', () => {
   it.each([
     ROUTES.auth.login,
     ROUTES.auth.forgotPassword,
+    ROUTES.auth.acceptInvitation,
+    ROUTES.auth.resetPassword,
+    ROUTES.auth.verifyEmail,
     ROUTES.portals.vendor,
     ROUTES.portals.board,
   ])('marks %s as public', (route) => {
@@ -52,6 +54,9 @@ describe('post-auth redirects', () => {
     'dashboard',
     '/login',
     '/forgot-password',
+    '/accept-invitation',
+    '/reset-password',
+    '/verify-email',
   ])('rejects unsafe or looping destination %s', (destination) => {
     expect(getSafePostAuthRedirect(destination)).toBe(ROUTES.dashboard);
   });

@@ -158,10 +158,12 @@ func TestWorkerShutdownPeriod(t *testing.T) {
 func TestBridgeEventsBuildsTenantAwareNotificationEnvelope(t *testing.T) {
 	orgID := uuid.NewString()
 	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	thresholdTime := time.Date(2026, time.September, 14, 8, 0, 0, 0, time.UTC)
 	events := make(chan service.Event, 1)
 	events <- service.Event{
-		Type: "risk.created", OrgID: orgID, EntityType: "risk", EntityID: entityID,
-		Data: map[string]interface{}{"title": "Concentration risk"}, Timestamp: time.Now().UTC(),
+		ID: eventID, Type: "risk.created", OrgID: orgID, EntityType: "risk", EntityID: entityID,
+		Data: map[string]interface{}{"title": "Concentration risk"}, Timestamp: thresholdTime,
 	}
 	close(events)
 	recorder := &outboxRecorder{}
@@ -175,8 +177,21 @@ func TestBridgeEventsBuildsTenantAwareNotificationEnvelope(t *testing.T) {
 	if envelope.Type != "notification.event" || envelope.TenantID != orgID || envelope.CausationID != entityID {
 		t.Fatalf("notification envelope = %+v", envelope)
 	}
+	if envelope.ID != eventID || envelope.CorrelationID != eventID || !envelope.CreatedAt.Equal(thresholdTime) {
+		t.Fatalf("stable event identity was not preserved: %+v", envelope)
+	}
 	if envelope.Metadata["entity_type"] != "risk" || envelope.Metadata["entity_id"] != entityID {
 		t.Fatalf("notification metadata = %+v", envelope.Metadata)
+	}
+}
+
+func TestBridgeEventsKeepsFirstDeterministicOccurrenceSnapshot(t *testing.T) {
+	events := make(chan service.Event, 1)
+	events <- service.Event{ID: uuid.NewString(), Type: "risk.review_due_soon", OrgID: uuid.NewString()}
+	close(events)
+	recorder := &outboxRecorder{err: queuepkg.ErrOutboxConflict}
+	if err := bridgeEvents(context.Background(), events, recorder, new(pgxpool.Pool), "worker.test"); err != nil {
+		t.Fatalf("duplicate scheduled occurrence stopped bridge: %v", err)
 	}
 }
 

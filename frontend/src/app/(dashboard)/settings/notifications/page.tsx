@@ -1,19 +1,18 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { LockKeyhole } from 'lucide-react';
-
+import { Card, CardContent } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { hasSettingsPermission } from '@/lib/enterprise-settings';
+import { LockKeyhole } from 'lucide-react';
 import { normalizePermissionMap } from '@/lib/navigation';
-import { useAuthStore } from '@/store/auth-store';
-import { NotificationPreferencesForm } from '@/components/notifications/notification-preferences-form';
 import { NotificationChannelsPanel } from '@/components/notifications/notification-channels-panel';
+import { NotificationPreferencesForm } from '@/components/notifications/notification-preferences-form';
 import { NotificationRulesPanel } from '@/components/notifications/notification-rules-panel';
 import { NotificationTemplatesPanel } from '@/components/notifications/notification-templates-panel';
-import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useAuthStore } from '@/store/auth-store';
+import { useQuery } from '@tanstack/react-query';
 
 export default function NotificationSettingsPage() {
   const user = useAuthStore((state) => state.user);

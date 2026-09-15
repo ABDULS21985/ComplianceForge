@@ -35,6 +35,7 @@ func TestRiskHandlerUsesAuthenticatedTenantAndRejectsUnknownFields(t *testing.T)
 	h := NewRiskHandler(stub)
 	request := httptest.NewRequest(http.MethodPost, "/risks", strings.NewReader(`{"title":"Availability","inherent_likelihood":4,"inherent_impact":5}`))
 	ctx := context.WithValue(request.Context(), middleware.ContextKeyOrgID, riskTestHandlerOrgID)
+	ctx = handlerAllowedContext(ctx)
 	request = request.WithContext(ctx)
 	response := httptest.NewRecorder()
 	h.Create(response, request)
@@ -55,7 +56,7 @@ func TestRiskHandlerMapsLifecycleConflict(t *testing.T) {
 	stub := &riskHandlerServiceStub{err: service.ErrInvalidRiskTransition}
 	h := NewRiskHandler(stub)
 	request := httptest.NewRequest(http.MethodPost, "/risks", strings.NewReader(`{"title":"Risk"}`))
-	request = request.WithContext(context.WithValue(request.Context(), middleware.ContextKeyOrgID, riskTestHandlerOrgID))
+	request = request.WithContext(handlerAllowedContext(context.WithValue(request.Context(), middleware.ContextKeyOrgID, riskTestHandlerOrgID)))
 	response := httptest.NewRecorder()
 	h.Create(response, request)
 	if response.Code != http.StatusConflict {

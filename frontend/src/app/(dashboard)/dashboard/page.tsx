@@ -1,45 +1,45 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import Link from 'next/link';
 import {
-  AlertTriangle,
-  Shield,
+  Activity,
+  AlertCircle,
   AlertOctagon,
+  AlertTriangle,
+  ArrowRight,
+  Building2,
   ClipboardCheck,
   FileText,
-  Building2,
   Plus,
   Search,
-  ArrowRight,
-  AlertCircle,
-  Activity,
+  Shield,
 } from 'lucide-react';
 import {
-  BarChart,
   Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-  PieChart,
-  Pie,
-  Legend,
 } from 'recharts';
-
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { formatRelativeTime, formatPercentage } from '@/lib/utils';
-import api from '@/lib/api';
-import { QUICK_CREATE_ROUTES, ROUTES } from '@/lib/routes';
 import type {
-  DashboardSummary,
   ComplianceScore,
+  DashboardSummary,
   Incident,
 } from '@/types';
+import { formatPercentage, formatRelativeTime } from '@/lib/utils';
+import { QUICK_CREATE_ROUTES, ROUTES } from '@/lib/routes';
+import { ResourceBoundary, StaleDataNotice } from '@/components/data/resource-state';
+import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 
 // ---------------------------------------------------------------------------
 // Hooks
@@ -49,6 +49,7 @@ function useDashboard() {
   return useQuery<DashboardSummary>({
     queryKey: ['dashboard'],
     queryFn: () => api.dashboard.summary() as Promise<DashboardSummary>,
+    staleTime: 60_000,
   });
 }
 
@@ -57,6 +58,7 @@ function useUrgentBreaches() {
     queryKey: ['incidents', 'urgent-breaches'],
     queryFn: () => api.incidents.urgentBreaches() as Promise<Incident[]>,
     refetchInterval: 60000,
+    staleTime: 30_000,
   });
 }
 
@@ -64,6 +66,7 @@ function useComplianceScores() {
   return useQuery<ComplianceScore[]>({
     queryKey: ['compliance', 'scores'],
     queryFn: () => api.compliance.scores() as Promise<ComplianceScore[]>,
+    staleTime: 60_000,
   });
 }
 
@@ -78,20 +81,6 @@ const RISK_LEVEL_COLORS: Record<string, string> = {
   low: '#22C55E',
   very_low: '#06B6D4',
 };
-
-function StatCardSkeleton() {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="animate-pulse space-y-3">
-          <div className="h-4 w-24 rounded bg-muted" />
-          <div className="h-8 w-16 rounded bg-muted" />
-          <div className="h-3 w-32 rounded bg-muted" />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function StatCard({
   title,
@@ -119,43 +108,6 @@ function StatCard({
           {subtitle && (
             <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
           )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ChartSkeleton({ height = 300 }: { height?: number }) {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-5 w-40 rounded bg-muted" />
-          <div
-            className="w-full rounded bg-muted"
-            style={{ height: `${height}px` }}
-          />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ActivitySkeleton() {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-5 w-32 rounded bg-muted" />
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex items-start gap-3">
-              <div className="h-8 w-8 rounded-full bg-muted" />
-              <div className="flex-1 space-y-2">
-                <div className="h-4 w-3/4 rounded bg-muted" />
-                <div className="h-3 w-1/4 rounded bg-muted" />
-              </div>
-            </div>
-          ))}
         </div>
       </CardContent>
     </Card>
@@ -201,6 +153,43 @@ export default function DashboardPage() {
           Executive overview of your organisation&apos;s compliance posture.
         </p>
       </div>
+
+      {(dashboard.isError && data) ||
+      (complianceScores.isError && scores) ||
+      (urgentBreaches.isError && breaches) ? (
+        <StaleDataNotice
+          isRefreshing={
+            dashboard.isFetching ||
+            complianceScores.isFetching ||
+            urgentBreaches.isFetching
+          }
+          lastUpdatedAt={Math.min(
+            ...[
+              dashboard.dataUpdatedAt,
+              complianceScores.dataUpdatedAt,
+              urgentBreaches.dataUpdatedAt,
+            ].filter((value) => value > 0),
+          )}
+          onRefresh={() => {
+            void Promise.all([
+              dashboard.refetch(),
+              complianceScores.refetch(),
+              urgentBreaches.refetch(),
+            ]);
+          }}
+        />
+      ) : null}
+
+      {urgentBreaches.isError && !breaches && (
+        <ResourceBoundary
+          isError
+          errorTitle="Urgent breach alerts could not be checked"
+          errorDescription="Dashboard metrics remain available, but confirm incident deadlines in the incident register."
+          onRetry={() => void urgentBreaches.refetch()}
+        >
+          {null}
+        </ResourceBoundary>
+      )}
 
       {/* Section A: GDPR Breach Alert Banner */}
       {breaches && breaches.length > 0 && (
@@ -248,16 +237,18 @@ export default function DashboardPage() {
 
       {/* Section B: KPI StatCards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {dashboard.isLoading ? (
-          Array.from({ length: 6 }).map((_, i) => <StatCardSkeleton key={i} />)
-        ) : dashboard.error ? (
-          <Card className="col-span-full">
-            <CardContent className="flex items-center gap-2 p-6 text-destructive">
-              <AlertCircle className="h-5 w-5" />
-              <span>Failed to load dashboard data. Please try again.</span>
-            </CardContent>
-          </Card>
-        ) : data ? (
+        <ResourceBoundary
+          className="col-span-full"
+          isError={dashboard.isError && !data}
+          isLoading={dashboard.isLoading}
+          loadingLayout="cards"
+          loadingTitle="Loading executive metrics"
+          errorTitle="Dashboard metrics could not be loaded"
+          errorDescription="The service did not return executive metrics. Retry without leaving the dashboard."
+          onRetry={() => void dashboard.refetch()}
+          retrying={dashboard.isFetching}
+        >
+          {data ? (
           <>
             <StatCard
               title="Compliance Score"
@@ -296,23 +287,26 @@ export default function DashboardPage() {
               icon={Building2}
             />
           </>
-        ) : null}
+          ) : null}
+        </ResourceBoundary>
       </div>
 
       {/* Section C + D: Charts row */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Section C: Framework Compliance bar chart */}
         <div className="lg:col-span-2">
-          {complianceScores.isLoading ? (
-            <ChartSkeleton height={320} />
-          ) : complianceScores.error ? (
-            <Card>
-              <CardContent className="flex items-center gap-2 p-6 text-destructive">
-                <AlertCircle className="h-5 w-5" />
-                <span>Failed to load compliance scores.</span>
-              </CardContent>
-            </Card>
-          ) : (
+          <ResourceBoundary
+            isEmpty={!complianceScores.isLoading && !complianceScores.isError && complianceChartData.length === 0}
+            isError={complianceScores.isError && !scores}
+            isLoading={complianceScores.isLoading}
+            loadingLayout="detail"
+            loadingTitle="Loading framework compliance"
+            emptyTitle="No framework compliance data"
+            emptyDescription="Adopt and assess a framework to populate compliance scores."
+            errorTitle="Framework compliance could not be loaded"
+            onRetry={() => void complianceScores.refetch()}
+            retrying={complianceScores.isFetching}
+          >
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">
@@ -320,11 +314,7 @@ export default function DashboardPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {complianceChartData.length === 0 ? (
-                  <p className="py-8 text-center text-muted-foreground">
-                    No compliance data available yet.
-                  </p>
-                ) : (
+                {complianceChartData.length > 0 && (
                   <ResponsiveContainer width="100%" height={320}>
                     <BarChart
                       layout="vertical"
@@ -368,25 +358,29 @@ export default function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-          )}
+          </ResourceBoundary>
         </div>
 
         {/* Section D: Risk Distribution donut chart */}
         <div>
-          {dashboard.isLoading ? (
-            <ChartSkeleton height={320} />
-          ) : (
+          <ResourceBoundary
+            isEmpty={Boolean(data) && (riskChartData.length === 0 || riskChartData.every((entry) => entry.value === 0))}
+            isError={dashboard.isError && !data}
+            isLoading={dashboard.isLoading}
+            loadingLayout="detail"
+            loadingTitle="Loading risk distribution"
+            emptyTitle="No risk distribution data"
+            emptyDescription="Register a risk to populate the distribution."
+            errorTitle="Risk distribution could not be loaded"
+            onRetry={() => void dashboard.refetch()}
+          >
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Risk Distribution</CardTitle>
               </CardHeader>
               <CardContent>
-                {riskChartData.length === 0 ||
-                riskChartData.every((d) => d.value === 0) ? (
-                  <p className="py-8 text-center text-muted-foreground">
-                    No risk data available yet.
-                  </p>
-                ) : (
+                {riskChartData.length > 0 &&
+                !riskChartData.every((d) => d.value === 0) && (
                   <ResponsiveContainer width="100%" height={280}>
                     <PieChart>
                       <Pie
@@ -413,7 +407,7 @@ export default function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-          )}
+          </ResourceBoundary>
         </div>
       </div>
 
@@ -421,9 +415,17 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Section E: Recent Activity */}
         <div className="lg:col-span-2">
-          {dashboard.isLoading ? (
-            <ActivitySkeleton />
-          ) : (
+          <ResourceBoundary
+            isEmpty={Boolean(data) && !data?.recent_activity?.length}
+            isError={dashboard.isError && !data}
+            isLoading={dashboard.isLoading}
+            loadingLayout="table"
+            loadingTitle="Loading recent activity"
+            emptyTitle="No recent activity"
+            emptyDescription="New governance activity will appear here."
+            errorTitle="Recent activity could not be loaded"
+            onRetry={() => void dashboard.refetch()}
+          >
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-lg">Recent Activity</CardTitle>
@@ -434,12 +436,7 @@ export default function DashboardPage() {
                 </Link>
               </CardHeader>
               <CardContent>
-                {!data?.recent_activity ||
-                data.recent_activity.length === 0 ? (
-                  <p className="py-8 text-center text-muted-foreground">
-                    No recent activity.
-                  </p>
-                ) : (
+                {data?.recent_activity && data.recent_activity.length > 0 && (
                   <div className="space-y-4">
                     {data.recent_activity.slice(0, 10).map((entry) => (
                       <div
@@ -471,7 +468,7 @@ export default function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-          )}
+          </ResourceBoundary>
         </div>
 
         {/* Section F: Quick Actions */}

@@ -1,12 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
-
-import { cn } from '@/lib/utils';
-import type { Pagination } from '@/types';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Select,
   SelectContent,
@@ -14,8 +9,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { TableSkeleton } from '@/components/data/loading-skeleton';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { EmptyState } from '@/components/data/empty-state';
+import { Input } from '@/components/ui/input';
+import type { Pagination } from '@/types';
+import { TableSkeleton } from '@/components/data/loading-skeleton';
 
 // ---- Types ----
 export interface ColumnDef<T> {
@@ -33,6 +32,7 @@ export interface FilterConfig {
 }
 
 interface DataTableProps<T> {
+  accessibleLabel?: string;
   columns: ColumnDef<T>[];
   data: T[];
   pagination?: Pagination;
@@ -50,6 +50,7 @@ interface DataTableProps<T> {
 }
 
 export function DataTable<T extends Record<string, unknown>>({
+  accessibleLabel = 'Data table',
   columns,
   data,
   pagination,
@@ -92,11 +93,11 @@ export function DataTable<T extends Record<string, unknown>>({
   );
 
   const getSortIcon = (field: string) => {
-    if (sortField !== field) return <ArrowUpDown className="ml-1 h-3.5 w-3.5 text-muted-foreground/50" />;
+    if (sortField !== field) return <ArrowUpDown aria-hidden="true" className="ml-1 h-3.5 w-3.5 text-muted-foreground/50" />;
     return sortDirection === 'asc' ? (
-      <ArrowUp className="ml-1 h-3.5 w-3.5" />
+      <ArrowUp aria-hidden="true" className="ml-1 h-3.5 w-3.5" />
     ) : (
-      <ArrowDown className="ml-1 h-3.5 w-3.5" />
+      <ArrowDown aria-hidden="true" className="ml-1 h-3.5 w-3.5" />
     );
   };
 
@@ -107,6 +108,10 @@ export function DataTable<T extends Record<string, unknown>>({
   const endItem = pagination
     ? Math.min(pagination.page * pagination.page_size, pagination.total_items)
     : data.length;
+  const rowLabel = (row: T, rowIndex: number) => {
+    const identity = row.name ?? row.title ?? row.reference ?? row.id;
+    return `Open ${typeof identity === 'string' && identity.trim() ? identity : `row ${rowIndex + 1}`}`;
+  };
 
   return (
     <div className={cn('space-y-4', className)}>
@@ -115,8 +120,9 @@ export function DataTable<T extends Record<string, unknown>>({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {onSearch && (
             <div className="relative max-w-sm flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search aria-hidden="true" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                aria-label={searchPlaceholder}
                 placeholder={searchPlaceholder}
                 value={searchValue}
                 onChange={(e) => setSearchValue(e.target.value)}
@@ -133,7 +139,7 @@ export function DataTable<T extends Record<string, unknown>>({
                     onFilterChange?.(filter.key, value === '__all__' ? '' : value)
                   }
                 >
-                  <SelectTrigger className="h-9 w-[150px]">
+                  <SelectTrigger aria-label={filter.label} className="min-h-11 w-[150px]">
                     <SelectValue placeholder={filter.label} />
                   </SelectTrigger>
                   <SelectContent>
@@ -160,22 +166,35 @@ export function DataTable<T extends Record<string, unknown>>({
         <div className="rounded-md border">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
+              <caption className="sr-only">{accessibleLabel}</caption>
               <thead>
                 <tr className="border-b bg-muted/50">
                   {columns.map((col) => (
                     <th
                       key={col.key}
+                      scope="col"
+                      aria-sort={
+                        col.sortable && sortField === col.key
+                          ? sortDirection === 'asc'
+                            ? 'ascending'
+                            : 'descending'
+                          : undefined
+                      }
                       className={cn(
                         'px-4 py-3 text-left font-medium text-muted-foreground',
-                        col.sortable && 'cursor-pointer select-none hover:text-foreground',
                         col.className
                       )}
-                      onClick={col.sortable ? () => handleSort(col.key) : undefined}
                     >
-                      <div className="flex items-center">
-                        {col.label}
-                        {col.sortable && getSortIcon(col.key)}
-                      </div>
+                      {col.sortable ? (
+                        <button
+                          type="button"
+                          className="flex min-h-11 items-center rounded-md text-left hover:text-foreground"
+                          onClick={() => handleSort(col.key)}
+                        >
+                          {col.label}
+                          {getSortIcon(col.key)}
+                        </button>
+                      ) : col.label}
                     </th>
                   ))}
                 </tr>
@@ -190,11 +209,23 @@ export function DataTable<T extends Record<string, unknown>>({
                     )}
                     onClick={() => onRowClick?.(row)}
                   >
-                    {columns.map((col) => (
+                    {columns.map((col, columnIndex) => (
                       <td key={col.key} className={cn('px-4 py-3', col.className)}>
                         {col.render
                           ? col.render(row)
                           : (row[col.key] as React.ReactNode) ?? '—'}
+                        {columnIndex === 0 && onRowClick && (
+                          <button
+                            type="button"
+                            className="sr-only min-h-11 rounded-md px-3 focus:not-sr-only"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onRowClick(row);
+                            }}
+                          >
+                            {rowLabel(row, rowIndex)}
+                          </button>
+                        )}
                       </td>
                     ))}
                   </tr>
@@ -207,7 +238,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
       {/* Footer: pagination */}
       {pagination && pagination.total_items > 0 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <span>
             Showing {startItem}–{endItem} of {pagination.total_items} results
           </span>
@@ -218,7 +249,7 @@ export function DataTable<T extends Record<string, unknown>>({
               disabled={pagination.page <= 1}
               onClick={() => onPageChange?.(pagination.page - 1)}
             >
-              <ChevronLeft className="mr-1 h-4 w-4" />
+              <ChevronLeft aria-hidden="true" className="mr-1 h-4 w-4" />
               Previous
             </Button>
             <span className="px-2">
@@ -231,7 +262,7 @@ export function DataTable<T extends Record<string, unknown>>({
               onClick={() => onPageChange?.(pagination.page + 1)}
             >
               Next
-              <ChevronRight className="ml-1 h-4 w-4" />
+              <ChevronRight aria-hidden="true" className="ml-1 h-4 w-4" />
             </Button>
           </div>
         </div>

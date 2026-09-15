@@ -1,18 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, ChevronLeft, ChevronRight, FileClock, Pencil, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
-import { format } from 'date-fns';
-import { toast } from 'sonner';
-
-import api from '@/lib/api';
-import { formatApiError } from '@/lib/enterprise-settings';
-import type { Integration } from '@/types/enterprise-settings';
-import { IntegrationEditorDialog } from '@/components/integrations/integration-editor-dialog';
-import { ConfirmAction } from '@/components/settings/confirm-action';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
@@ -21,7 +9,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ConfirmAction } from '@/components/settings/confirm-action';
+import { format } from 'date-fns';
+import { formatApiError } from '@/lib/enterprise-settings';
+import type { Integration } from '@/types/enterprise-settings';
+import { IntegrationEditorDialog } from '@/components/integrations/integration-editor-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
+import { useState } from 'react';
 
 const LOG_PAGE_SIZE = 20;
 

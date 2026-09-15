@@ -88,7 +88,7 @@ const directoryUserSelect = `
 		COALESCE(u.suspension_reason,''),u.reactivated_at,u.deprovisioned_at,u.deprovisioned_by,
 		COALESCE(u.deprovision_reason,''),u.updated_by,u.version,
 		COALESCE((SELECT jsonb_agg(role.slug ORDER BY role.slug)
-			FROM user_roles ur JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
+			FROM effective_user_roles ur JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
 			WHERE ur.organization_id=u.organization_id AND ur.user_id=u.id),'[]'::jsonb),
 		(SELECT COUNT(*) FROM directory_group_memberships gm
 			WHERE gm.organization_id=u.organization_id AND gm.user_id=u.id AND gm.removed_at IS NULL),
@@ -229,6 +229,26 @@ func (r *userAdministrationRepo) ListUsers(ctx context.Context, organizationID s
 		args = append(args, value)
 		where = append(where, fmt.Sprintf(condition, len(args)))
 	}
+	if filter.GroupID != "" {
+		group, err := getDirectoryGroup(ctx, q, organizationID, filter.GroupID, false)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, 0, ErrDirectoryGroupNotFound
+		}
+		if err != nil {
+			return nil, 0, fmt.Errorf("load directory group filter: %w", err)
+		}
+		if group.GroupType == models.DirectoryGroupDynamic {
+			predicate, dynamicArgs, err := dynamicGroupPredicate(organizationID, group.MembershipRule)
+			if err != nil {
+				return nil, 0, err
+			}
+			where, args = []string{predicate}, dynamicArgs
+		} else {
+			add(`EXISTS(SELECT 1 FROM directory_group_memberships filter_gm
+				WHERE filter_gm.organization_id=u.organization_id AND filter_gm.user_id=u.id
+				AND filter_gm.group_id=$%d::uuid AND filter_gm.removed_at IS NULL)`, filter.GroupID)
+		}
+	}
 	if filter.Search != "" {
 		add(`u.directory_search @@ websearch_to_tsquery('simple',$%d)`, filter.Search)
 	}
@@ -245,14 +265,9 @@ func (r *userAdministrationRepo) ListUsers(ctx context.Context, organizationID s
 		add(`u.manager_user_id=$%d::uuid`, filter.ManagerID)
 	}
 	if filter.RoleSlug != "" {
-		add(`EXISTS(SELECT 1 FROM user_roles filter_ur JOIN roles filter_role ON filter_role.id=filter_ur.role_id
+		add(`EXISTS(SELECT 1 FROM effective_user_roles filter_ur JOIN roles filter_role ON filter_role.id=filter_ur.role_id
 			WHERE filter_ur.organization_id=u.organization_id AND filter_ur.user_id=u.id
 			AND filter_role.deleted_at IS NULL AND filter_role.slug=$%d)`, filter.RoleSlug)
-	}
-	if filter.GroupID != "" {
-		add(`EXISTS(SELECT 1 FROM directory_group_memberships filter_gm
-			WHERE filter_gm.organization_id=u.organization_id AND filter_gm.user_id=u.id
-			AND filter_gm.group_id=$%d::uuid AND filter_gm.removed_at IS NULL)`, filter.GroupID)
 	}
 	predicate := strings.Join(where, " AND ")
 	var total int
@@ -291,10 +306,7 @@ func (r *userAdministrationRepo) UpdateUser(ctx context.Context, organizationID,
 			return err
 		}
 		if next.ManagerUserID != nil {
-			if *next.ManagerUserID == next.ID {
-				return ErrDirectoryConflict
-			}
-			if err := ensureDirectoryAssignableUser(ctx, tx, organizationID, *next.ManagerUserID); err != nil {
+			if err := ensureDirectoryManagerAssignment(ctx, tx, organizationID, next.ID, *next.ManagerUserID); err != nil {
 				return err
 			}
 		}
@@ -415,7 +427,6 @@ var directoryOwnershipBindings = []ownershipBinding{
 	{"remediation.plan_owner", "remediation_plans", "owner_user_id"},
 	{"remediation.action_assignee", "remediation_actions", "assigned_to"},
 	{"evidence.assignee", "evidence_requirements", "assigned_to"},
-	{"regulatory_change.assignee", "regulatory_changes", "assigned_to"},
 	{"calendar.assignee", "calendar_events", "assigned_to"},
 	{"dsr.request_assignee", "dsr_requests", "assigned_to"}, {"dsr.task_assignee", "dsr_tasks", "assigned_to"},
 	{"analytics.dashboard_owner", "analytics_custom_dashboards", "owner_user_id"},
@@ -460,15 +471,17 @@ func directoryOwnershipImpact(ctx context.Context, q database.Querier, organizat
 	if err := q.QueryRow(ctx, `SELECT
 		EXISTS(SELECT 1 FROM users u WHERE u.organization_id=$1::uuid AND u.id=$2::uuid
 			AND u.status='active' AND u.deleted_at IS NULL AND (u.is_super_admin OR EXISTS(
-				SELECT 1 FROM user_roles ur JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
+				SELECT 1 FROM effective_user_roles ur JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
 				JOIN role_permissions rp ON rp.role_id=role.id JOIN permissions p ON p.id=rp.permission_id
 				WHERE ur.organization_id=u.organization_id AND ur.user_id=u.id
 				AND p.resource='settings' AND p.action::text='configure'))),
 		EXISTS(SELECT 1 FROM users u WHERE u.organization_id=$1::uuid AND u.id<>$2::uuid
 			AND u.status='active' AND u.deleted_at IS NULL AND (u.is_super_admin OR EXISTS(
-				SELECT 1 FROM user_roles ur JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
+				SELECT 1 FROM effective_user_roles ur JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
 				JOIN role_permissions rp ON rp.role_id=role.id JOIN permissions p ON p.id=rp.permission_id
 				WHERE ur.organization_id=u.organization_id AND ur.user_id=u.id
+				AND ur.expires_at IS NULL AND NOT EXISTS(SELECT 1 FROM access_sod_rules rule
+				 WHERE rule.organization_id=ur.organization_id AND rule.enabled AND ur.role_id IN(rule.role_a_id,rule.role_b_id))
 				AND p.resource='settings' AND p.action::text='configure')))`, organizationID, userID).Scan(&impact.HasAdministrativeGrant, &remainingAdmin); err != nil {
 		return nil, fmt.Errorf("calculate administrator impact: %w", err)
 	}
@@ -671,7 +684,7 @@ func ensureOwnershipReplacement(ctx context.Context, q database.Querier, organiz
 		return err
 	}
 	var reportsToTarget bool
-	if err := q.QueryRow(ctx, `SELECT manager_user_id=$2::uuid FROM users
+	if err := q.QueryRow(ctx, `SELECT COALESCE(manager_user_id=$2::uuid,FALSE) FROM users
 		WHERE organization_id=$1::uuid AND id=$3::uuid AND deleted_at IS NULL`, organizationID, userID, replacementID).Scan(&reportsToTarget); err != nil {
 		return err
 	}
@@ -793,6 +806,31 @@ func ensureDirectoryAssignableUser(ctx context.Context, q database.Querier, orga
 	return nil
 }
 
+func ensureDirectoryManagerAssignment(ctx context.Context, q database.Querier, organizationID, userID, managerID string) error {
+	if userID == managerID {
+		return fmt.Errorf("%w: a user cannot manage themselves", ErrDirectoryConflict)
+	}
+	if err := ensureDirectoryAssignableUser(ctx, q, organizationID, managerID); err != nil {
+		return err
+	}
+	var createsCycle bool
+	if err := q.QueryRow(ctx, `WITH RECURSIVE manager_chain(id,manager_user_id) AS (
+		SELECT id,manager_user_id FROM users
+		WHERE organization_id=$1::uuid AND id=$2::uuid AND deleted_at IS NULL
+		UNION
+		SELECT manager.id,manager.manager_user_id FROM users manager
+		JOIN manager_chain child ON manager.id=child.manager_user_id
+		WHERE manager.organization_id=$1::uuid AND manager.deleted_at IS NULL
+	)
+	SELECT EXISTS(SELECT 1 FROM manager_chain WHERE id=$3::uuid)`, organizationID, managerID, userID).Scan(&createsCycle); err != nil {
+		return fmt.Errorf("validate directory manager hierarchy: %w", err)
+	}
+	if createsCycle {
+		return fmt.Errorf("%w: manager assignment creates a reporting cycle", ErrDirectoryConflict)
+	}
+	return nil
+}
+
 func directoryLastAdministrator(ctx context.Context, q database.Querier, organizationID, userID string) (bool, error) {
 	impact, err := directoryOwnershipImpact(ctx, q, organizationID, userID)
 	if err != nil {
@@ -852,6 +890,12 @@ func marshalDirectoryState(value any) (any, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, fmt.Errorf("encode directory history state: %w", err)
+	}
+	// An interface containing a typed nil map or pointer is non-nil, but JSON
+	// encodes it as `null`. Pass a real SQL NULL so the database's history
+	// invariant (states are objects when present) remains true.
+	if string(encoded) == "null" {
+		return nil, nil
 	}
 	return encoded, nil
 }

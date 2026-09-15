@@ -44,7 +44,7 @@ func (h *AssetHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeAssetError(w, r, err, "Failed to create asset")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "assets", item)
 }
 
 func (h *AssetHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +53,7 @@ func (h *AssetHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writeAssetError(w, r, err, "Failed to get asset")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "assets", item)
 }
 
 func (h *AssetHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +67,7 @@ func (h *AssetHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeAssetError(w, r, err, "Failed to update asset")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "assets", item)
 }
 
 func (h *AssetHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +106,7 @@ func (h *AssetHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeAssetError(w, r, err, "Failed to list assets")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(filter.PaginationRequest))
+	writeClassifiedPaginated(w, r, "assets", items, total, normalizedHandlerPagination(filter.PaginationRequest))
 }
 
 func (h *AssetHandler) Stats(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +115,7 @@ func (h *AssetHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		writeAssetError(w, r, err, "Failed to calculate asset statistics")
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
+	writeClassifiedJSON(w, r, http.StatusOK, "assets", stats)
 }
 
 func (h *AssetHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +126,7 @@ func (h *AssetHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		writeAssetError(w, r, err, "Failed to list asset history")
 		return
 	}
-	writePaginated(w, events, total, normalizedHandlerPagination(parsePagination(r)))
+	writeClassifiedPaginated(w, r, "assets", events, total, normalizedHandlerPagination(parsePagination(r)))
 }
 
 func assetOrgID(r *http.Request) string  { return middleware.GetOrgIDFromContext(r.Context()) }

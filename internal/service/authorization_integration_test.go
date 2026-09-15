@@ -86,7 +86,7 @@ func TestRBACAuthorizerWithNonSuperuserTenantContext(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO user_roles (user_id,role_id,organization_id) VALUES ($1,$2,$3),($4,$5,$6)`, userA, roleA, orgA, userB, roleB, orgB); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, "GRANT USAGE ON SCHEMA public TO "+quotedRole+"; GRANT SELECT ON users,user_roles,roles,role_permissions,permissions TO "+quotedRole); err != nil {
+	if _, err := pool.Exec(ctx, "GRANT USAGE ON SCHEMA public TO "+quotedRole+"; GRANT SELECT ON users,user_roles,effective_user_roles,access_sod_rules,access_sod_exceptions,roles,role_permissions,permissions TO "+quotedRole); err != nil {
 		t.Fatal(err)
 	}
 

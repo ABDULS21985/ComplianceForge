@@ -33,7 +33,7 @@ func (h *FrameworkHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeComplianceError(w, err, "Failed to list frameworks")
 		return
 	}
-	writePaginated(w, items, total, p)
+	writeClassifiedPaginated(w, r, "frameworks", items, total, p)
 }
 
 func (h *FrameworkHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +42,7 @@ func (h *FrameworkHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writeComplianceError(w, err, "Failed to get framework")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", item)
 }
 
 func (h *FrameworkHandler) Adopt(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +51,7 @@ func (h *FrameworkHandler) Adopt(w http.ResponseWriter, r *http.Request) {
 		writeComplianceError(w, err, "Failed to adopt framework")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", item)
 }
 
 func (h *FrameworkHandler) GetControls(w http.ResponseWriter, r *http.Request) {
@@ -72,14 +72,24 @@ func writePaginated(w http.ResponseWriter, data any, total int, p models.Paginat
 	writeJSON(w, http.StatusOK, map[string]any{"data": data, "pagination": models.PaginationResponse{Page: p.Page, PageSize: p.PageSize, TotalItems: total, TotalPages: totalPages}})
 }
 
+func writeAccepted(w http.ResponseWriter, data any, job models.AsyncJob) {
+	writeJSON(w, http.StatusAccepted, models.AsyncJobResponse{Data: data, Job: job})
+}
+
 func writeComplianceError(w http.ResponseWriter, err error, fallback string) {
 	switch {
 	case errors.Is(err, service.ErrSubscriptionLimitExceeded):
 		writeError(w, http.StatusPaymentRequired, "Subscription framework limit reached", "Upgrade the subscription or remove an existing framework before adopting another")
 	case errors.Is(err, service.ErrInvalidComplianceID), errors.Is(err, service.ErrInvalidControlPatch), errors.Is(err, service.ErrInvalidEvidence):
 		writeError(w, http.StatusBadRequest, "Invalid compliance request", err.Error())
-	case errors.Is(err, service.ErrFrameworkNotFound), errors.Is(err, service.ErrControlNotFound):
+	case errors.Is(err, service.ErrInvalidEvidenceReview), errors.Is(err, service.ErrInvalidEvidenceVersion), errors.Is(err, service.ErrEvidenceObjectRejected):
+		writeError(w, http.StatusUnprocessableEntity, "Evidence was rejected", err.Error())
+	case errors.Is(err, service.ErrEvidenceReviewConflict):
+		writeError(w, http.StatusConflict, "Evidence review request conflicts with an earlier request", err.Error())
+	case errors.Is(err, service.ErrFrameworkNotFound), errors.Is(err, service.ErrControlNotFound), errors.Is(err, service.ErrEvidenceObjectNotFound), errors.Is(err, service.ErrEvidenceLifecycleNotFound):
 		writeError(w, http.StatusNotFound, "Compliance resource not found", err.Error())
+	case errors.Is(err, service.ErrEvidenceScannerOffline), errors.Is(err, service.ErrEvidenceObjectUnavailable), errors.Is(err, service.ErrEvidenceIntegrityUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "Evidence service unavailable", "The evidence security service is temporarily unavailable")
 	default:
 		writeError(w, http.StatusInternalServerError, fallback, err.Error())
 	}

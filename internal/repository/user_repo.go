@@ -53,7 +53,7 @@ const userSelect = `
 		u.last_login_at,
 		COALESCE((
 			SELECT role.slug
-			FROM user_roles ur
+			FROM effective_user_roles ur
 			JOIN roles role ON role.id = ur.role_id AND role.deleted_at IS NULL
 			WHERE ur.user_id = u.id AND ur.organization_id = u.organization_id
 			ORDER BY ur.assigned_at ASC, role.slug ASC
@@ -61,7 +61,10 @@ const userSelect = `
 		), CASE WHEN u.is_super_admin THEN 'super_admin' ELSE 'viewer' END),
 		EXISTS (
 			SELECT 1 FROM user_mfa mfa
-			WHERE mfa.user_id = u.id AND mfa.is_verified = true
+			WHERE mfa.organization_id = u.organization_id
+				AND mfa.user_id = u.id
+				AND mfa.is_verified = true
+				AND mfa.disabled_at IS NULL
 		),
 		u.created_at, u.updated_at, u.deleted_at
 	FROM users u`
@@ -350,14 +353,20 @@ func (r *userRepo) CreateSession(ctx context.Context, session *models.UserSessio
 	if session.ID == "" {
 		session.ID = uuid.NewString()
 	}
+	if session.AuthenticationMethod == "" {
+		session.AuthenticationMethod = models.IdentityMethodPassword
+	}
 	return database.WithTenantConnection(ctx, r.pool, session.OrganizationID, func(scopedCtx context.Context) error {
 		return database.QuerierFromContext(scopedCtx, r.pool).QueryRow(scopedCtx, `
 			INSERT INTO user_sessions (
-				id, user_id, organization_id, token_hash, refresh_token_hash, expires_at
+				id, user_id, organization_id, token_hash, refresh_token_hash, ip_address,
+				user_agent, device_name, authentication_method, mfa_verified_at, expires_at
 			)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::inet, NULLIF($7, ''),
+				NULLIF($8, ''), $9, $10, $11)
 			RETURNING created_at`, session.ID, session.UserID, session.OrganizationID,
-			session.TokenHash, session.RefreshTokenHash, session.ExpiresAt,
+			session.TokenHash, session.RefreshTokenHash, session.IPAddress, session.UserAgent,
+			session.DeviceName, session.AuthenticationMethod, session.MFAVerifiedAt, session.ExpiresAt,
 		).Scan(&session.CreatedAt)
 	})
 }
@@ -373,7 +382,8 @@ func (r *userRepo) RotateSession(
 	err := database.WithTenantConnection(ctx, r.pool, orgID, func(scopedCtx context.Context) error {
 		tag, err := database.QuerierFromContext(scopedCtx, r.pool).Exec(scopedCtx, `
 			UPDATE user_sessions
-			SET token_hash = $4, refresh_token_hash = $5, expires_at = $6
+			SET token_hash = $4, refresh_token_hash = $5, expires_at = $6,
+				last_seen_at = NOW(), version = version + 1
 			WHERE organization_id = $1 AND user_id = $2 AND refresh_token_hash = $3
 			  AND revoked_at IS NULL AND expires_at > NOW()`,
 			orgID, userID, currentRefreshHash, session.TokenHash,
@@ -405,8 +415,8 @@ func (r *userRepo) IsSessionActive(ctx context.Context, orgID, userID, accessTok
 	var active bool
 	err := database.WithTenantConnection(ctx, r.pool, orgID, func(scopedCtx context.Context) error {
 		return database.QuerierFromContext(scopedCtx, r.pool).QueryRow(scopedCtx, `
-			SELECT EXISTS (
-				SELECT 1
+			WITH eligible AS (
+				SELECT session.id
 				FROM user_sessions session
 				JOIN users user_account
 				  ON user_account.id = session.user_id
@@ -418,7 +428,16 @@ func (r *userRepo) IsSessionActive(ctx context.Context, orgID, userID, accessTok
 				  AND session.expires_at > NOW()
 				  AND user_account.status = 'active'
 				  AND user_account.deleted_at IS NULL
-			)`, orgID, userID, accessTokenHash).Scan(&active)
+			), touched AS (
+				UPDATE user_sessions session
+				SET last_seen_at = NOW()
+				FROM eligible
+				WHERE session.organization_id = $1
+				  AND session.id = eligible.id
+				  AND session.last_seen_at < NOW() - INTERVAL '5 minutes'
+				RETURNING session.id
+			)
+			SELECT EXISTS (SELECT 1 FROM eligible)`, orgID, userID, accessTokenHash).Scan(&active)
 	})
 	return active, err
 }

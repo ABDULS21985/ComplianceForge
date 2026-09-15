@@ -19,6 +19,7 @@ interface TopbarProps {
   className?: string;
   /** Override labels for dynamic breadcrumb segments. */
   dynamicLabels?: Record<string, string>;
+  enabledCapabilities?: readonly string[];
   onLogout: () => void;
   permissions?: PermissionMap;
   user: User | null;
@@ -27,6 +28,7 @@ interface TopbarProps {
 export function Topbar({
   className,
   dynamicLabels,
+  enabledCapabilities,
   onLogout,
   permissions,
   user,
@@ -34,11 +36,12 @@ export function Topbar({
   const [commandOpen, setCommandOpen] = useState(false);
   const navigationContext = useMemo<NavigationContext>(
     () => ({
+      enabledCapabilities,
       isSuperAdmin: user?.is_super_admin,
       permissions,
       roleSlugs: getRoleSlugs(user?.roles),
     }),
-    [permissions, user?.is_super_admin, user?.roles]
+    [enabledCapabilities, permissions, user?.is_super_admin, user?.roles]
   );
 
   useEffect(() => {

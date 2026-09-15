@@ -1,11 +1,5 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { useForm, Controller } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import {
   AlertCircle,
   CheckCircle2,
@@ -17,15 +11,15 @@ import {
   Search,
   X,
 } from 'lucide-react';
-
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
+import {
+  cn,
+  formatDate,
+  formatPercentage,
+  getStatusColor,
+} from '@/lib/utils';
+import { Controller, useForm, useWatch } from 'react-hook-form';
+import { ResourceBoundary, StaleDataNotice } from '@/components/data/resource-state';
 import {
   Select,
   SelectContent,
@@ -42,19 +36,25 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-
+import { useCallback, useMemo, useState } from 'react';
 import {
-  usePolicies,
   useCreatePolicy,
+  usePolicies,
   useUsers,
 } from '@/lib/api-hooks';
-import {
-  cn,
-  formatDate,
-  formatPercentage,
-  getStatusColor,
-} from '@/lib/utils';
+import { useRouter, useSearchParams } from 'next/navigation';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import Link from 'next/link';
+import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { useQuickCreate } from '@/lib/use-quick-create';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 // ---------------------------------------------------------------------------
 // Zod schema
@@ -123,7 +123,6 @@ function CreatePolicyForm({ onClose }: { onClose: () => void }) {
     register,
     handleSubmit,
     control,
-    watch,
     setValue,
     formState: { errors },
   } = useForm<CreatePolicyFormData>({
@@ -143,8 +142,10 @@ function CreatePolicyForm({ onClose }: { onClose: () => void }) {
     },
   });
 
-  const isMandatory = watch('is_mandatory');
-  const requiresAttestation = watch('requires_attestation');
+  const [isMandatory, requiresAttestation] = useWatch({
+    control,
+    name: ['is_mandatory', 'requires_attestation'],
+  });
 
   const onSubmit = (formData: CreatePolicyFormData) => {
     const payload = {
@@ -278,23 +279,11 @@ function CreatePolicyForm({ onClose }: { onClose: () => void }) {
           <Label htmlFor="is_mandatory" className="font-medium">Mandatory</Label>
           <p className="text-xs text-muted-foreground">All staff must comply with this policy</p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isMandatory}
-          onClick={() => setValue('is_mandatory', !isMandatory)}
-          className={cn(
-            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            isMandatory ? 'bg-primary' : 'bg-input'
-          )}
-        >
-          <span
-            className={cn(
-              'pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform',
-              isMandatory ? 'translate-x-5' : 'translate-x-0'
-            )}
-          />
-        </button>
+        <Switch
+          id="is_mandatory"
+          checked={isMandatory}
+          onCheckedChange={(checked) => setValue('is_mandatory', checked)}
+        />
       </div>
 
       <div className="flex items-center justify-between rounded-lg border p-3">
@@ -302,23 +291,11 @@ function CreatePolicyForm({ onClose }: { onClose: () => void }) {
           <Label htmlFor="requires_attestation" className="font-medium">Requires Attestation</Label>
           <p className="text-xs text-muted-foreground">Users must acknowledge they have read this policy</p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={requiresAttestation}
-          onClick={() => setValue('requires_attestation', !requiresAttestation)}
-          className={cn(
-            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            requiresAttestation ? 'bg-primary' : 'bg-input'
-          )}
-        >
-          <span
-            className={cn(
-              'pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform',
-              requiresAttestation ? 'translate-x-5' : 'translate-x-0'
-            )}
-          />
-        </button>
+        <Switch
+          id="requires_attestation"
+          checked={requiresAttestation}
+          onCheckedChange={(checked) => setValue('requires_attestation', checked)}
+        />
       </div>
 
       <div className="space-y-1.5">
@@ -359,14 +336,25 @@ export default function PoliciesPage() {
     return params;
   }, [page, pageSize, search]);
 
-  const { data, isLoading, error } = usePolicies(apiParams as Parameters<typeof usePolicies>[0]);
+  const {
+    data,
+    dataUpdatedAt,
+    error,
+    isFetching,
+    isLoading,
+    refetch,
+  } = usePolicies(apiParams as Parameters<typeof usePolicies>[0]);
 
   const policiesData = data as {
     items?: Array<Record<string, unknown>>;
     total?: number;
     total_pages?: number;
   };
-  const policies = policiesData?.items ?? [];
+  const policies = useMemo(
+    () =>
+      (data as { items?: Array<Record<string, unknown>> } | undefined)?.items ?? [],
+    [data],
+  );
   const totalPages = policiesData?.total_pages ?? 1;
 
   // Compute summary stats from the current page data
@@ -431,6 +419,14 @@ export default function PoliciesPage() {
           Draft Policy
         </Button>
       </div>
+
+      {Boolean(error) && Boolean(data) && (
+        <StaleDataNotice
+          isRefreshing={isFetching}
+          lastUpdatedAt={dataUpdatedAt}
+          onRefresh={() => void refetch()}
+        />
+      )}
 
       {/* Summary cards */}
       <div className="grid gap-4 md:grid-cols-5">
@@ -498,10 +494,12 @@ export default function PoliciesPage() {
           />
           {search && (
             <button
+              type="button"
+              aria-label="Clear policy search"
               onClick={() => setSearch('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <X className="h-3 w-3" />
+              <X aria-hidden="true" className="h-4 w-4" />
             </button>
           )}
         </div>
@@ -510,35 +508,48 @@ export default function PoliciesPage() {
       {/* Table */}
       <Card>
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : error ? (
-            <div className="flex items-center justify-center py-12 text-destructive">
-              Failed to load policies. Please try again.
-            </div>
-          ) : policies.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <FileText className="h-10 w-10 mb-3 opacity-40" />
-              <p className="font-medium">No policies found</p>
-              <p className="text-sm mt-1">Draft a new policy to get started.</p>
-            </div>
-          ) : (
+          <ResourceBoundary
+            surface="plain"
+            isEmpty={policies.length === 0}
+            isError={Boolean(error) && !data}
+            isLoading={isLoading}
+            loadingLayout="table"
+            loadingTitle="Loading policy register"
+            emptyTitle="No policies found"
+            emptyDescription={
+              search
+                ? 'Clear the search to view all policies, or use a broader term.'
+                : 'Draft your first policy to begin review and attestation.'
+            }
+            emptyAction={
+              search ? (
+                <Button type="button" variant="outline" onClick={() => setSearch('')}>
+                  Clear search
+                </Button>
+              ) : (
+                <Button type="button" onClick={() => setSheetOpen(true)}>
+                  Draft policy
+                </Button>
+              )
+            }
+            errorTitle="Policy register could not be loaded"
+            errorDescription="The service did not return the policy list. Retry without losing your search."
+            onRetry={() => void refetch()}
+            retrying={isFetching}
+          >
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">Policies matching the current page and search</caption>
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="px-4 py-3 text-left font-medium">Ref</th>
-                    <th className="px-4 py-3 text-left font-medium">Title</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-left font-medium">Version</th>
-                    <th className="px-4 py-3 text-left font-medium">Review Status</th>
-                    <th className="px-4 py-3 text-left font-medium">Next Review</th>
-                    <th className="px-4 py-3 text-left font-medium">Attestation</th>
-                    <th className="px-4 py-3 text-left font-medium">Actions</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Ref</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Title</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Status</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Version</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Review Status</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Next Review</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Attestation</th>
+                    <th scope="col" className="px-4 py-3 text-left font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -609,7 +620,7 @@ export default function PoliciesPage() {
                 </tbody>
               </table>
             </div>
-          )}
+          </ResourceBoundary>
         </CardContent>
       </Card>
 

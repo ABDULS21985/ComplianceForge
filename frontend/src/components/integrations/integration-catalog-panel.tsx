@@ -1,17 +1,16 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Cloud, KeyRound, MessageSquare, Search, ShieldCheck, TicketCheck, Webhook } from 'lucide-react';
-
-import api from '@/lib/api';
 import { formatApiError, INTEGRATION_CATALOG, type IntegrationCatalogEntry } from '@/lib/enterprise-settings';
-import { IntegrationEditorDialog } from '@/components/integrations/integration-editor-dialog';
+import { useMemo, useState } from 'react';
+import api from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { IntegrationEditorDialog } from '@/components/integrations/integration-editor-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useQuery } from '@tanstack/react-query';
 
 function CategoryIcon({ category }: { category: IntegrationCatalogEntry['category'] }) {
   const Icon = category === 'Identity' ? KeyRound : category === 'Cloud' ? Cloud : category === 'Security' ? ShieldCheck : category === 'IT service management' ? TicketCheck : category === 'Messaging' ? MessageSquare : Webhook;

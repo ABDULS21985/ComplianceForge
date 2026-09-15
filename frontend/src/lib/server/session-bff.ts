@@ -1,9 +1,12 @@
-import { createHash } from 'node:crypto';
-
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-
-import { sessionCookiePolicy } from '@/lib/request-security';
+import {
+  buildUpstreamUrl,
+  forwardedRequestHeaders,
+  PayloadTooLargeError,
+  proxyResponse,
+  readLimitedRequestBody,
+  type ServerFetch,
+  serverFetchInit,
+} from '@/lib/server/upstream';
 import {
   clearSessionCookies,
   csrfErrorResponse,
@@ -12,15 +15,11 @@ import {
   setSessionCookies,
   verifyCsrf,
 } from '@/lib/server/session-security';
-import {
-  buildUpstreamUrl,
-  forwardedRequestHeaders,
-  PayloadTooLargeError,
-  proxyResponse,
-  readLimitedRequestBody,
-  serverFetchInit,
-  type ServerFetch,
-} from '@/lib/server/upstream';
+import { SUPPORT_BUNDLE_MAX_REQUEST_BYTES, SUPPORT_BUNDLE_ROUTE } from '@/lib/support-bundle-contract';
+import { createHash } from 'node:crypto';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+import { sessionCookiePolicy } from '@/lib/request-security';
 
 const MAX_AUTH_BODY_BYTES = 1024 * 1024;
 const MAX_PROXY_BODY_BYTES = 50 * 1024 * 1024;
@@ -50,6 +49,41 @@ function isTokenPair(value: unknown): value is SessionTokenPair {
     pair.user !== null &&
     !Array.isArray(pair.user)
   );
+}
+
+function pendingAuthenticationResponse(
+  value: unknown,
+):
+  | { kind: 'mfa'; challenge: Record<string, unknown>; user: Record<string, unknown> }
+  | { kind: 'verification'; user: Record<string, unknown> }
+  | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const data = value as Record<string, unknown>;
+  if (!data.user || typeof data.user !== 'object' || Array.isArray(data.user)) return null;
+  if (data.mfa_required === true) {
+    if (!data.mfa_challenge || typeof data.mfa_challenge !== 'object' || Array.isArray(data.mfa_challenge)) {
+      return null;
+    }
+    const challenge = data.mfa_challenge as Record<string, unknown>;
+    if (
+      typeof challenge.challenge_token !== 'string' ||
+      challenge.challenge_token.length === 0 ||
+      challenge.challenge_token.length > 8192 ||
+      !Array.isArray(challenge.methods) ||
+      !challenge.methods.every((method) =>
+        ['totp', 'recovery_code', 'passkey'].includes(String(method)),
+      ) ||
+      typeof challenge.expires_at !== 'string' ||
+      !Number.isFinite(Date.parse(challenge.expires_at))
+    ) {
+      return null;
+    }
+    return { kind: 'mfa', challenge, user: data.user as Record<string, unknown> };
+  }
+  if (data.email_verification_required === true) {
+    return { kind: 'verification', user: data.user as Record<string, unknown> };
+  }
+  return null;
 }
 
 async function performRefresh(refreshToken: string, fetcher: ServerFetch): Promise<RefreshResult> {
@@ -172,6 +206,7 @@ async function authenticatedFetch(
       method: request.method,
       headers,
       body: body ? body.slice(0) : undefined,
+      signal: pathname === SUPPORT_BUNDLE_ROUTE ? request.signal : undefined,
     }),
   );
 }
@@ -193,7 +228,10 @@ export async function proxyAuthenticatedRequest(
 
   let body: ArrayBuffer | undefined;
   try {
-    body = await readLimitedRequestBody(request, MAX_PROXY_BODY_BYTES);
+    body = await readLimitedRequestBody(
+      request,
+      pathname === SUPPORT_BUNDLE_ROUTE ? SUPPORT_BUNDLE_MAX_REQUEST_BYTES : MAX_PROXY_BODY_BYTES,
+    );
   } catch (error) {
     if (error instanceof PayloadTooLargeError) {
       return jsonError(413, 'PAYLOAD_TOO_LARGE', error.message);
@@ -232,6 +270,19 @@ export async function proxyAuthenticatedRequest(
     if (refreshed.kind === 'unavailable') return refreshUnavailable();
     refreshedPair = refreshed.pair;
 
+    if (request.method === 'POST' && pathname === SUPPORT_BUNDLE_ROUTE) {
+      void upstream.body?.cancel().catch(() => undefined);
+      return preserveRotatedSession(
+        request,
+        jsonError(
+          409,
+          'CONSENT_RECONFIRMATION_REQUIRED',
+          'Your session was renewed. Review the support-bundle scope and consent again.',
+        ),
+        refreshedPair,
+      );
+    }
+
     try {
       upstream = await authenticatedFetch(
         request,
@@ -251,12 +302,21 @@ export async function proxyAuthenticatedRequest(
 
   if (upstream.status === 401) return terminalUnauthorized(request);
 
+  if (request.method === 'POST' && pathname === SUPPORT_BUNDLE_ROUTE && upstream.status >= 300 && upstream.status < 400) {
+    void upstream.body?.cancel().catch(() => undefined);
+    return preserveRotatedSession(
+      request,
+      jsonError(502, 'SUPPORT_BUNDLE_REDIRECT_REJECTED', 'Support bundle generation cannot redirect'),
+      refreshedPair,
+    );
+  }
+
   return preserveRotatedSession(request, proxyResponse(upstream), refreshedPair);
 }
 
 export async function handleCredentialExchange(
   request: NextRequest,
-  operation: 'login' | 'register',
+  operation: 'login' | 'mfa/verify' | 'passkeys/authentication/verify' | 'register',
   fetcher: ServerFetch = fetch,
 ): Promise<NextResponse> {
   const csrf = verifyCsrf(request);
@@ -289,6 +349,20 @@ export async function handleCredentialExchange(
   if (!upstream.ok) return proxyResponse(upstream);
 
   const data: unknown = await upstream.json().catch(() => null);
+  const pending = pendingAuthenticationResponse(data);
+  if ((operation === 'login' || operation === 'register') && pending) {
+    const responseBody =
+      pending.kind === 'mfa'
+        ? { mfa_challenge: pending.challenge, mfa_required: true, user: pending.user }
+        : { email_verification_required: true, user: pending.user };
+    return NextResponse.json(responseBody, {
+      status: upstream.status,
+      headers: {
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  }
   if (!isTokenPair(data)) {
     return jsonError(
       502,

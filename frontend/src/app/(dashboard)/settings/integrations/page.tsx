@@ -1,19 +1,18 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { LockKeyhole } from 'lucide-react';
-
+import { Card, CardContent } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
-import { hasSettingsPermission } from '@/lib/enterprise-settings';
-import { normalizePermissionMap } from '@/lib/navigation';
-import { useAuthStore } from '@/store/auth-store';
 import { APIKeysPanel } from '@/components/integrations/api-keys-panel';
 import { ConfiguredIntegrationsPanel } from '@/components/integrations/configured-integrations-panel';
+import { hasSettingsPermission } from '@/lib/enterprise-settings';
 import { IntegrationCatalogPanel } from '@/components/integrations/integration-catalog-panel';
-import { SSOPanel } from '@/components/integrations/sso-panel';
-import { Card, CardContent } from '@/components/ui/card';
+import { LockKeyhole } from 'lucide-react';
+import { normalizePermissionMap } from '@/lib/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SSOPanel } from '@/components/integrations/sso-panel';
+import { useAuthStore } from '@/store/auth-store';
+import { useQuery } from '@tanstack/react-query';
 
 export default function IntegrationsPage() {
   const user = useAuthStore((state) => state.user);

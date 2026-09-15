@@ -55,7 +55,7 @@ func (h *WorkflowHandler) ListDefinitions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": defs})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"data": defs})
 }
 
 // CreateDefinition handles POST /workflows/definitions.
@@ -78,7 +78,7 @@ func (h *WorkflowHandler) CreateDefinition(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"data": def})
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", map[string]interface{}{"data": def})
 }
 
 // UpdateDefinition handles PUT /workflows/definitions/{id}.
@@ -106,7 +106,7 @@ func (h *WorkflowHandler) UpdateDefinition(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Definition updated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"message": "Definition updated"})
 }
 
 // ActivateDefinition handles POST /workflows/definitions/{id}/activate.
@@ -128,7 +128,7 @@ func (h *WorkflowHandler) ActivateDefinition(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Definition activated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"message": "Definition activated"})
 }
 
 // ListInstances handles GET /workflows/instances.
@@ -154,7 +154,7 @@ func (h *WorkflowHandler) ListInstances(w http.ResponseWriter, r *http.Request) 
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{
 		"data": instances,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -185,7 +185,7 @@ func (h *WorkflowHandler) GetInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": instance})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"data": instance})
 }
 
 // StartWorkflow handles POST /workflows/start.
@@ -219,7 +219,7 @@ func (h *WorkflowHandler) StartWorkflow(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"data": result})
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", map[string]interface{}{"data": result})
 }
 
 // CancelWorkflow handles POST /workflows/instances/{id}/cancel.
@@ -251,7 +251,7 @@ func (h *WorkflowHandler) CancelWorkflow(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Workflow cancelled"})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"message": "Workflow cancelled"})
 }
 
 // GetMyApprovals handles GET /workflows/my-approvals.
@@ -276,7 +276,7 @@ func (h *WorkflowHandler) GetMyApprovals(w http.ResponseWriter, r *http.Request)
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{
 		"data": approvals,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -316,7 +316,7 @@ func (h *WorkflowHandler) ApproveStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Step approved"})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"message": "Step approved"})
 }
 
 // RejectStep handles POST /workflows/executions/{id}/reject.
@@ -353,7 +353,7 @@ func (h *WorkflowHandler) RejectStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Step rejected"})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"message": "Step rejected"})
 }
 
 // DelegateStep handles POST /workflows/executions/{id}/delegate.
@@ -389,7 +389,7 @@ func (h *WorkflowHandler) DelegateStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Step delegated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"message": "Step delegated"})
 }
 
 // RequestInfo handles POST /workflows/executions/{id}/request-info.
@@ -421,7 +421,7 @@ func (h *WorkflowHandler) RequestInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Information requested"})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"message": "Information requested"})
 }
 
 // ListDelegations handles GET /workflows/delegations.
@@ -438,7 +438,7 @@ func (h *WorkflowHandler) ListDelegations(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": delegations})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"data": delegations})
 }
 
 // CreateDelegation handles POST /workflows/delegations.
@@ -461,5 +461,5 @@ func (h *WorkflowHandler) CreateDelegation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"data": delegation})
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", map[string]interface{}{"data": delegation})
 }

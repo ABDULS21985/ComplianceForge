@@ -372,7 +372,7 @@ func dynamicGroupPredicate(organizationID string, raw json.RawMessage) (string, 
 	}
 	if len(rule.RoleSlugs) > 0 {
 		args = append(args, rule.RoleSlugs)
-		where = append(where, fmt.Sprintf(`EXISTS(SELECT 1 FROM user_roles dynamic_ur JOIN roles dynamic_role
+		where = append(where, fmt.Sprintf(`EXISTS(SELECT 1 FROM effective_user_roles dynamic_ur JOIN roles dynamic_role
 			ON dynamic_role.id=dynamic_ur.role_id AND dynamic_role.deleted_at IS NULL
 			WHERE dynamic_ur.organization_id=u.organization_id AND dynamic_ur.user_id=u.id
 			AND dynamic_role.slug=ANY($%d::text[]))`, len(args)))

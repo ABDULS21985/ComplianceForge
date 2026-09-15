@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/complianceforge/platform/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
@@ -306,9 +307,9 @@ func (e *ABACEngine) GetUserPermissions(ctx context.Context, orgID, userID strin
 // GetFieldPermissions returns field-level visibility rules for a user on a resource type.
 func (e *ABACEngine) GetFieldPermissions(ctx context.Context, orgID, userID, resourceType string) ([]FieldPermission, error) {
 	// Fetch user role IDs for lookup.
-	roleRows, err := e.pool.Query(ctx, `
+	roleRows, err := database.QuerierFromContext(ctx, e.pool).Query(ctx, `
 		SELECT r.slug
-		FROM user_roles ur
+		FROM effective_user_roles ur
 		JOIN roles r ON r.id = ur.role_id
 		WHERE ur.user_id = $1 AND ur.organization_id = $2`, userID, orgID)
 	if err != nil {
@@ -516,12 +517,12 @@ func (e *ABACEngine) fetchSubjectAttributes(ctx context.Context, orgID, userID s
 	attrs["is_active"] = isActive
 
 	// Roles.
-	rows, err := e.pool.Query(ctx, `
-		SELECT r.slug FROM user_roles ur
+	rows, err := database.QuerierFromContext(ctx, e.pool).Query(ctx, `
+		SELECT r.slug FROM effective_user_roles ur
 		JOIN roles r ON r.id = ur.role_id
 		WHERE ur.user_id = $1 AND ur.organization_id = $2`, userID, orgID)
 	if err != nil {
-		return attrs, nil
+		return nil, fmt.Errorf("fetch effective user roles: %w", err)
 	}
 	defer rows.Close()
 
@@ -537,7 +538,7 @@ func (e *ABACEngine) fetchSubjectAttributes(ctx context.Context, orgID, userID s
 }
 
 func (e *ABACEngine) fetchApplicablePolicies(ctx context.Context, orgID, userID string) ([]AccessPolicy, error) {
-	rows, err := e.pool.Query(ctx, `
+	rows, err := database.QuerierFromContext(ctx, e.pool).Query(ctx, `
 		SELECT DISTINCT ap.id, ap.organization_id, ap.name, ap.priority, ap.effect, ap.is_active,
 		       ap.subject_conditions, ap.resource_type, ap.resource_conditions,
 		       ap.actions, ap.environment_conditions, ap.valid_from, ap.valid_until
@@ -548,7 +549,7 @@ func (e *ABACEngine) fetchApplicablePolicies(ctx context.Context, orgID, userID 
 		  AND (
 		      (pa.assignee_type = 'user' AND pa.assignee_id = $2)
 		      OR (pa.assignee_type = 'role' AND pa.assignee_id IN (
-		          SELECT ur.role_id::text FROM user_roles ur WHERE ur.user_id = $2 AND ur.organization_id = $1
+		          SELECT ur.role_id::text FROM effective_user_roles ur WHERE ur.user_id = $2 AND ur.organization_id = $1
 		      ))
 		      OR pa.assignee_type = 'all_users'
 		  )

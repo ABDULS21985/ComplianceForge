@@ -1,18 +1,16 @@
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-
-import { portalCookiePolicy } from '@/lib/request-security';
-
-import { csrfErrorResponse, jsonError, verifyCsrf } from './session-security';
 import {
   buildUpstreamUrl,
   forwardedRequestHeaders,
   PayloadTooLargeError,
   proxyResponse,
   readLimitedRequestBody,
-  serverFetchInit,
   type ServerFetch,
+  serverFetchInit,
 } from './upstream';
+import { csrfErrorResponse, jsonError, verifyCsrf } from './session-security';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+import { portalCookiePolicy } from '@/lib/request-security';
 
 const MAX_PORTAL_BODY_BYTES = 5 * 1024 * 1024;
 const MAX_PORTAL_TOKEN_BODY_BYTES = 16 * 1024;

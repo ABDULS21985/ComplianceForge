@@ -202,6 +202,12 @@ func (o *PostgresOutbox) Enqueue(ctx context.Context, executor database.Querier,
 	err = executor.QueryRow(ctx, `
 		SELECT queue_name = $2 AND envelope = $3::JSONB
 		FROM queue_outbox WHERE message_id = $1`, envelope.ID, queueName, body).Scan(&identical)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// A conflicting identifier may belong to another RLS tenant. Return the
+		// same opaque conflict as a visible non-identical row so callers cannot
+		// use idempotent enqueue as a cross-tenant existence oracle.
+		return ErrOutboxConflict
+	}
 	if err != nil {
 		return fmt.Errorf("verify existing outbox message: %w", err)
 	}

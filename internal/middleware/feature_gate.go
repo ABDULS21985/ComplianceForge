@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -92,9 +91,5 @@ func RequireEntitlementCapacity(checker EntitlementLimitChecker, metric string, 
 }
 
 func writeFeatureGateError(w http.ResponseWriter, r *http.Request, status int, errorCode, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-		Code: status, ErrorCode: errorCode, Message: message, RequestID: GetRequestIDFromContext(r.Context()),
-	})
+	writeMiddlewareError(w, r, status, errorCode, message, "")
 }

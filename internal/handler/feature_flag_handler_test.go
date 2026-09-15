@@ -72,6 +72,7 @@ func featureFlagRequest(method, target, body string) *http.Request {
 	ctx := context.WithValue(request.Context(), middleware.ContextKeyOrgID, featureFlagHandlerOrg)
 	ctx = context.WithValue(ctx, middleware.ContextKeyUserID, featureFlagHandlerActor)
 	ctx = context.WithValue(ctx, middleware.ContextKeyRequestID, "request-flag-1")
+	ctx = handlerAllowedContext(ctx)
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("key", "advanced_reporting")
 	routeContext.URLParams.Add("metric", "users")

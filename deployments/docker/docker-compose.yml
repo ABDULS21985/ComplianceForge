@@ -27,6 +27,16 @@ x-backend-environment: &backend-environment
   SMTP_TIMEOUT_SECONDS: 15
   STORAGE_TYPE: local
   STORAGE_PATH: /app/storage
+  EVIDENCE_MAXIMUM_UPLOAD_BYTES: ${EVIDENCE_MAXIMUM_UPLOAD_BYTES:-26214400}
+  EVIDENCE_SCANNER_NETWORK: tcp
+  EVIDENCE_SCANNER_ADDRESS: clamav:3310
+  EVIDENCE_SCANNER_TIMEOUT_SECONDS: ${EVIDENCE_SCANNER_TIMEOUT_SECONDS:-30}
+  EVIDENCE_SIGNED_DOWNLOAD_SECONDS: ${EVIDENCE_SIGNED_DOWNLOAD_SECONDS:-300}
+  HTTP_READ_HEADER_TIMEOUT_SECONDS: ${HTTP_READ_HEADER_TIMEOUT_SECONDS:-5}
+  HTTP_READ_TIMEOUT_SECONDS: ${HTTP_READ_TIMEOUT_SECONDS:-120}
+  HTTP_WRITE_TIMEOUT_SECONDS: ${HTTP_WRITE_TIMEOUT_SECONDS:-360}
+  HTTP_IDLE_TIMEOUT_SECONDS: ${HTTP_IDLE_TIMEOUT_SECONDS:-60}
+  HTTP_SHUTDOWN_TIMEOUT_SECONDS: ${HTTP_SHUTDOWN_TIMEOUT_SECONDS:-30}
   CORS_ALLOWED_ORIGINS: http://localhost:3000
   LOG_LEVEL: debug
   OBSERVABILITY_METRICS_ENABLED: "true"
@@ -70,6 +80,8 @@ services:
       redis:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     restart: unless-stopped
     init: true
@@ -183,6 +195,21 @@ services:
     networks:
       - complianceforge
 
+  # Evidence never reaches the clean object namespace until clamd returns a
+  # conclusive clean verdict. The signature database is persisted so local
+  # restarts do not repeatedly bootstrap it from scratch.
+  clamav:
+    image: clamav/clamav:1.5.4-debian@sha256:cc16781fe005e49de6a8fc1231b63b265f74b18fc2a6347c670c35716914c3b6
+    volumes:
+      - clamav_data:/var/lib/clamav
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    networks:
+      - complianceforge
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
     profiles: [observability]
@@ -255,6 +282,7 @@ volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  clamav_data:
   prometheus_data:
   grafana_data:
 

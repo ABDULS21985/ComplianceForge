@@ -76,7 +76,7 @@ func (h *IntegrationHandler) ListIntegrations(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": integrations})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{"data": integrations})
 }
 
 // CreateIntegration handles POST /integrations.
@@ -105,7 +105,7 @@ func (h *IntegrationHandler) CreateIntegration(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"data": result})
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", map[string]interface{}{"data": result})
 }
 
 // GetIntegration handles GET /integrations/{id}.
@@ -128,7 +128,7 @@ func (h *IntegrationHandler) GetIntegration(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": integration})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{"data": integration})
 }
 
 // UpdateIntegration handles PUT /integrations/{id}.
@@ -161,7 +161,7 @@ func (h *IntegrationHandler) UpdateIntegration(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Integration updated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{"message": "Integration updated"})
 }
 
 // DeleteIntegration handles DELETE /integrations/{id}.
@@ -206,7 +206,7 @@ func (h *IntegrationHandler) TestConnection(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{
 		"status":  status,
 		"message": "Connection test completed",
 	})
@@ -251,7 +251,12 @@ func (h *IntegrationHandler) TriggerSync(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, map[string]interface{}{"data": result})
+	writeClassifiedJSON(w, r, http.StatusAccepted, "settings", models.AsyncJobResponse{
+		Data: result,
+		Job: models.AsyncJob{
+			ID: result.ID, Type: "integration_sync", Status: result.Status, SubmittedAt: result.CreatedAt,
+		},
+	})
 }
 
 // GetSyncLogs handles GET /integrations/{id}/logs.
@@ -276,20 +281,7 @@ func (h *IntegrationHandler) GetSyncLogs(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	totalPages := 0
-	if pagination.PageSize > 0 {
-		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data": logs,
-		"pagination": models.PaginationResponse{
-			Page:       pagination.Page,
-			PageSize:   pagination.PageSize,
-			TotalItems: total,
-			TotalPages: totalPages,
-		},
-	})
+	writeClassifiedPaginated(w, r, "settings", logs, total, pagination)
 }
 
 // GetSSOConfig handles GET /settings/sso.
@@ -306,7 +298,7 @@ func (h *IntegrationHandler) GetSSOConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": config})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{"data": config})
 }
 
 // UpdateSSOConfig handles PUT /settings/sso.
@@ -328,7 +320,7 @@ func (h *IntegrationHandler) UpdateSSOConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "SSO configuration updated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{"message": "SSO configuration updated"})
 }
 
 // ListAPIKeys handles GET /settings/api-keys.
@@ -345,7 +337,7 @@ func (h *IntegrationHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": keys})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{"data": keys})
 }
 
 // CreateAPIKey handles POST /settings/api-keys.
@@ -408,7 +400,7 @@ func (h *IntegrationHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", map[string]interface{}{
 		"data": keyRecord,
 		"key":  rawKey,
 		"note": "Store this key securely. It will not be shown again.",

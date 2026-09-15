@@ -244,6 +244,16 @@ func (s *UserAdministrationService) CreateGroup(ctx context.Context, organizatio
 		return nil, err
 	}
 	normalizeDirectoryGroupCreate(&input)
+	if input.GroupType == models.DirectoryGroupDynamic {
+		rule, err := validateDynamicGroupRule(input.MembershipRule)
+		if err != nil {
+			return nil, err
+		}
+		input.MembershipRule, err = json.Marshal(rule)
+		if err != nil {
+			return nil, fmt.Errorf("%w: encode dynamic membership rule", ErrUserAdministrationInvalid)
+		}
+	}
 	if err := validateDirectoryGroupCreate(input); err != nil {
 		return nil, err
 	}
@@ -317,8 +327,13 @@ func (s *UserAdministrationService) UpdateGroup(ctx context.Context, organizatio
 		if current.GroupType != models.DirectoryGroupDynamic {
 			return nil, fmt.Errorf("%w: only dynamic groups accept membership rules", ErrUserAdministrationInvalid)
 		}
-		if _, err := validateDynamicGroupRule(patch.MembershipRule); err != nil {
+		rule, err := validateDynamicGroupRule(patch.MembershipRule)
+		if err != nil {
 			return nil, err
+		}
+		patch.MembershipRule, err = json.Marshal(rule)
+		if err != nil {
+			return nil, fmt.Errorf("%w: encode dynamic membership rule", ErrUserAdministrationInvalid)
 		}
 	}
 	item, err := s.store.UpdateGroup(ctx, organizationID, groupID, actorID, patch)

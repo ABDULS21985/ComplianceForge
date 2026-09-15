@@ -17,6 +17,7 @@ const (
 	ContextKeyOrgID  contextKey = "organization_id"
 	ContextKeyRole   contextKey = "role"
 	ContextKeyEmail  contextKey = "email"
+	ContextKeyMFA    contextKey = "mfa_verified"
 )
 
 // AccessTokenValidator validates a signed access token and its persisted
@@ -36,7 +37,7 @@ func AuthMiddleware(validator AccessTokenValidator) func(http.Handler) http.Hand
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if validator == nil {
 				log.Error().Msg("authentication middleware has no token validator")
-				writeAuthError(w, "authentication unavailable")
+				writeAuthError(w, r, "authentication unavailable")
 				return
 			}
 
@@ -46,7 +47,7 @@ func AuthMiddleware(validator AccessTokenValidator) func(http.Handler) http.Hand
 					Str("path", r.URL.Path).
 					Str("method", r.Method).
 					Msg("missing authorization header")
-				writeAuthError(w, "missing authorization header")
+				writeAuthError(w, r, "missing authorization header")
 				return
 			}
 
@@ -55,7 +56,7 @@ func AuthMiddleware(validator AccessTokenValidator) func(http.Handler) http.Hand
 				log.Warn().
 					Str("path", r.URL.Path).
 					Msg("invalid authorization header format")
-				writeAuthError(w, "invalid authorization header format")
+				writeAuthError(w, r, "invalid authorization header format")
 				return
 			}
 
@@ -66,7 +67,7 @@ func AuthMiddleware(validator AccessTokenValidator) func(http.Handler) http.Hand
 					Err(err).
 					Str("path", r.URL.Path).
 					Msg("invalid or expired token")
-				writeAuthError(w, "invalid or expired token")
+				writeAuthError(w, r, "invalid or expired token")
 				return
 			}
 
@@ -75,6 +76,7 @@ func AuthMiddleware(validator AccessTokenValidator) func(http.Handler) http.Hand
 			ctx = context.WithValue(ctx, ContextKeyOrgID, claims.OrganizationID)
 			ctx = context.WithValue(ctx, ContextKeyRole, claims.Role)
 			ctx = context.WithValue(ctx, ContextKeyEmail, claims.Email)
+			ctx = context.WithValue(ctx, ContextKeyMFA, claims.MFAVerified)
 
 			log.Debug().
 				Str("user_id", claims.UserID).
@@ -87,10 +89,8 @@ func AuthMiddleware(validator AccessTokenValidator) func(http.Handler) http.Hand
 	}
 }
 
-func writeAuthError(w http.ResponseWriter, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`{"error":"` + message + `"}`))
+func writeAuthError(w http.ResponseWriter, r *http.Request, detail string) {
+	writeMiddlewareError(w, r, http.StatusUnauthorized, "authentication_required", "Authentication required", detail)
 }
 
 // GetUserIDFromContext extracts the user_id from the request context.
@@ -123,4 +123,11 @@ func GetEmailFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// GetMFAVerifiedFromContext reports the signed session assurance established
+// by authentication. Request bodies and forwarded headers cannot set it.
+func GetMFAVerifiedFromContext(ctx context.Context) bool {
+	value, _ := ctx.Value(ContextKeyMFA).(bool)
+	return value
 }

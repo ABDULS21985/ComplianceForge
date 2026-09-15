@@ -7,6 +7,7 @@ repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 migrations_dir=${MIGRATIONS_DIR:-$repo_root/sql/migrations}
 seeds_dir=${SEEDS_DIR:-$repo_root/sql/seeds}
 manifest=${SEED_MANIFEST:-$seeds_dir/manifest.txt}
+schema_version_file=${SCHEMA_VERSION_FILE:-$repo_root/internal/database/schema.go}
 
 fail() {
   printf 'migration validation failed: %s\n' "$*" >&2
@@ -62,6 +63,11 @@ for down_file in "$migrations_dir"/*.down.sql; do
   stem=$(basename -- "$down_file" .down.sql)
   [ -f "$migrations_dir/$stem.up.sql" ] || fail "orphan down migration: $(basename -- "$down_file")"
 done
+
+[ -f "$schema_version_file" ] || fail "schema version declaration not found: $schema_version_file"
+supported_schema_version=$(sed -n 's/^[[:space:]]*const SupportedSchemaVersion int64 = \([0-9][0-9]*\)[[:space:]]*$/\1/p' "$schema_version_file")
+[ -n "$supported_schema_version" ] || fail "could not read SupportedSchemaVersion from $schema_version_file"
+[ "$supported_schema_version" -eq "$up_count" ] || fail "SupportedSchemaVersion is $supported_schema_version but latest migration is $up_count"
 
 seed_count=0
 seen_seeds='|'

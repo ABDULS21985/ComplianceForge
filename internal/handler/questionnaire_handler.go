@@ -50,26 +50,26 @@ type QuestionnaireFilters struct {
 
 // Questionnaire represents a vendor assessment questionnaire template.
 type Questionnaire struct {
-	ID             string              `json:"id"`
-	OrganizationID string              `json:"organization_id"`
-	Title          string              `json:"title" validate:"required"`
-	Description    string              `json:"description"`
-	Category       string              `json:"category"` // security, privacy, compliance, general
-	Status         string              `json:"status"`   // draft, active, archived
-	Version        int                 `json:"version"`
-	Sections       []QuestionSection   `json:"sections,omitempty"`
-	ScoringMethod  string              `json:"scoring_method,omitempty"` // weighted, equal, pass_fail
-	CreatedBy      string              `json:"created_by"`
-	CreatedAt      string              `json:"created_at"`
-	UpdatedAt      string              `json:"updated_at"`
+	ID             string            `json:"id"`
+	OrganizationID string            `json:"organization_id"`
+	Title          string            `json:"title" validate:"required"`
+	Description    string            `json:"description"`
+	Category       string            `json:"category"` // security, privacy, compliance, general
+	Status         string            `json:"status"`   // draft, active, archived
+	Version        int               `json:"version"`
+	Sections       []QuestionSection `json:"sections,omitempty"`
+	ScoringMethod  string            `json:"scoring_method,omitempty"` // weighted, equal, pass_fail
+	CreatedBy      string            `json:"created_by"`
+	CreatedAt      string            `json:"created_at"`
+	UpdatedAt      string            `json:"updated_at"`
 }
 
 // QuestionnaireDetail extends Questionnaire with usage statistics.
 type QuestionnaireDetail struct {
 	Questionnaire
-	TotalAssessments    int `json:"total_assessments"`
-	ActiveAssessments   int `json:"active_assessments"`
-	AverageScore        float64 `json:"average_score"`
+	TotalAssessments  int     `json:"total_assessments"`
+	ActiveAssessments int     `json:"active_assessments"`
+	AverageScore      float64 `json:"average_score"`
 }
 
 // QuestionSection represents a section within a questionnaire.
@@ -84,15 +84,15 @@ type QuestionSection struct {
 
 // Question represents a single question in a questionnaire.
 type Question struct {
-	ID           string   `json:"id"`
-	Text         string   `json:"text"`
-	Type         string   `json:"type"` // text, single_choice, multi_choice, yes_no, file_upload, scale
-	Required     bool     `json:"required"`
-	Options      []string `json:"options,omitempty"`
-	Weight       float64  `json:"weight,omitempty"`
-	HelpText     string   `json:"help_text,omitempty"`
-	Order        int      `json:"order"`
-	RequiresEvidence bool `json:"requires_evidence"`
+	ID               string   `json:"id"`
+	Text             string   `json:"text"`
+	Type             string   `json:"type"` // text, single_choice, multi_choice, yes_no, file_upload, scale
+	Required         bool     `json:"required"`
+	Options          []string `json:"options,omitempty"`
+	Weight           float64  `json:"weight,omitempty"`
+	HelpText         string   `json:"help_text,omitempty"`
+	Order            int      `json:"order"`
+	RequiresEvidence bool     `json:"requires_evidence"`
 }
 
 // VendorAssessmentFilters holds filter parameters for listing vendor assessments.
@@ -105,23 +105,23 @@ type VendorAssessmentFilters struct {
 
 // VendorAssessment represents a vendor assessment instance.
 type VendorAssessment struct {
-	ID              string `json:"id"`
-	OrganizationID  string `json:"organization_id"`
-	VendorID        string `json:"vendor_id" validate:"required"`
-	QuestionnaireID string `json:"questionnaire_id" validate:"required"`
-	VendorName      string `json:"vendor_name,omitempty"`
-	Status          string `json:"status"` // draft, sent, in_progress, submitted, under_review, completed, expired
-	PortalToken     string `json:"portal_token,omitempty"`
-	DueDate         string `json:"due_date,omitempty"`
+	ID              string  `json:"id"`
+	OrganizationID  string  `json:"organization_id"`
+	VendorID        string  `json:"vendor_id" validate:"required"`
+	QuestionnaireID string  `json:"questionnaire_id" validate:"required"`
+	VendorName      string  `json:"vendor_name,omitempty"`
+	Status          string  `json:"status"` // draft, sent, in_progress, submitted, under_review, completed, expired
+	PortalToken     string  `json:"portal_token,omitempty"`
+	DueDate         string  `json:"due_date,omitempty"`
 	Score           float64 `json:"score,omitempty"`
-	RiskRating      string `json:"risk_rating,omitempty"`
-	SentAt          string `json:"sent_at,omitempty"`
-	SubmittedAt     string `json:"submitted_at,omitempty"`
-	ReviewedAt      string `json:"reviewed_at,omitempty"`
-	ReviewedBy      string `json:"reviewed_by,omitempty"`
-	CreatedBy       string `json:"created_by"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	RiskRating      string  `json:"risk_rating,omitempty"`
+	SentAt          string  `json:"sent_at,omitempty"`
+	SubmittedAt     string  `json:"submitted_at,omitempty"`
+	ReviewedAt      string  `json:"reviewed_at,omitempty"`
+	ReviewedBy      string  `json:"reviewed_by,omitempty"`
+	CreatedBy       string  `json:"created_by"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 // VendorAssessmentDetail extends VendorAssessment with responses.
@@ -142,22 +142,22 @@ type QuestionResponse struct {
 
 // ReviewAssessmentRequest is the payload for POST /vendor-assessments/{id}/review.
 type ReviewAssessmentRequest struct {
-	RiskRating    string              `json:"risk_rating" validate:"required"`
-	Comments      string              `json:"comments,omitempty"`
+	RiskRating    string               `json:"risk_rating" validate:"required"`
+	Comments      string               `json:"comments,omitempty"`
 	QuestionNotes []QuestionReviewNote `json:"question_notes,omitempty"`
 }
 
 // QuestionReviewNote is a reviewer's note on a specific question response.
 type QuestionReviewNote struct {
-	QuestionID string `json:"question_id"`
+	QuestionID string  `json:"question_id"`
 	Score      float64 `json:"score"`
 	Note       string  `json:"note,omitempty"`
 }
 
 // AssessmentComparison holds comparison data between multiple vendor assessments.
 type AssessmentComparison struct {
-	Assessments []AssessmentSummary  `json:"assessments"`
-	BySection   []SectionComparison  `json:"by_section"`
+	Assessments []AssessmentSummary `json:"assessments"`
+	BySection   []SectionComparison `json:"by_section"`
 }
 
 // AssessmentSummary is a summary of a single assessment for comparison.
@@ -189,12 +189,12 @@ type AssessmentDashboard struct {
 
 // PortalQuestionnaire is the questionnaire data returned to the vendor portal.
 type PortalQuestionnaire struct {
-	AssessmentID    string            `json:"assessment_id"`
-	VendorName      string            `json:"vendor_name"`
-	Title           string            `json:"title"`
-	Description     string            `json:"description"`
-	DueDate         string            `json:"due_date,omitempty"`
-	Sections        []QuestionSection `json:"sections"`
+	AssessmentID      string             `json:"assessment_id"`
+	VendorName        string             `json:"vendor_name"`
+	Title             string             `json:"title"`
+	Description       string             `json:"description"`
+	DueDate           string             `json:"due_date,omitempty"`
+	Sections          []QuestionSection  `json:"sections"`
 	ExistingResponses []QuestionResponse `json:"existing_responses,omitempty"`
 }
 
@@ -213,12 +213,12 @@ type PortalEvidence struct {
 
 // PortalProgress provides progress information for the vendor portal.
 type PortalProgress struct {
-	AssessmentID     string  `json:"assessment_id"`
-	TotalQuestions   int     `json:"total_questions"`
-	AnsweredQuestions int    `json:"answered_questions"`
-	RequiredRemaining int   `json:"required_remaining"`
-	CompletionPct    float64 `json:"completion_pct"`
-	CanSubmit        bool    `json:"can_submit"`
+	AssessmentID      string  `json:"assessment_id"`
+	TotalQuestions    int     `json:"total_questions"`
+	AnsweredQuestions int     `json:"answered_questions"`
+	RequiredRemaining int     `json:"required_remaining"`
+	CompletionPct     float64 `json:"completion_pct"`
+	CanSubmit         bool    `json:"can_submit"`
 }
 
 // ---------- handler ----------
@@ -255,7 +255,7 @@ func (h *QuestionnaireHandler) ListQuestionnaires(w http.ResponseWriter, r *http
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]interface{}{
 		"data": questionnaires,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -287,7 +287,7 @@ func (h *QuestionnaireHandler) CreateQuestionnaire(w http.ResponseWriter, r *htt
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, q)
+	writeClassifiedJSON(w, r, http.StatusCreated, "vendors", q)
 }
 
 // GetQuestionnaire handles GET /questionnaires/{id}.
@@ -305,7 +305,7 @@ func (h *QuestionnaireHandler) GetQuestionnaire(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", detail)
 }
 
 // UpdateQuestionnaire handles PUT /questionnaires/{id}.
@@ -330,7 +330,7 @@ func (h *QuestionnaireHandler) UpdateQuestionnaire(w http.ResponseWriter, r *htt
 		return
 	}
 
-	writeJSON(w, http.StatusOK, q)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", q)
 }
 
 // CloneQuestionnaire handles POST /questionnaires/{id}/clone.
@@ -349,7 +349,7 @@ func (h *QuestionnaireHandler) CloneQuestionnaire(w http.ResponseWriter, r *http
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, cloned)
+	writeClassifiedJSON(w, r, http.StatusCreated, "vendors", cloned)
 }
 
 // ListVendorAssessments handles GET /vendor-assessments.
@@ -375,7 +375,7 @@ func (h *QuestionnaireHandler) ListVendorAssessments(w http.ResponseWriter, r *h
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]interface{}{
 		"data": assessments,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -407,7 +407,7 @@ func (h *QuestionnaireHandler) CreateVendorAssessment(w http.ResponseWriter, r *
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, assessment)
+	writeClassifiedJSON(w, r, http.StatusCreated, "vendors", assessment)
 }
 
 // GetVendorAssessment handles GET /vendor-assessments/{id}.
@@ -425,7 +425,7 @@ func (h *QuestionnaireHandler) GetVendorAssessment(w http.ResponseWriter, r *htt
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", detail)
 }
 
 // ReviewVendorAssessment handles POST /vendor-assessments/{id}/review.
@@ -454,7 +454,7 @@ func (h *QuestionnaireHandler) ReviewVendorAssessment(w http.ResponseWriter, r *
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Assessment reviewed"})
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]string{"message": "Assessment reviewed"})
 }
 
 // SendReminder handles POST /vendor-assessments/{id}/reminder.
@@ -471,7 +471,7 @@ func (h *QuestionnaireHandler) SendReminder(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Reminder sent"})
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]string{"message": "Reminder sent"})
 }
 
 // CompareAssessments handles GET /vendor-assessments/compare.
@@ -490,7 +490,7 @@ func (h *QuestionnaireHandler) CompareAssessments(w http.ResponseWriter, r *http
 		return
 	}
 
-	writeJSON(w, http.StatusOK, comparison)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", comparison)
 }
 
 // GetAssessmentDashboard handles GET /vendor-assessments/dashboard.
@@ -503,7 +503,7 @@ func (h *QuestionnaireHandler) GetAssessmentDashboard(w http.ResponseWriter, r *
 		return
 	}
 
-	writeJSON(w, http.StatusOK, dashboard)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", dashboard)
 }
 
 // ---------- vendor portal handler (public, token-authenticated) ----------

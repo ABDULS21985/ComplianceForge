@@ -54,6 +54,7 @@ func accessAdminRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	ctx := context.WithValue(request.Context(), middleware.ContextKeyOrgID, accessAdminHandlerOrg)
 	ctx = context.WithValue(ctx, middleware.ContextKeyUserID, accessAdminHandlerUser)
+	ctx = handlerAllowedContext(ctx)
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("id", accessAdminHandlerRole)
 	routeContext.URLParams.Add("userID", accessAdminTargetUser)

@@ -1,7 +1,10 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -195,5 +198,133 @@ func TestNotificationDeliveryConfigFromEnvironment(t *testing.T) {
 	t.Setenv("NOTIFICATION_DELIVERY_LEASE", "5s")
 	if _, err := NotificationDeliveryConfigFromEnvironment(ownerID); err == nil {
 		t.Fatal("expected unsafe lease configuration to fail")
+	}
+}
+
+func notificationPagerIDs(count int) []string {
+	ids := make([]string, count)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("20000000-0000-0000-0000-%012d", i+1)
+	}
+	return ids
+}
+
+func TestNotificationTenantPaginationVisitsAllPagesBeyondLegacyCeiling(t *testing.T) {
+	for _, pageSize := range []int{1, 31, 1000} {
+		t.Run(fmt.Sprintf("page size %d", pageSize), func(t *testing.T) {
+			ids := notificationPagerIDs(2051)
+			position, queries := 0, 0
+			var visited []string
+			err := runNotificationTenantPages(context.Background(), pageSize, func(_ context.Context, after *string, limit int) ([]string, error) {
+				queries++
+				if limit != pageSize || (position == 0 && after != nil) || (position > 0 && (after == nil || *after != ids[position-1])) {
+					t.Fatalf("incorrect registry continuation position=%d after=%v limit=%d", position, after, limit)
+				}
+				end := min(position+limit, len(ids))
+				page := ids[position:end]
+				position = end
+				return page, nil
+			}, func(_ context.Context, id string) error {
+				visited = append(visited, id)
+				return nil
+			})
+			if err != nil || !slices.Equal(visited, ids) || queries != len(ids)/pageSize+1 {
+				t.Fatalf("visited=%d queries=%d error=%v", len(visited), queries, err)
+			}
+		})
+	}
+}
+
+func TestNotificationTenantPaginationBoundsErrorsWithoutSkippingLaterTenants(t *testing.T) {
+	ids := notificationPagerIDs(1250)
+	position, visited := 0, 0
+	marker := errors.New("tenant marker")
+	err := runNotificationTenantPages(context.Background(), 31, func(_ context.Context, _ *string, limit int) ([]string, error) {
+		end := min(position+limit, len(ids))
+		page := ids[position:end]
+		position = end
+		return page, nil
+	}, func(context.Context, string) error {
+		visited++
+		return marker
+	})
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok || len(joined.Unwrap()) != maximumNotificationTenantErrors+1 || visited != len(ids) || !errors.Is(err, marker) ||
+		!strings.Contains(err.Error(), "1150 additional tenants") || strings.Contains(err.Error(), ids[maximumNotificationTenantErrors]) {
+		t.Fatalf("unbounded/skipped error retention visited=%d error=%v", visited, err)
+	}
+}
+
+func TestNotificationTenantPaginationRetainsErrorsOnDiscoveryFailureAndCancellation(t *testing.T) {
+	for _, name := range []string{"discovery failure", "cancellation"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			runError, queryError := errors.New("first tenant failed"), errors.New("registry unavailable")
+			queries, runs := 0, 0
+			err := runNotificationTenantPages(ctx, 1, func(context.Context, *string, int) ([]string, error) {
+				queries++
+				if queries > 1 {
+					return nil, queryError
+				}
+				return notificationPagerIDs(1), nil
+			}, func(context.Context, string) error {
+				runs++
+				if name == "cancellation" {
+					cancel()
+				}
+				return runError
+			})
+			cause := queryError
+			if name == "cancellation" {
+				cause = context.Canceled
+			}
+			if runs != 1 || !errors.Is(err, runError) || !errors.Is(err, cause) || (name == "cancellation" && queries != 1) {
+				t.Fatalf("runs=%d queries=%d error=%v", runs, queries, err)
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	queries := 0
+	err := runNotificationTenantPages(ctx, 1, func(context.Context, *string, int) ([]string, error) {
+		queries++
+		return nil, nil
+	}, func(context.Context, string) error { t.Fatal("cancelled callback ran"); return nil })
+	if queries != 0 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled paginator queried registry: queries=%d error=%v", queries, err)
+	}
+}
+
+func TestNotificationTenantPaginationRejectsMalformedPagesBeforeEffects(t *testing.T) {
+	ids := notificationPagerIDs(3)
+	for _, test := range []struct {
+		name string
+		page []string
+	}{
+		{"oversized", ids},
+		{"duplicate", []string{ids[0], ids[0]}},
+		{"unordered", []string{ids[1], ids[0]}},
+		{"invalid UUID", []string{ids[0], "not-a-uuid"}},
+		{"nil UUID", []string{uuid.Nil.String()}},
+		{"UUID alias", []string{"urn:uuid:" + ids[0]}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runs := 0
+			err := runNotificationTenantPages(context.Background(), 2, func(context.Context, *string, int) ([]string, error) {
+				return test.page, nil
+			}, func(context.Context, string) error { runs++; return nil })
+			if err == nil || runs != 0 {
+				t.Fatalf("malformed page caused effects runs=%d error=%v", runs, err)
+			}
+		})
+	}
+	queries, runs := 0, 0
+	err := runNotificationTenantPages(context.Background(), 1, func(context.Context, *string, int) ([]string, error) {
+		queries++
+		return ids[:1], nil
+	}, func(context.Context, string) error { runs++; return nil })
+	if err == nil || queries != 2 || runs != 1 {
+		t.Fatalf("cyclic page not rejected: queries=%d runs=%d error=%v", queries, runs, err)
 	}
 }

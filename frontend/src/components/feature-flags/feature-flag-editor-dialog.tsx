@@ -2,9 +2,6 @@
 
 import * as React from 'react';
 import { AlertTriangle, Loader2, Save } from 'lucide-react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '@/lib/api';
-import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -20,12 +17,15 @@ import {
   isFeatureFlagConflict,
   rolloutPercent,
 } from '@/lib/feature-flags';
+import type { FeatureFlagEvaluation, FeatureFlagOverrideInput } from '@/types/feature-flag';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import type { FeatureFlagEvaluation, FeatureFlagOverrideInput } from '@/types/feature-flag';
 
 interface EditorState {
   enabled: boolean;

@@ -1,34 +1,33 @@
 'use client';
 
-import { useState } from 'react';
 import {
-  BarChart3,
-  AlertTriangle,
-  Shield,
   AlertCircle,
+  AlertTriangle,
+  BarChart3,
   ChevronRight,
+  Shield,
 } from 'lucide-react';
 import {
-  BarChart,
   Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-  PieChart,
-  Pie,
-  Legend,
 } from 'recharts';
-
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { cn } from '@/lib/utils';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatPercentage, getRiskLevelColor } from '@/lib/utils';
 import { useComplianceReport, useRiskReport } from '@/lib/api-hooks';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { Progress } from '@/components/ui/progress';
+import { useState } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types for report data

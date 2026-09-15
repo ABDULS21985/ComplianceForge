@@ -36,6 +36,8 @@ var protectedResourceAliases = map[string]string{
 	"incidents":          "incidents",
 	"assets":             "assets",
 	"vendors":            "vendors",
+	"directory":          "users",
+	"identity":           "users",
 	"dashboard":          "reports",
 	"reports":            "reports",
 	"notifications":      "users",
@@ -140,7 +142,14 @@ func permissionForProtectedRequest(method, path string) (routePermission, bool) 
 		action = "update"
 	}
 	if segment == "controls" && strings.Contains(lowerPath, "/evidence") {
-		action = mapReadOrUpdate(method)
+		switch {
+		case containsActionSegment(lowerPath, "download"):
+			action = "export"
+		case containsActionSegment(lowerPath, "review"):
+			action = "approve"
+		default:
+			action = mapReadOrUpdate(method)
+		}
 	}
 	if segment == "policies" && containsActionSegment(lowerPath, "decision") {
 		action = "approve"
@@ -161,6 +170,39 @@ func permissionForProtectedRequest(method, path string) (routePermission, bool) 
 			action = "approve"
 		case containsActionSegment(lowerPath, "contacts", "contracts", "certifications", "subprocessors") && method != http.MethodGet && method != http.MethodHead:
 			action = "update"
+		}
+	}
+	if segment == "directory" {
+		switch {
+		case containsActionSegment(lowerPath, "transfer-ownership"):
+			action = "assign"
+		case containsActionSegment(lowerPath, "members") && method != http.MethodGet && method != http.MethodHead:
+			action = "assign"
+		case containsActionSegment(lowerPath, "suspend", "reactivate"):
+			action = "update"
+		case containsActionSegment(lowerPath, "mfa", "reset"):
+			action = "update"
+		case containsActionSegment(lowerPath, "deprovision"):
+			action = "delete"
+		}
+	}
+	if segment == "identity" {
+		switch lowerPath {
+		case "identity/policy":
+			resource = "settings"
+			if method == http.MethodGet || method == http.MethodHead {
+				action = "read"
+			} else {
+				action = "configure"
+			}
+		case "identity/history":
+			resource = "settings"
+			action = "read"
+		default:
+			// Sessions, factors, step-up grants, and passkeys are always scoped
+			// to the authenticated principal by the identity handler.
+			resource = "users"
+			action = "read"
 		}
 	}
 	// An acknowledgement is the authenticated principal's own read receipt.
@@ -250,7 +292,10 @@ func containsActionSegment(path string, candidates ...string) bool {
 }
 
 func resolveProtectedResourceID(r *http.Request) string {
-	for _, key := range []string{"id", "frameworkID", "riskId", "entityId", "articleId", "taskId", "assignmentId"} {
+	for _, key := range []string{
+		"id", "frameworkID", "riskId", "entityId", "articleId", "taskId", "assignmentId",
+		"sessionID", "factorID", "passkeyID", "groupID", "userID",
+	} {
 		if value := chi.URLParam(r, key); value != "" {
 			return value
 		}

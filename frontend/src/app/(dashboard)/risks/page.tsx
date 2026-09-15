@@ -1,11 +1,5 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { useForm, Controller } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import {
   AlertTriangle,
   ChevronDown,
@@ -15,15 +9,15 @@ import {
   Search,
   X,
 } from 'lucide-react';
-
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  cn,
+  getRiskLevelColor,
+  getRiskScoreColor,
+  getStatusColor,
+} from '@/lib/utils';
+import { Controller, useForm, useWatch } from 'react-hook-form';
+import { ResourceBoundary, ResourceState, StaleDataNotice } from '@/components/data/resource-state';
 import {
   Select,
   SelectContent,
@@ -40,20 +34,25 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useCallback, useMemo, useState } from 'react';
 import {
-  useRisks,
-  useRiskHeatmap,
   useCreateRisk,
+  useRiskHeatmap,
+  useRisks,
   useUsers,
 } from '@/lib/api-hooks';
-import {
-  cn,
-  getRiskLevelColor,
-  getRiskScoreColor,
-  getStatusColor,
-} from '@/lib/utils';
+import { useRouter, useSearchParams } from 'next/navigation';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import Link from 'next/link';
+import { Textarea } from '@/components/ui/textarea';
 import { useQuickCreate } from '@/lib/use-quick-create';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 // ---------------------------------------------------------------------------
 // Zod schema for creating a risk
@@ -140,23 +139,24 @@ function ScoreBadge({ score }: { score: number }) {
 // ---------------------------------------------------------------------------
 
 function RiskHeatmap() {
-  const { data, isLoading, error } = useRiskHeatmap();
+  const { data, isFetching, isLoading, error, refetch } = useRiskHeatmap();
   const [mode, setMode] = useState<'inherent' | 'residual'>('residual');
 
   if (isLoading) {
     return (
-      <div className="grid gap-4">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-[400px] w-full" />
-      </div>
+      <ResourceState kind="loading" loadingLayout="detail" title="Loading risk heatmap" />
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center py-12 text-destructive">
-        Failed to load heatmap data.
-      </div>
+      <ResourceState
+        kind="error"
+        title="Risk heatmap could not be loaded"
+        description="The heatmap service did not return risk distribution data."
+        onRetry={() => void refetch()}
+        retrying={isFetching}
+      />
     );
   }
 
@@ -322,7 +322,6 @@ function CreateRiskForm({ onClose }: { onClose: () => void }) {
     register,
     handleSubmit,
     control,
-    watch,
     formState: { errors },
   } = useForm<CreateRiskFormData>({
     resolver: zodResolver(createRiskSchema),
@@ -343,10 +342,15 @@ function CreateRiskForm({ onClose }: { onClose: () => void }) {
     },
   });
 
-  const inherentL = watch('inherent_likelihood');
-  const inherentI = watch('inherent_impact');
-  const residualL = watch('residual_likelihood');
-  const residualI = watch('residual_impact');
+  const [inherentL, inherentI, residualL, residualI] = useWatch({
+    control,
+    name: [
+      'inherent_likelihood',
+      'inherent_impact',
+      'residual_likelihood',
+      'residual_impact',
+    ],
+  });
 
   const inherentScore = inherentL * inherentI;
   const residualScore = residualL * residualI;
@@ -589,9 +593,9 @@ function CreateRiskForm({ onClose }: { onClose: () => void }) {
 function SortIcon({ active, direction }: { active: boolean; direction: 'asc' | 'desc' }) {
   if (!active) return null;
   return direction === 'asc' ? (
-    <ChevronUp className="ml-1 inline h-3 w-3" />
+    <ChevronUp aria-hidden="true" className="ml-1 inline h-3 w-3" />
   ) : (
-    <ChevronDown className="ml-1 inline h-3 w-3" />
+    <ChevronDown aria-hidden="true" className="ml-1 inline h-3 w-3" />
   );
 }
 
@@ -623,7 +627,14 @@ export default function RiskRegisterPage() {
     return params;
   }, [page, sortBy, sortDir, statusFilter, riskLevelFilter, search]);
 
-  const { data, isLoading, error } = useRisks(apiParams as Parameters<typeof useRisks>[0]);
+  const {
+    data,
+    dataUpdatedAt,
+    error,
+    isFetching,
+    isLoading,
+    refetch,
+  } = useRisks(apiParams as Parameters<typeof useRisks>[0]);
 
   const risksData = data as {
     items?: Array<Record<string, unknown>>;
@@ -681,6 +692,14 @@ export default function RiskRegisterPage() {
         </Button>
       </div>
 
+      {Boolean(error) && Boolean(data) && (
+        <StaleDataNotice
+          isRefreshing={isFetching}
+          lastUpdatedAt={dataUpdatedAt}
+          onRefresh={() => void refetch()}
+        />
+      )}
+
       {/* Tabs */}
       <Tabs defaultValue="list">
         <TabsList>
@@ -702,10 +721,12 @@ export default function RiskRegisterPage() {
               />
               {search && (
                 <button
+                  type="button"
+                  aria-label="Clear risk search"
                   onClick={() => setSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <X className="h-3 w-3" />
+                  <X aria-hidden="true" className="h-4 w-4" />
                 </button>
               )}
             </div>
@@ -744,46 +765,80 @@ export default function RiskRegisterPage() {
           {/* Table */}
           <Card>
             <CardContent className="p-0">
-              {isLoading ? (
-                <div className="p-6 space-y-3">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <Skeleton key={i} className="h-10 w-full" />
-                  ))}
-                </div>
-              ) : error ? (
-                <div className="flex items-center justify-center py-12 text-destructive">
-                  Failed to load risks. Please try again.
-                </div>
-              ) : risks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <AlertTriangle className="h-10 w-10 mb-3 opacity-40" />
-                  <p className="font-medium">No risks found</p>
-                  <p className="text-sm mt-1">Adjust your filters or register a new risk.</p>
-                </div>
-              ) : (
+              <ResourceBoundary
+                surface="plain"
+                isEmpty={risks.length === 0}
+                isError={Boolean(error) && !data}
+                isLoading={isLoading}
+                loadingLayout="table"
+                loadingTitle="Loading risk register"
+                emptyTitle="No risks found"
+                emptyDescription={
+                  search || statusFilter !== 'all' || riskLevelFilter !== 'all'
+                    ? 'Adjust or clear the active filters to broaden the results.'
+                    : 'Register your first risk to begin tracking treatment and review.'
+                }
+                emptyAction={
+                  search || statusFilter !== 'all' || riskLevelFilter !== 'all' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setSearch('');
+                        updateParams({ page: '1', risk_level: 'all', status: 'all' });
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  ) : (
+                    <Button type="button" onClick={() => setSheetOpen(true)}>
+                      Register risk
+                    </Button>
+                  )
+                }
+                errorTitle="Risk register could not be loaded"
+                errorDescription="The service did not return the risk list. Retry without losing your filters."
+                onRetry={() => void refetch()}
+                retrying={isFetching}
+              >
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
+                    <caption className="sr-only">Risks matching the active filters</caption>
                     <thead>
                       <tr className="border-b bg-muted/50">
-                        <th className="px-4 py-3 text-left font-medium">Ref</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Ref</th>
                         <th
-                          className="px-4 py-3 text-left font-medium cursor-pointer select-none"
-                          onClick={() => toggleSort('title')}
+                          scope="col"
+                          aria-sort={sortBy === 'title' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                          className="px-2 text-left font-medium"
                         >
-                          Title <SortIcon active={sortBy === 'title'} direction={sortDir} />
+                          <button
+                            type="button"
+                            className="flex min-h-11 w-full items-center rounded-sm px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => toggleSort('title')}
+                          >
+                            Title <SortIcon active={sortBy === 'title'} direction={sortDir} />
+                          </button>
                         </th>
-                        <th className="px-4 py-3 text-left font-medium">Category</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Category</th>
                         <th
-                          className="px-4 py-3 text-left font-medium cursor-pointer select-none"
-                          onClick={() => toggleSort('residual_risk_score')}
+                          scope="col"
+                          aria-sort={sortBy === 'residual_risk_score' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                          className="px-2 text-left font-medium"
                         >
-                          Residual Score{' '}
-                          <SortIcon active={sortBy === 'residual_risk_score'} direction={sortDir} />
+                          <button
+                            type="button"
+                            className="flex min-h-11 w-full items-center rounded-sm px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => toggleSort('residual_risk_score')}
+                          >
+                            Residual Score{' '}
+                            <SortIcon active={sortBy === 'residual_risk_score'} direction={sortDir} />
+                          </button>
                         </th>
-                        <th className="px-4 py-3 text-left font-medium">Level</th>
-                        <th className="px-4 py-3 text-left font-medium">Owner</th>
-                        <th className="px-4 py-3 text-left font-medium">Status</th>
-                        <th className="px-4 py-3 text-left font-medium">Treatments</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Level</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Owner</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Status</th>
+                        <th scope="col" className="px-4 py-3 text-left font-medium">Treatments</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -840,7 +895,7 @@ export default function RiskRegisterPage() {
                     </tbody>
                   </table>
                 </div>
-              )}
+              </ResourceBoundary>
             </CardContent>
           </Card>
 

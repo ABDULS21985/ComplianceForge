@@ -33,11 +33,14 @@ function CardGridSkeleton({ count = 2 }: { count?: number }) {
 
 export default function DashboardLoading() {
   return (
-    <div className="space-y-6">
+    <div aria-busy="true" aria-label="Loading dashboard" role="status">
+      <h1 className="sr-only">Dashboard</h1>
+      <span className="sr-only">Loading dashboard information</span>
+      <div aria-hidden="true" className="space-y-6">
       {/* Header skeleton */}
       <div className="space-y-2">
         <div className="h-9 w-48 animate-pulse rounded bg-muted" />
-        <div className="h-5 w-80 animate-pulse rounded bg-muted" />
+        <div className="h-5 w-80 max-w-full animate-pulse rounded bg-muted" />
       </div>
 
       {/* StatCards skeleton */}
@@ -89,6 +92,7 @@ export default function DashboardLoading() {
             </CardContent>
           </Card>
         </div>
+      </div>
       </div>
     </div>
   );

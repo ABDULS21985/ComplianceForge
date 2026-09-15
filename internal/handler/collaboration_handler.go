@@ -66,24 +66,24 @@ type CommentReaction struct {
 
 // ActivityEntry represents an activity feed entry.
 type ActivityEntry struct {
-	ID             string `json:"id"`
-	OrganizationID string `json:"organization_id"`
-	ActorID        string `json:"actor_id"`
-	ActorName      string `json:"actor_name,omitempty"`
-	Action         string `json:"action"` // created, updated, deleted, commented, approved, rejected, assigned, etc.
-	EntityType     string `json:"entity_type"`
-	EntityID       string `json:"entity_id"`
-	EntityTitle    string `json:"entity_title,omitempty"`
-	Description    string `json:"description,omitempty"`
+	ID             string                 `json:"id"`
+	OrganizationID string                 `json:"organization_id"`
+	ActorID        string                 `json:"actor_id"`
+	ActorName      string                 `json:"actor_name,omitempty"`
+	Action         string                 `json:"action"` // created, updated, deleted, commented, approved, rejected, assigned, etc.
+	EntityType     string                 `json:"entity_type"`
+	EntityID       string                 `json:"entity_id"`
+	EntityTitle    string                 `json:"entity_title,omitempty"`
+	Description    string                 `json:"description,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	IsRead         bool   `json:"is_read"`
-	CreatedAt      string `json:"created_at"`
+	IsRead         bool                   `json:"is_read"`
+	CreatedAt      string                 `json:"created_at"`
 }
 
 // UnreadActivityCount holds unread activity counts by type.
 type UnreadActivityCount struct {
-	Total      int            `json:"total"`
-	ByType     map[string]int `json:"by_type,omitempty"`
+	Total  int            `json:"total"`
+	ByType map[string]int `json:"by_type,omitempty"`
 }
 
 // FollowedEntity represents an entity a user is following.
@@ -129,7 +129,7 @@ func (h *CollaborationHandler) ListComments(w http.ResponseWriter, r *http.Reque
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "controls", map[string]interface{}{
 		"data": comments,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -172,7 +172,7 @@ func (h *CollaborationHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, comment)
+	writeClassifiedJSON(w, r, http.StatusCreated, "controls", comment)
 }
 
 // UpdateComment handles PUT /comments/{id}.
@@ -198,7 +198,7 @@ func (h *CollaborationHandler) UpdateComment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, comment)
+	writeClassifiedJSON(w, r, http.StatusOK, "controls", comment)
 }
 
 // DeleteComment handles DELETE /comments/{id}.
@@ -234,7 +234,7 @@ func (h *CollaborationHandler) PinComment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Comment pinned"})
+	writeClassifiedJSON(w, r, http.StatusOK, "controls", map[string]string{"message": "Comment pinned"})
 }
 
 // ReactToComment handles POST /comments/{id}/react.
@@ -263,7 +263,7 @@ func (h *CollaborationHandler) ReactToComment(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Reaction added"})
+	writeClassifiedJSON(w, r, http.StatusOK, "controls", map[string]string{"message": "Reaction added"})
 }
 
 // GetUserFeed handles GET /activity/feed.
@@ -283,7 +283,7 @@ func (h *CollaborationHandler) GetUserFeed(w http.ResponseWriter, r *http.Reques
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": entries,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -310,7 +310,7 @@ func (h *CollaborationHandler) GetOrgFeed(w http.ResponseWriter, r *http.Request
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": entries,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -344,7 +344,7 @@ func (h *CollaborationHandler) GetEntityActivity(w http.ResponseWriter, r *http.
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": entries,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -366,7 +366,7 @@ func (h *CollaborationHandler) GetUnreadCount(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, count)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", count)
 }
 
 // MarkEntityRead handles POST /activity/{entityType}/{entityId}/mark-read.
@@ -385,7 +385,7 @@ func (h *CollaborationHandler) MarkEntityRead(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Marked as read"})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]string{"message": "Marked as read"})
 }
 
 // ListFollowing handles GET /following.
@@ -399,7 +399,7 @@ func (h *CollaborationHandler) ListFollowing(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": following})
+	writeClassifiedJSON(w, r, http.StatusOK, "controls", map[string]interface{}{"data": following})
 }
 
 // Follow handles POST /following/{entityType}/{entityId}.
@@ -418,7 +418,7 @@ func (h *CollaborationHandler) Follow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{"message": "Now following"})
+	writeClassifiedJSON(w, r, http.StatusCreated, "controls", map[string]string{"message": "Now following"})
 }
 
 // Unfollow handles DELETE /following/{entityType}/{entityId}.

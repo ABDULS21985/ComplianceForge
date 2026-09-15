@@ -45,6 +45,7 @@ type Claims struct {
 	Role           string `json:"role"`
 	Email          string `json:"email"`
 	TokenType      string `json:"token_type"`
+	MFAVerified    bool   `json:"mfa_verified"`
 	jwt.RegisteredClaims
 }
 
@@ -52,20 +53,22 @@ type Claims struct {
 // for backwards compatibility, but clients should provide it because email is
 // unique per organization rather than globally.
 type LoginRequest struct {
-	Email          string `json:"email" validate:"required,email"`
-	Password       string `json:"password" validate:"required,min=8"`
-	OrganizationID string `json:"organization_id,omitempty" validate:"omitempty,uuid"`
+	Email          string                         `json:"email" validate:"required,email"`
+	Password       string                         `json:"password" validate:"required,min=8,max=72"`
+	OrganizationID string                         `json:"organization_id,omitempty" validate:"omitempty,uuid"`
+	Metadata       models.IdentityRequestMetadata `json:"-"`
 }
 
 // RegisterRequest contains the fields permitted during public registration.
 // A caller cannot choose its own privileged role; new users start as viewers.
 type RegisterRequest struct {
-	Email          string `json:"email" validate:"required,email"`
-	Password       string `json:"password" validate:"required,min=8"`
-	FirstName      string `json:"first_name" validate:"required,max=100"`
-	LastName       string `json:"last_name" validate:"required,max=100"`
-	OrganizationID string `json:"organization_id" validate:"required,uuid"`
-	Department     string `json:"department,omitempty" validate:"max=200"`
+	Email          string                         `json:"email" validate:"required,email"`
+	Password       string                         `json:"password" validate:"required,min=12,max=72"`
+	FirstName      string                         `json:"first_name" validate:"required,max=100"`
+	LastName       string                         `json:"last_name" validate:"required,max=100"`
+	OrganizationID string                         `json:"organization_id" validate:"required,uuid"`
+	Department     string                         `json:"department,omitempty" validate:"max=200"`
+	Metadata       models.IdentityRequestMetadata `json:"-"`
 }
 
 // RefreshRequest is the payload for a refresh-token exchange.
@@ -77,9 +80,12 @@ type RefreshRequest struct {
 // the user makes the response usable by clients without a second round trip;
 // RefreshExpiresAt is intentionally internal and is used to persist sessions.
 type TokenPair struct {
-	AccessToken      string       `json:"access_token"`
-	RefreshToken     string       `json:"refresh_token"`
-	ExpiresAt        time.Time    `json:"expires_at"`
-	User             *models.User `json:"user"`
-	RefreshExpiresAt time.Time    `json:"-"`
+	AccessToken               string                               `json:"access_token,omitempty"`
+	RefreshToken              string                               `json:"refresh_token,omitempty"`
+	ExpiresAt                 time.Time                            `json:"expires_at,omitzero"`
+	User                      *models.User                         `json:"user,omitempty"`
+	MFARequired               bool                                 `json:"mfa_required,omitempty"`
+	MFAChallenge              *models.IdentityMFAChallengeResponse `json:"mfa_challenge,omitempty"`
+	EmailVerificationRequired bool                                 `json:"email_verification_required,omitempty"`
+	RefreshExpiresAt          time.Time                            `json:"-"`
 }

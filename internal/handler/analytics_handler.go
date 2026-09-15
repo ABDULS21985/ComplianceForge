@@ -78,23 +78,23 @@ type TrendDataPoint struct {
 
 // TrendSummary provides aggregate statistics for a trend.
 type TrendSummary struct {
-	Min     float64 `json:"min"`
-	Max     float64 `json:"max"`
-	Average float64 `json:"average"`
-	Change  float64 `json:"change"`
+	Min       float64 `json:"min"`
+	Max       float64 `json:"max"`
+	Average   float64 `json:"average"`
+	Change    float64 `json:"change"`
 	ChangePct float64 `json:"change_pct"`
 }
 
 // RiskPrediction represents a predicted risk trajectory.
 type RiskPrediction struct {
-	RiskID          string           `json:"risk_id"`
-	CurrentScore    float64          `json:"current_score"`
-	PredictedScore  float64          `json:"predicted_score"`
-	Confidence      float64          `json:"confidence"`
-	Horizon         string           `json:"horizon"` // 30d, 60d, 90d
-	Trend           string           `json:"trend"`   // increasing, stable, decreasing
-	Factors         []PredictionFactor `json:"factors"`
-	DataPoints      []TrendDataPoint `json:"data_points"`
+	RiskID         string             `json:"risk_id"`
+	CurrentScore   float64            `json:"current_score"`
+	PredictedScore float64            `json:"predicted_score"`
+	Confidence     float64            `json:"confidence"`
+	Horizon        string             `json:"horizon"` // 30d, 60d, 90d
+	Trend          string             `json:"trend"`   // increasing, stable, decreasing
+	Factors        []PredictionFactor `json:"factors"`
+	DataPoints     []TrendDataPoint   `json:"data_points"`
 }
 
 // PredictionFactor is a contributing factor to a risk prediction.
@@ -111,12 +111,12 @@ type BreachProbabilityParams struct {
 
 // BreachProbability represents a breach probability forecast.
 type BreachProbability struct {
-	Probability     float64          `json:"probability"`
-	Confidence      float64          `json:"confidence"`
-	Horizon         string           `json:"horizon"`
-	TopRiskFactors  []PredictionFactor `json:"top_risk_factors"`
-	HistoricalComparison float64     `json:"historical_comparison"`
-	Recommendations []string         `json:"recommendations,omitempty"`
+	Probability          float64            `json:"probability"`
+	Confidence           float64            `json:"confidence"`
+	Horizon              string             `json:"horizon"`
+	TopRiskFactors       []PredictionFactor `json:"top_risk_factors"`
+	HistoricalComparison float64            `json:"historical_comparison"`
+	Recommendations      []string           `json:"recommendations,omitempty"`
 }
 
 // BenchmarkParams holds parameters for peer benchmarking.
@@ -127,11 +127,11 @@ type BenchmarkParams struct {
 
 // BenchmarkData represents peer comparison data.
 type BenchmarkData struct {
-	OrganizationScore float64          `json:"organization_score"`
-	PeerAverage       float64          `json:"peer_average"`
-	PeerMedian        float64          `json:"peer_median"`
-	Percentile        float64          `json:"percentile"`
-	SampleSize        int              `json:"sample_size"`
+	OrganizationScore float64             `json:"organization_score"`
+	PeerAverage       float64             `json:"peer_average"`
+	PeerMedian        float64             `json:"peer_median"`
+	Percentile        float64             `json:"percentile"`
+	SampleSize        int                 `json:"sample_size"`
 	Categories        []BenchmarkCategory `json:"categories"`
 }
 
@@ -160,25 +160,25 @@ type TimeSeriesData struct {
 
 // PeriodCompareParams holds parameters for period-over-period comparison.
 type PeriodCompareParams struct {
-	CurrentStart   string `json:"current_start"`
-	CurrentEnd     string `json:"current_end"`
-	PreviousStart  string `json:"previous_start"`
-	PreviousEnd    string `json:"previous_end"`
+	CurrentStart  string `json:"current_start"`
+	CurrentEnd    string `json:"current_end"`
+	PreviousStart string `json:"previous_start"`
+	PreviousEnd   string `json:"previous_end"`
 }
 
 // PeriodComparison represents a period-over-period comparison.
 type PeriodComparison struct {
-	Metric         string  `json:"metric"`
-	CurrentValue   float64 `json:"current_value"`
-	PreviousValue  float64 `json:"previous_value"`
-	Change         float64 `json:"change"`
-	ChangePct      float64 `json:"change_pct"`
-	Trend          string  `json:"trend"`
+	Metric        string  `json:"metric"`
+	CurrentValue  float64 `json:"current_value"`
+	PreviousValue float64 `json:"previous_value"`
+	Change        float64 `json:"change"`
+	ChangePct     float64 `json:"change_pct"`
+	Trend         string  `json:"trend"`
 }
 
 // TopMoversParams holds parameters for top movers query.
 type TopMoversParams struct {
-	Period    string `json:"period"` // 7d, 30d, 90d
+	Period    string `json:"period"`    // 7d, 30d, 90d
 	Direction string `json:"direction"` // up, down, both
 	Limit     int    `json:"limit"`
 }
@@ -201,10 +201,10 @@ type DistributionParams struct {
 
 // DistributionData represents the distribution of an entity.
 type DistributionData struct {
-	Entity   string             `json:"entity"`
-	GroupBy  string             `json:"group_by"`
-	Buckets  []DistributionBucket `json:"buckets"`
-	Total    int                `json:"total"`
+	Entity  string               `json:"entity"`
+	GroupBy string               `json:"group_by"`
+	Buckets []DistributionBucket `json:"buckets"`
+	Total   int                  `json:"total"`
 }
 
 // DistributionBucket is a single bucket in a distribution.
@@ -216,10 +216,10 @@ type DistributionBucket struct {
 
 // ExportRequest is the payload for POST /analytics/export.
 type ExportRequest struct {
-	DataType  string `json:"data_type" validate:"required"` // compliance, risks, controls, incidents
-	Format    string `json:"format" validate:"required"`    // csv, xlsx, json
-	StartDate string `json:"start_date,omitempty"`
-	EndDate   string `json:"end_date,omitempty"`
+	DataType  string            `json:"data_type" validate:"required"` // compliance, risks, controls, incidents
+	Format    string            `json:"format" validate:"required"`    // csv, xlsx, json
+	StartDate string            `json:"start_date,omitempty"`
+	EndDate   string            `json:"end_date,omitempty"`
 	Filters   map[string]string `json:"filters,omitempty"`
 }
 
@@ -233,15 +233,15 @@ type ExportResult struct {
 
 // CustomDashboard represents a user-defined analytics dashboard.
 type CustomDashboard struct {
-	ID             string          `json:"id"`
-	OrganizationID string          `json:"organization_id"`
-	Name           string          `json:"name" validate:"required"`
-	Description    string          `json:"description,omitempty"`
-	IsDefault      bool            `json:"is_default"`
+	ID             string            `json:"id"`
+	OrganizationID string            `json:"organization_id"`
+	Name           string            `json:"name" validate:"required"`
+	Description    string            `json:"description,omitempty"`
+	IsDefault      bool              `json:"is_default"`
 	Widgets        []DashboardWidget `json:"widgets,omitempty"`
-	CreatedBy      string          `json:"created_by"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
+	CreatedBy      string            `json:"created_by"`
+	CreatedAt      string            `json:"created_at"`
+	UpdatedAt      string            `json:"updated_at"`
 }
 
 // DashboardWidget is a widget configuration within a custom dashboard.
@@ -263,10 +263,10 @@ type WidgetPosition struct {
 
 // WidgetType describes an available widget type.
 type WidgetType struct {
-	Type        string                 `json:"type"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Category    string                 `json:"category"`
+	Type         string                 `json:"type"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	Category     string                 `json:"category"`
 	ConfigSchema map[string]interface{} `json:"config_schema,omitempty"`
 }
 
@@ -298,7 +298,7 @@ func (h *AnalyticsHandler) ListSnapshots(w http.ResponseWriter, r *http.Request)
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": snapshots,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -326,7 +326,7 @@ func (h *AnalyticsHandler) GetComplianceTrends(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, trends)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", trends)
 }
 
 // GetRiskTrends handles GET /analytics/trends/risks.
@@ -345,7 +345,7 @@ func (h *AnalyticsHandler) GetRiskTrends(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, trends)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", trends)
 }
 
 // GetRiskPrediction handles GET /analytics/predictions/risks/{riskId}.
@@ -363,7 +363,7 @@ func (h *AnalyticsHandler) GetRiskPrediction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, prediction)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", prediction)
 }
 
 // GetBreachProbability handles GET /analytics/predictions/breach-probability.
@@ -380,7 +380,7 @@ func (h *AnalyticsHandler) GetBreachProbability(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	writeJSON(w, http.StatusOK, probability)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", probability)
 }
 
 // GetBenchmarks handles GET /analytics/benchmarks.
@@ -398,7 +398,7 @@ func (h *AnalyticsHandler) GetBenchmarks(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, benchmarks)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", benchmarks)
 }
 
 // GetMetricTimeSeries handles GET /analytics/metrics/{metric}.
@@ -422,7 +422,7 @@ func (h *AnalyticsHandler) GetMetricTimeSeries(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, data)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", data)
 }
 
 // CompareMetricPeriods handles GET /analytics/metrics/{metric}/compare.
@@ -447,7 +447,7 @@ func (h *AnalyticsHandler) CompareMetricPeriods(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	writeJSON(w, http.StatusOK, comparison)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", comparison)
 }
 
 // GetTopMovers handles GET /analytics/top-movers.
@@ -473,7 +473,7 @@ func (h *AnalyticsHandler) GetTopMovers(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": movers})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": movers})
 }
 
 // GetDistribution handles GET /analytics/distribution/{entity}.
@@ -495,7 +495,7 @@ func (h *AnalyticsHandler) GetDistribution(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, data)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", data)
 }
 
 // ExportData handles POST /analytics/export.
@@ -520,7 +520,7 @@ func (h *AnalyticsHandler) ExportData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, result)
+	writeClassifiedJSON(w, r, http.StatusAccepted, "reports", result)
 }
 
 // ListDashboards handles GET /analytics/dashboards.
@@ -533,7 +533,7 @@ func (h *AnalyticsHandler) ListDashboards(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": dashboards})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": dashboards})
 }
 
 // CreateDashboard handles POST /analytics/dashboards.
@@ -557,7 +557,7 @@ func (h *AnalyticsHandler) CreateDashboard(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, dashboard)
+	writeClassifiedJSON(w, r, http.StatusCreated, "reports", dashboard)
 }
 
 // UpdateDashboard handles PUT /analytics/dashboards/{id}.
@@ -582,7 +582,7 @@ func (h *AnalyticsHandler) UpdateDashboard(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, dashboard)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", dashboard)
 }
 
 // DeleteDashboard handles DELETE /analytics/dashboards/{id}.
@@ -610,7 +610,7 @@ func (h *AnalyticsHandler) GetWidgetTypes(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": types})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": types})
 }
 
 // parseIntParam is a helper that parses a string to int.

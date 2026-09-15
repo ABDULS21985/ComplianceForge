@@ -1,8 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '@/lib/api';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -12,17 +10,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Button } from '@/components/ui/button';
 import {
   featureFlagKeys,
   formatFeatureFlagError,
   isFeatureFlagConflict,
 } from '@/lib/feature-flags';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import type { FeatureFlagEvaluation } from '@/types/feature-flag';
 import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import type { FeatureFlagEvaluation } from '@/types/feature-flag';
 
 export function FeatureFlagResetDialog({
   evaluation,

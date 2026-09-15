@@ -1,8 +1,7 @@
+import { createCsrfToken, setCsrfCookie } from '@/lib/server/session-security';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-
 import { sessionCookiePolicy } from '@/lib/request-security';
-import { createCsrfToken, setCsrfCookie } from '@/lib/server/session-security';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';

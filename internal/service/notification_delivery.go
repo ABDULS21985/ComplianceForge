@@ -23,12 +23,13 @@ import (
 )
 
 const (
-	defaultNotificationTenantBatch = 100
-	defaultNotificationClaimBatch  = 100
-	defaultNotificationLease       = 3 * time.Minute
-	defaultNotificationRetryBase   = 30 * time.Second
-	defaultNotificationRetryMax    = time.Hour
-	defaultNotificationPoll        = 10 * time.Second
+	defaultNotificationTenantBatch  = 100
+	defaultNotificationClaimBatch   = 100
+	defaultNotificationLease        = 3 * time.Minute
+	defaultNotificationRetryBase    = 30 * time.Second
+	defaultNotificationRetryMax     = time.Hour
+	defaultNotificationPoll         = 10 * time.Second
+	maximumNotificationTenantErrors = 100
 )
 
 // NotificationDeliveryConfig controls durable notification claiming. OwnerID
@@ -36,7 +37,7 @@ const (
 // to fence stale workers after a lease expires.
 type NotificationDeliveryConfig struct {
 	OwnerID        string
-	TenantBatch    int
+	TenantBatch    int // Registry page size, not a global per-cycle tenant ceiling.
 	ClaimBatch     int
 	LeaseDuration  time.Duration
 	RetryBaseDelay time.Duration
@@ -224,9 +225,11 @@ func notificationDeliveryKey(parts ...string) string {
 	return hex.EncodeToString(digest[:])
 }
 
-// RunDeliveryCycle discovers tenants with due work and then performs every
-// claim and state change through a tenant-scoped connection. One bounded batch
-// per tenant prevents a noisy tenant from starving the rest.
+// RunDeliveryCycle traverses the active-tenant registry in bounded keyset pages
+// and checks due work through each tenant's FORCE-RLS connection. Legacy due
+// wrappers depend on a privileged migration owner and are deliberately unused.
+// One bounded claim batch per tenant prevents noisy-tenant starvation; page
+// size is not a global tenant ceiling. The registry exposes no tenant content.
 func (ne *NotificationEngine) RunDeliveryCycle(ctx context.Context, config NotificationDeliveryConfig) error {
 	if ctx == nil || ne == nil || ne.pool == nil {
 		return fmt.Errorf("notification delivery database is not configured")
@@ -234,38 +237,100 @@ func (ne *NotificationEngine) RunDeliveryCycle(ctx context.Context, config Notif
 	if err := config.Validate(); err != nil {
 		return err
 	}
-	rows, err := ne.pool.Query(ctx, `SELECT organization_id FROM notification_due_tenants($1)`, config.TenantBatch)
-	if err != nil {
-		return fmt.Errorf("discover due notification tenants: %w", err)
+	if database.QuerierFromContext(ctx, nil) != nil {
+		return errors.New("notification delivery requires an unscoped worker context")
 	}
-	var tenantIDs []string
+	return runNotificationTenantPages(ctx, config.TenantBatch, ne.notificationTenantPage, func(tenantCtx context.Context, tenantID string) error {
+		return database.WithTenantConnection(tenantCtx, ne.pool, tenantID, func(scopedCtx context.Context) error {
+			return errors.Join(
+				ne.createDueEscalations(scopedCtx, tenantID, config.ClaimBatch),
+				ne.deliverDueForTenant(scopedCtx, tenantID, config),
+			)
+		})
+	})
+}
+
+func (ne *NotificationEngine) notificationTenantPage(ctx context.Context, after *string, limit int) ([]string, error) {
+	rows, err := ne.pool.Query(ctx, `SELECT organization_id FROM evidence_due_tenants($1,$2::uuid)`, limit, after)
+	if err != nil {
+		return nil, fmt.Errorf("discover active notification tenants: %w", err)
+	}
+	tenantIDs := make([]string, 0, limit)
 	for rows.Next() {
 		var tenantID string
 		if err := rows.Scan(&tenantID); err != nil {
 			rows.Close()
-			return fmt.Errorf("scan due notification tenant: %w", err)
+			return nil, fmt.Errorf("scan active notification tenant: %w", err)
 		}
 		tenantIDs = append(tenantIDs, tenantID)
 	}
 	rowErr := rows.Err()
 	rows.Close()
 	if rowErr != nil {
-		return fmt.Errorf("iterate due notification tenants: %w", rowErr)
+		return nil, fmt.Errorf("iterate active notification tenants: %w", rowErr)
 	}
+	return tenantIDs, nil
+}
 
-	var deliveryErrors []error
-	for _, tenantID := range tenantIDs {
-		tenantID := tenantID
-		if err := database.WithTenantConnection(ctx, ne.pool, tenantID, func(tenantCtx context.Context) error {
-			return errors.Join(
-				ne.createDueEscalations(tenantCtx, tenantID, config.ClaimBatch),
-				ne.deliverDueForTenant(tenantCtx, tenantID, config),
-			)
-		}); err != nil {
-			deliveryErrors = append(deliveryErrors, fmt.Errorf("tenant %s notification delivery: %w", tenantID, err))
-		}
+// Keeping pagination separate makes continuation, cancellation, ordered-page
+// validation and bounded error retention executable without database mocks.
+func runNotificationTenantPages(
+	ctx context.Context, pageSize int,
+	discover func(context.Context, *string, int) ([]string, error),
+	run func(context.Context, string) error,
+) error {
+	if ctx == nil || discover == nil || run == nil || pageSize < 1 || pageSize > 1000 {
+		return errors.New("notification tenant pagination is not configured")
 	}
-	return errors.Join(deliveryErrors...)
+	var deliveryErrors []error
+	failedTenants := 0
+	result := func(cause error) error {
+		if omitted := failedTenants - len(deliveryErrors); omitted > 0 {
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("notification delivery failed for %d additional tenants", omitted))
+		}
+		return errors.Join(append(deliveryErrors, cause)...)
+	}
+	var after *string
+	for {
+		if err := ctx.Err(); err != nil {
+			return result(err)
+		}
+		tenantIDs, err := discover(ctx, after, pageSize)
+		if err != nil {
+			return result(err)
+		}
+		if len(tenantIDs) > pageSize {
+			return result(errors.New("notification registry returned an oversized page"))
+		}
+		previous := ""
+		if after != nil {
+			previous = *after
+		}
+		// Validate the entire page before effects; a malformed/cyclic response
+		// must not cause repeated deliveries or an endless registry traversal.
+		for _, tenantID := range tenantIDs {
+			id, err := uuid.Parse(tenantID)
+			if err != nil || id == uuid.Nil || id.String() != tenantID || tenantID <= previous {
+				return result(errors.New("notification registry returned an invalid ordered page"))
+			}
+			previous = tenantID
+		}
+		for _, tenantID := range tenantIDs {
+			if err := ctx.Err(); err != nil {
+				return result(err)
+			}
+			if err := run(ctx, tenantID); err != nil {
+				failedTenants++
+				if len(deliveryErrors) < maximumNotificationTenantErrors {
+					deliveryErrors = append(deliveryErrors, fmt.Errorf("tenant %s notification delivery: %w", tenantID, err))
+				}
+			}
+		}
+		if len(tenantIDs) < pageSize {
+			return result(nil)
+		}
+		after = &tenantIDs[len(tenantIDs)-1]
+	}
 }
 
 func (ne *NotificationEngine) deliverDueForTenant(ctx context.Context, tenantID string, config NotificationDeliveryConfig) error {

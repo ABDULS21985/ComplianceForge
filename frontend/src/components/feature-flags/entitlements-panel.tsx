@@ -2,10 +2,6 @@
 
 import * as React from 'react';
 import { AlertTriangle, CheckCircle2, Gauge, Infinity as InfinityIcon, RefreshCw } from 'lucide-react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import api from '@/lib/api';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   entitlementMetrics,
@@ -14,10 +10,14 @@ import {
   formatFeatureFlagError,
   humanizeFeatureToken,
 } from '@/lib/feature-flags';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Link from 'next/link';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const GIBIBYTE = 1024 ** 3;
@@ -80,7 +80,7 @@ export function EntitlementsPanel() {
             {metrics.map((metric) => {
               const unlimited = metric.limit === 0;
               const percent = unlimited ? 0 : Math.min(100, (metric.usage / metric.limit) * 100);
-              return <div key={metric.metric} className="space-y-2"><div className="flex items-center justify-between gap-3 text-sm"><span className="font-medium">{humanizeFeatureToken(metric.metric)}</span><span className="text-muted-foreground">{formatEntitlementAmount(metric.metric, metric.usage)} / {unlimited ? 'Unlimited' : formatEntitlementAmount(metric.metric, metric.limit)}</span></div>{unlimited ? <div className="flex items-center gap-2 text-xs text-emerald-700"><InfinityIcon aria-hidden="true" className="h-4 w-4" />No plan ceiling</div> : <div role="progressbar" aria-label={`${humanizeFeatureToken(metric.metric)} usage`} aria-valuemin={0} aria-valuemax={metric.limit} aria-valuenow={metric.usage} className="h-2 overflow-hidden rounded-full bg-muted"><div className={`h-full ${percent >= 100 ? 'bg-destructive' : percent >= 80 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${percent}%` }} /></div>}</div>;
+              return <div key={metric.metric} className="space-y-2"><div className="flex items-center justify-between gap-3 text-sm"><span className="font-medium">{humanizeFeatureToken(metric.metric)}</span><span className="text-muted-foreground">{formatEntitlementAmount(metric.metric, metric.usage)} / {unlimited ? 'Unlimited' : formatEntitlementAmount(metric.metric, metric.limit)}</span></div>{unlimited ? <div className="flex items-center gap-2 text-xs text-emerald-700"><InfinityIcon aria-hidden="true" className="h-4 w-4" />No plan ceiling</div> : <div role="progressbar" aria-label={`${humanizeFeatureToken(metric.metric)} usage`} aria-valuemin={0} aria-valuemax={metric.limit} aria-valuenow={Math.min(metric.usage, metric.limit)} className="h-2 overflow-hidden rounded-full bg-muted"><div className={`h-full ${percent >= 100 ? 'bg-destructive' : percent >= 80 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${percent}%` }} /></div>}</div>;
             })}
           </CardContent>
         </Card>

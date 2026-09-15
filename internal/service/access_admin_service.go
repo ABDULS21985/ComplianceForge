@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -195,6 +196,18 @@ func (s *AccessAdministrationService) AssignRole(ctx context.Context, organizati
 	input.Reason = strings.TrimSpace(input.Reason)
 	if _, err := uuid.Parse(input.UserID); err != nil || utf8.RuneCountInString(input.Reason) < 3 || utf8.RuneCountInString(input.Reason) > 1000 {
 		return fmt.Errorf("%w: active user and a 3-1000 character reason are required", ErrRoleAssignmentInvalid)
+	}
+	if input.ExpiresAt != nil {
+		start := time.Now().UTC()
+		if input.ValidFrom != nil {
+			start = *input.ValidFrom
+		}
+		if actorID == input.UserID || !governanceWindow(time.Now().UTC(), start, *input.ExpiresAt) {
+			return ErrRoleAssignmentInvalid
+		}
+		input.ValidFrom = &start
+	} else if input.ValidFrom != nil {
+		return ErrRoleAssignmentInvalid
 	}
 	if err := s.store.AssignRole(ctx, organizationID, roleID, actorID, input); err != nil {
 		return mapManagedRoleError(err)

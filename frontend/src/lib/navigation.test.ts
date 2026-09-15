@@ -9,13 +9,14 @@ import {
   normalizeGlobalAutocompleteResults,
   normalizeGlobalSearchResponse,
 } from '@/lib/navigation';
+import type { PermissionMap } from '@/types/access';
 
 describe('enterprise navigation model', () => {
   it('groups every canonical destination and assigns a unique icon', () => {
     expect(NAVIGATION_GROUPS).toHaveLength(6);
-    expect(NAVIGATION_ITEMS).toHaveLength(30);
-    expect(new Set(NAVIGATION_ITEMS.map((item) => item.id)).size).toBe(30);
-    expect(new Set(NAVIGATION_ITEMS.map((item) => item.icon)).size).toBe(30);
+    expect(NAVIGATION_ITEMS).toHaveLength(34);
+    expect(new Set(NAVIGATION_ITEMS.map((item) => item.id)).size).toBe(34);
+    expect(new Set(NAVIGATION_ITEMS.map((item) => item.icon)).size).toBe(34);
   });
 
   it('uses resolved permissions to hide inaccessible domains', () => {
@@ -39,17 +40,36 @@ describe('enterprise navigation model', () => {
   it('keeps all navigation available to a super administrator', () => {
     const groups = getVisibleNavigationGroups({
       isSuperAdmin: true,
+      enabledCapabilities: ['data_lifecycle'],
       roleSlugs: [],
       permissions: {},
     });
 
-    expect(groups.flatMap((group) => group.items)).toHaveLength(30);
+    expect(groups.flatMap((group) => group.items)).toHaveLength(34);
+  });
+
+  it('fails closed for capability-gated destinations', () => {
+    const base = { roleSlugs: ['org_admin'], permissions: { settings: ['read'] } };
+    const unavailable = getVisibleNavigationGroups(base).flatMap((group) =>
+      group.items.map((item) => item.id),
+    );
+    const enabled = getVisibleNavigationGroups({
+      ...base,
+      enabledCapabilities: ['data_lifecycle'],
+    }).flatMap((group) => group.items.map((item) => item.id));
+
+    expect(unavailable).not.toContain('data-lifecycle');
+    expect(unavailable).toContain('diagnostics');
+    expect(enabled).toContain('data-lifecycle');
   });
 
   it('selects the most specific navigation item for nested settings paths', () => {
     expect(
       getNavigationItemForPath('/settings/notifications/email')?.id
     ).toBe('notifications');
+    expect(getNavigationItemForPath('/settings/diagnostics')?.id).toBe('diagnostics');
+    expect(getNavigationItemForPath('/settings/security')?.id).toBe('account-security');
+    expect(getNavigationItemForPath('/settings/identity')?.id).toBe('identity-administration');
   });
 
   it('uses an admin-role fallback only when settings permissions are unavailable', () => {
@@ -66,6 +86,27 @@ describe('enterprise navigation model', () => {
     }).flatMap((group) => group.items.map((item) => item.id));
     expect(deniedIds).not.toContain('integrations');
     expect(deniedIds).not.toContain('notifications');
+  });
+
+  it('shows identity administration for any canonical administrator grant', () => {
+    const permissionCases: PermissionMap[] = [
+      { settings: ['read'] },
+      { users: ['create'] },
+      { users: ['update'] },
+    ];
+    for (const permissions of permissionCases) {
+      const ids = getVisibleNavigationGroups({
+        roleSlugs: [],
+        permissions,
+      }).flatMap((group) => group.items.map((item) => item.id));
+      expect(ids).toContain('identity-administration');
+    }
+
+    const denied = getVisibleNavigationGroups({
+      roleSlugs: ['viewer'],
+      permissions: { users: ['read'], settings: [] },
+    }).flatMap((group) => group.items.map((item) => item.id));
+    expect(denied).not.toContain('identity-administration');
   });
 });
 

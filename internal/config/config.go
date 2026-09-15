@@ -23,6 +23,17 @@ type AppConfig struct {
 	TrustProxyHeaders bool   `mapstructure:"trust_proxy_headers"`
 }
 
+// HTTPConfig defines bounded public-server deadlines. WriteTimeoutSeconds must
+// cover both request ingestion and the configured evidence malware scan so a
+// valid upload cannot be terminated before its verdict arrives.
+type HTTPConfig struct {
+	ReadHeaderTimeoutSeconds int `mapstructure:"read_header_timeout_seconds"`
+	ReadTimeoutSeconds       int `mapstructure:"read_timeout_seconds"`
+	WriteTimeoutSeconds      int `mapstructure:"write_timeout_seconds"`
+	IdleTimeoutSeconds       int `mapstructure:"idle_timeout_seconds"`
+	ShutdownTimeoutSeconds   int `mapstructure:"shutdown_timeout_seconds"`
+}
+
 // DatabaseConfig holds PostgreSQL connection settings.
 type DatabaseConfig struct {
 	URL      string `mapstructure:"url"`
@@ -62,8 +73,17 @@ type JWTConfig struct {
 // service; they must never be logged or returned by diagnostics.
 type EncryptionConfig struct {
 	DSRKey          string `mapstructure:"dsr_key"`
+	IdentityKey     string `mapstructure:"identity_key"`
 	IntegrationKey  string `mapstructure:"integration_key"`
 	NotificationKey string `mapstructure:"notification_key"`
+}
+
+// IdentityConfig defines the WebAuthn relying party boundary. Origins are
+// exact browser origins; RPID is a hostname and never includes a scheme/port.
+type IdentityConfig struct {
+	RPID          string   `mapstructure:"rp_id"`
+	RPDisplayName string   `mapstructure:"rp_display_name"`
+	RPOrigins     []string `mapstructure:"rp_origins"`
 }
 
 // OAuthConfig holds OAuth2 client settings.
@@ -88,10 +108,24 @@ type SMTPConfig struct {
 
 // StorageConfig holds file storage settings.
 type StorageConfig struct {
-	Type     string `mapstructure:"type"`
-	Path     string `mapstructure:"path"`
-	S3Bucket string `mapstructure:"s3_bucket"`
-	S3Region string `mapstructure:"s3_region"`
+	Type                  string `mapstructure:"type"`
+	Path                  string `mapstructure:"path"`
+	S3Bucket              string `mapstructure:"s3_bucket"`
+	S3Region              string `mapstructure:"s3_region"`
+	S3Endpoint            string `mapstructure:"s3_endpoint"`
+	S3ForcePathStyle      bool   `mapstructure:"s3_force_path_style"`
+	S3KMSKeyID            string `mapstructure:"s3_kms_key_id"`
+	S3ExpectedBucketOwner string `mapstructure:"s3_expected_bucket_owner"`
+}
+
+// EvidenceConfig defines bounded upload, malware scanning, and signed-download
+// controls. Scanner connectivity is checked at upload time and fails closed.
+type EvidenceConfig struct {
+	MaximumUploadBytes    int64  `mapstructure:"maximum_upload_bytes"`
+	ScannerNetwork        string `mapstructure:"scanner_network"`
+	ScannerAddress        string `mapstructure:"scanner_address"`
+	ScannerTimeoutSeconds int    `mapstructure:"scanner_timeout_seconds"`
+	SignedDownloadSeconds int    `mapstructure:"signed_download_seconds"`
 }
 
 // LogConfig holds logging settings.
@@ -127,14 +161,17 @@ type RateLimitConfig struct {
 // Config is the root configuration struct for ComplianceForge.
 type Config struct {
 	App           AppConfig           `mapstructure:"app"`
+	HTTP          HTTPConfig          `mapstructure:"http"`
 	Database      DatabaseConfig      `mapstructure:"database"`
 	Redis         RedisConfig         `mapstructure:"redis"`
 	RabbitMQ      RabbitMQConfig      `mapstructure:"rabbitmq"`
 	JWT           JWTConfig           `mapstructure:"jwt"`
 	Encryption    EncryptionConfig    `mapstructure:"encryption"`
+	Identity      IdentityConfig      `mapstructure:"identity"`
 	OAuth         OAuthConfig         `mapstructure:"oauth"`
 	SMTP          SMTPConfig          `mapstructure:"smtp"`
 	Storage       StorageConfig       `mapstructure:"storage"`
+	Evidence      EvidenceConfig      `mapstructure:"evidence"`
 	Log           LogConfig           `mapstructure:"log"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
 	CORS          CORSConfig          `mapstructure:"cors"`
@@ -184,6 +221,11 @@ func Load() (*Config, error) {
 	v.SetDefault("app.port", 8080)
 	v.SetDefault("app.grpc_port", 9090)
 	v.SetDefault("app.trust_proxy_headers", false)
+	v.SetDefault("http.read_header_timeout_seconds", 5)
+	v.SetDefault("http.read_timeout_seconds", 120)
+	v.SetDefault("http.write_timeout_seconds", 360)
+	v.SetDefault("http.idle_timeout_seconds", 60)
+	v.SetDefault("http.shutdown_timeout_seconds", 30)
 
 	v.SetDefault("database.host", "localhost")
 	v.SetDefault("database.url", "")
@@ -207,6 +249,10 @@ func Load() (*Config, error) {
 	v.SetDefault("jwt.issuer", "complianceforge")
 	v.SetDefault("jwt.expiry_hours", 24)
 	v.SetDefault("encryption.notification_key", "")
+	v.SetDefault("encryption.identity_key", "")
+	v.SetDefault("identity.rp_id", "localhost")
+	v.SetDefault("identity.rp_display_name", "ComplianceForge")
+	v.SetDefault("identity.rp_origins", []string{"http://localhost:3000"})
 
 	v.SetDefault("oauth.client_id", "")
 	v.SetDefault("oauth.client_secret", "")
@@ -226,6 +272,15 @@ func Load() (*Config, error) {
 	v.SetDefault("storage.path", "./uploads")
 	v.SetDefault("storage.s3_bucket", "")
 	v.SetDefault("storage.s3_region", "us-east-1")
+	v.SetDefault("storage.s3_endpoint", "")
+	v.SetDefault("storage.s3_force_path_style", false)
+	v.SetDefault("storage.s3_kms_key_id", "")
+	v.SetDefault("storage.s3_expected_bucket_owner", "")
+	v.SetDefault("evidence.maximum_upload_bytes", int64(25<<20))
+	v.SetDefault("evidence.scanner_network", "tcp")
+	v.SetDefault("evidence.scanner_address", "127.0.0.1:3310")
+	v.SetDefault("evidence.scanner_timeout_seconds", 30)
+	v.SetDefault("evidence.signed_download_seconds", 300)
 
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
@@ -271,6 +326,11 @@ func bindEnvironment(v *viper.Viper) error {
 		"app.port":                               {"APP_PORT", "PORT", "CF_APP_PORT"},
 		"app.grpc_port":                          {"APP_GRPC_PORT", "CF_APP_GRPC_PORT"},
 		"app.trust_proxy_headers":                {"API_TRUST_PROXY_HEADERS", "CF_API_TRUST_PROXY_HEADERS"},
+		"http.read_header_timeout_seconds":       {"HTTP_READ_HEADER_TIMEOUT_SECONDS", "CF_HTTP_READ_HEADER_TIMEOUT_SECONDS"},
+		"http.read_timeout_seconds":              {"HTTP_READ_TIMEOUT_SECONDS", "CF_HTTP_READ_TIMEOUT_SECONDS"},
+		"http.write_timeout_seconds":             {"HTTP_WRITE_TIMEOUT_SECONDS", "CF_HTTP_WRITE_TIMEOUT_SECONDS"},
+		"http.idle_timeout_seconds":              {"HTTP_IDLE_TIMEOUT_SECONDS", "CF_HTTP_IDLE_TIMEOUT_SECONDS"},
+		"http.shutdown_timeout_seconds":          {"HTTP_SHUTDOWN_TIMEOUT_SECONDS", "CF_HTTP_SHUTDOWN_TIMEOUT_SECONDS"},
 		"database.url":                           {"DATABASE_URL", "CF_DATABASE_URL"},
 		"database.host":                          {"DB_HOST", "CF_DATABASE_HOST"},
 		"database.port":                          {"DB_PORT", "CF_DATABASE_PORT"},
@@ -290,8 +350,12 @@ func bindEnvironment(v *viper.Viper) error {
 		"jwt.issuer":                             {"JWT_ISSUER", "CF_JWT_ISSUER"},
 		"jwt.expiry_hours":                       {"JWT_EXPIRY_HOURS", "CF_JWT_EXPIRY_HOURS"},
 		"encryption.dsr_key":                     {"DSR_ENCRYPTION_KEY", "CF_DSR_ENCRYPTION_KEY"},
+		"encryption.identity_key":                {"IDENTITY_ENCRYPTION_KEY", "CF_IDENTITY_ENCRYPTION_KEY"},
 		"encryption.integration_key":             {"INTEGRATION_ENCRYPTION_KEY", "CF_INTEGRATION_ENCRYPTION_KEY"},
 		"encryption.notification_key":            {"NOTIFICATION_ENCRYPTION_KEY", "CF_NOTIFICATION_ENCRYPTION_KEY"},
+		"identity.rp_id":                         {"IDENTITY_RP_ID", "CF_IDENTITY_RP_ID"},
+		"identity.rp_display_name":               {"IDENTITY_RP_DISPLAY_NAME", "CF_IDENTITY_RP_DISPLAY_NAME"},
+		"identity.rp_origins":                    {"IDENTITY_RP_ORIGINS", "CF_IDENTITY_RP_ORIGINS"},
 		"oauth.client_id":                        {"OAUTH_CLIENT_ID", "CF_OAUTH_CLIENT_ID"},
 		"oauth.client_secret":                    {"OAUTH_CLIENT_SECRET", "CF_OAUTH_CLIENT_SECRET"},
 		"oauth.redirect_url":                     {"OAUTH_REDIRECT_URL", "CF_OAUTH_REDIRECT_URL"},
@@ -308,6 +372,15 @@ func bindEnvironment(v *viper.Viper) error {
 		"storage.path":                           {"STORAGE_PATH", "CF_STORAGE_PATH"},
 		"storage.s3_bucket":                      {"S3_BUCKET", "CF_STORAGE_S3_BUCKET"},
 		"storage.s3_region":                      {"S3_REGION", "CF_STORAGE_S3_REGION"},
+		"storage.s3_endpoint":                    {"S3_ENDPOINT", "CF_STORAGE_S3_ENDPOINT"},
+		"storage.s3_force_path_style":            {"S3_FORCE_PATH_STYLE", "CF_STORAGE_S3_FORCE_PATH_STYLE"},
+		"storage.s3_kms_key_id":                  {"S3_KMS_KEY_ID", "CF_STORAGE_S3_KMS_KEY_ID"},
+		"storage.s3_expected_bucket_owner":       {"S3_EXPECTED_BUCKET_OWNER", "CF_STORAGE_S3_EXPECTED_BUCKET_OWNER"},
+		"evidence.maximum_upload_bytes":          {"EVIDENCE_MAXIMUM_UPLOAD_BYTES", "CF_EVIDENCE_MAXIMUM_UPLOAD_BYTES"},
+		"evidence.scanner_network":               {"EVIDENCE_SCANNER_NETWORK", "CF_EVIDENCE_SCANNER_NETWORK"},
+		"evidence.scanner_address":               {"EVIDENCE_SCANNER_ADDRESS", "CF_EVIDENCE_SCANNER_ADDRESS"},
+		"evidence.scanner_timeout_seconds":       {"EVIDENCE_SCANNER_TIMEOUT_SECONDS", "CF_EVIDENCE_SCANNER_TIMEOUT_SECONDS"},
+		"evidence.signed_download_seconds":       {"EVIDENCE_SIGNED_DOWNLOAD_SECONDS", "CF_EVIDENCE_SIGNED_DOWNLOAD_SECONDS"},
 		"log.level":                              {"LOG_LEVEL", "CF_LOG_LEVEL"},
 		"log.format":                             {"LOG_FORMAT", "CF_LOG_FORMAT"},
 		"observability.metrics_enabled":          {"OBSERVABILITY_METRICS_ENABLED"},
@@ -353,6 +426,9 @@ func (c *Config) Validate() error {
 	}
 	if c.App.Port == c.App.GRPCPort {
 		return fmt.Errorf("APP_PORT and APP_GRPC_PORT must be different")
+	}
+	if err := validateHTTPConfig(&c.HTTP, c.Evidence.ScannerTimeoutSeconds); err != nil {
+		return err
 	}
 
 	if c.Database.URL != "" {
@@ -404,6 +480,9 @@ func (c *Config) Validate() error {
 	if err := validateSMTPConfig(&c.SMTP, c.App.Env == "staging" || c.App.Env == "production"); err != nil {
 		return err
 	}
+	if err := validateIdentityConfig(&c.Identity, c.App.Env); err != nil {
+		return err
+	}
 	if len(c.CORS.AllowedOrigins) == 0 {
 		return fmt.Errorf("CORS_ALLOWED_ORIGINS must contain at least one origin")
 	}
@@ -437,10 +516,16 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Storage.S3Bucket) == "" || strings.TrimSpace(c.Storage.S3Region) == "" {
 			return fmt.Errorf("S3_BUCKET and S3_REGION are required for S3 storage")
 		}
+		if err := validateS3Config(&c.Storage, c.App.Env); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("STORAGE_TYPE must be local or s3")
 	}
 	c.Storage.Type = storageType
+	if err := validateEvidenceConfig(&c.Evidence); err != nil {
+		return err
+	}
 
 	if c.App.Env == "staging" || c.App.Env == "production" {
 		if len(c.JWT.Secret) < 32 || c.JWT.Secret == "change-me-in-production" || c.JWT.Secret == "replace-with-a-strong-secret" {
@@ -554,6 +639,17 @@ func validateEncryptionKeys(keys EncryptionConfig, required bool) error {
 		}
 	}
 
+	if keys.IdentityKey == "" {
+		if required {
+			return fmt.Errorf("IDENTITY_ENCRYPTION_KEY is required in staging and production")
+		}
+	} else {
+		decoded, err := hex.DecodeString(keys.IdentityKey)
+		if err != nil || len(decoded) != 32 {
+			return fmt.Errorf("IDENTITY_ENCRYPTION_KEY must be hex-encoded 32-byte key material")
+		}
+	}
+
 	if keys.NotificationKey == "" {
 		if required {
 			return fmt.Errorf("NOTIFICATION_ENCRYPTION_KEY is required in staging and production")
@@ -563,6 +659,45 @@ func validateEncryptionKeys(keys EncryptionConfig, required bool) error {
 		if err != nil || len(decoded) != 32 {
 			return fmt.Errorf("NOTIFICATION_ENCRYPTION_KEY must be hex-encoded 32-byte key material")
 		}
+	}
+	return nil
+}
+
+func validateIdentityConfig(cfg *IdentityConfig, environment string) error {
+	cfg.RPID = strings.ToLower(strings.TrimSpace(cfg.RPID))
+	cfg.RPDisplayName = strings.TrimSpace(cfg.RPDisplayName)
+	if cfg.RPID == "" || strings.Contains(cfg.RPID, ":") || net.ParseIP(cfg.RPID) != nil ||
+		strings.HasPrefix(cfg.RPID, ".") || strings.HasSuffix(cfg.RPID, ".") {
+		return fmt.Errorf("IDENTITY_RP_ID must be a hostname without a scheme or port")
+	}
+	if cfg.RPDisplayName == "" || len(cfg.RPDisplayName) > 120 {
+		return fmt.Errorf("IDENTITY_RP_DISPLAY_NAME is required and must not exceed 120 bytes")
+	}
+	if len(cfg.RPOrigins) == 0 || len(cfg.RPOrigins) > 20 {
+		return fmt.Errorf("IDENTITY_RP_ORIGINS must contain between 1 and 20 origins")
+	}
+	seen := make(map[string]struct{}, len(cfg.RPOrigins))
+	production := environment == "staging" || environment == "production"
+	for index, configured := range cfg.RPOrigins {
+		origin := strings.TrimSuffix(strings.TrimSpace(configured), "/")
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+			(parsed.Path != "" && parsed.Path != "/") {
+			return fmt.Errorf("invalid WebAuthn origin %q", configured)
+		}
+		hostname := strings.ToLower(parsed.Hostname())
+		localhost := hostname == "localhost" || net.ParseIP(hostname) != nil && net.ParseIP(hostname).IsLoopback()
+		if parsed.Scheme != "https" && !(parsed.Scheme == "http" && localhost && !production) {
+			return fmt.Errorf("WebAuthn origins must use HTTPS; localhost HTTP is allowed only outside staging and production")
+		}
+		if hostname != cfg.RPID && !strings.HasSuffix(hostname, "."+cfg.RPID) {
+			return fmt.Errorf("WebAuthn origin %q is outside IDENTITY_RP_ID %q", configured, cfg.RPID)
+		}
+		if _, duplicate := seen[origin]; duplicate {
+			return fmt.Errorf("duplicate WebAuthn origin %q", configured)
+		}
+		seen[origin] = struct{}{}
+		cfg.RPOrigins[index] = origin
 	}
 	return nil
 }
@@ -625,6 +760,91 @@ func validateSMTPConfig(cfg *SMTPConfig, secureEnvironment bool) error {
 	}
 	if cfg.ServerName != "" && strings.ContainsAny(cfg.ServerName, " /\r\n") {
 		return fmt.Errorf("SMTP_SERVER_NAME must be a hostname")
+	}
+	return nil
+}
+
+func validateS3Config(cfg *StorageConfig, environment string) error {
+	cfg.S3Bucket = strings.TrimSpace(cfg.S3Bucket)
+	cfg.S3Region = strings.TrimSpace(cfg.S3Region)
+	cfg.S3Endpoint = strings.TrimSuffix(strings.TrimSpace(cfg.S3Endpoint), "/")
+	cfg.S3KMSKeyID = strings.TrimSpace(cfg.S3KMSKeyID)
+	cfg.S3ExpectedBucketOwner = strings.TrimSpace(cfg.S3ExpectedBucketOwner)
+	if cfg.S3Endpoint != "" {
+		endpoint, err := url.Parse(cfg.S3Endpoint)
+		secureEnvironment := environment == "staging" || environment == "production"
+		if err != nil || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" ||
+			(endpoint.Path != "" && endpoint.Path != "/") || (endpoint.Scheme != "https" && !(endpoint.Scheme == "http" && !secureEnvironment)) {
+			return fmt.Errorf("S3_ENDPOINT must be an origin URL and use HTTPS in staging or production")
+		}
+	}
+	if len(cfg.S3KMSKeyID) > 2_048 || strings.ContainsAny(cfg.S3KMSKeyID, "\r\n\x00") {
+		return fmt.Errorf("S3_KMS_KEY_ID is invalid")
+	}
+	if cfg.S3ExpectedBucketOwner != "" {
+		if len(cfg.S3ExpectedBucketOwner) != 12 {
+			return fmt.Errorf("S3_EXPECTED_BUCKET_OWNER must be a 12-digit AWS account ID")
+		}
+		for _, character := range cfg.S3ExpectedBucketOwner {
+			if character < '0' || character > '9' {
+				return fmt.Errorf("S3_EXPECTED_BUCKET_OWNER must be a 12-digit AWS account ID")
+			}
+		}
+	}
+	return nil
+}
+
+func validateEvidenceConfig(cfg *EvidenceConfig) error {
+	const (
+		minimumUploadBytes = 1 << 20
+		maximumUploadBytes = int64(2 << 30)
+	)
+	if cfg.MaximumUploadBytes < minimumUploadBytes || cfg.MaximumUploadBytes > maximumUploadBytes {
+		return fmt.Errorf("EVIDENCE_MAXIMUM_UPLOAD_BYTES must be between 1 MiB and 2 GiB")
+	}
+	cfg.ScannerNetwork = strings.ToLower(strings.TrimSpace(cfg.ScannerNetwork))
+	cfg.ScannerAddress = strings.TrimSpace(cfg.ScannerAddress)
+	switch cfg.ScannerNetwork {
+	case "tcp":
+		host, portValue, err := net.SplitHostPort(cfg.ScannerAddress)
+		port, portErr := strconv.Atoi(portValue)
+		if err != nil || portErr != nil || strings.TrimSpace(host) == "" || port < 1 || port > 65_535 {
+			return fmt.Errorf("EVIDENCE_SCANNER_ADDRESS must be a valid host:port for tcp")
+		}
+	case "unix":
+		if !filepath.IsAbs(cfg.ScannerAddress) || strings.ContainsRune(cfg.ScannerAddress, '\x00') {
+			return fmt.Errorf("EVIDENCE_SCANNER_ADDRESS must be an absolute socket path for unix")
+		}
+	default:
+		return fmt.Errorf("EVIDENCE_SCANNER_NETWORK must be tcp or unix")
+	}
+	if cfg.ScannerTimeoutSeconds < 1 || cfg.ScannerTimeoutSeconds > 300 {
+		return fmt.Errorf("EVIDENCE_SCANNER_TIMEOUT_SECONDS must be between 1 and 300")
+	}
+	if cfg.SignedDownloadSeconds < 30 || cfg.SignedDownloadSeconds > 900 {
+		return fmt.Errorf("EVIDENCE_SIGNED_DOWNLOAD_SECONDS must be between 30 and 900")
+	}
+	return nil
+}
+
+func validateHTTPConfig(cfg *HTTPConfig, evidenceScannerTimeoutSeconds int) error {
+	if cfg.ReadHeaderTimeoutSeconds < 1 || cfg.ReadHeaderTimeoutSeconds > 30 {
+		return fmt.Errorf("HTTP_READ_HEADER_TIMEOUT_SECONDS must be between 1 and 30")
+	}
+	if cfg.ReadTimeoutSeconds < 5 || cfg.ReadTimeoutSeconds > 3600 {
+		return fmt.Errorf("HTTP_READ_TIMEOUT_SECONDS must be between 5 and 3600")
+	}
+	if cfg.WriteTimeoutSeconds < 5 || cfg.WriteTimeoutSeconds > 7200 {
+		return fmt.Errorf("HTTP_WRITE_TIMEOUT_SECONDS must be between 5 and 7200")
+	}
+	if cfg.WriteTimeoutSeconds < cfg.ReadTimeoutSeconds+evidenceScannerTimeoutSeconds {
+		return fmt.Errorf("HTTP_WRITE_TIMEOUT_SECONDS must be at least HTTP_READ_TIMEOUT_SECONDS plus EVIDENCE_SCANNER_TIMEOUT_SECONDS")
+	}
+	if cfg.IdleTimeoutSeconds < 5 || cfg.IdleTimeoutSeconds > 600 {
+		return fmt.Errorf("HTTP_IDLE_TIMEOUT_SECONDS must be between 5 and 600")
+	}
+	if cfg.ShutdownTimeoutSeconds < 5 || cfg.ShutdownTimeoutSeconds > 300 {
+		return fmt.Errorf("HTTP_SHUTDOWN_TIMEOUT_SECONDS must be between 5 and 300")
 	}
 	return nil
 }

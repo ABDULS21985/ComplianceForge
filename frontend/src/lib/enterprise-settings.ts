@@ -1,11 +1,11 @@
-import type { ApiError } from '@/lib/api';
-import type { PermissionMap } from '@/types/access';
-import type { User } from '@/types';
 import type {
   IntegrationType,
   NotificationChannel,
   NotificationPreference,
 } from '@/types/enterprise-settings';
+import type { ApiError } from '@/lib/api';
+import type { PermissionMap } from '@/types/access';
+import type { User } from '@/types';
 
 export interface IntegrationCatalogEntry {
   type: IntegrationType;

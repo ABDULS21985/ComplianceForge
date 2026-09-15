@@ -2,12 +2,14 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/complianceforge/platform/internal/authz"
+	"github.com/complianceforge/platform/internal/models"
 )
 
 type fakeAuthorizer struct {
@@ -56,8 +58,15 @@ func TestRequireAuthorizationDeniesUnmatchedPolicy(t *testing.T) {
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
 	}
-	if contentType := response.Header().Get("Content-Type"); contentType != "application/problem+json" {
+	if contentType := response.Header().Get("Content-Type"); contentType != "application/json" {
 		t.Fatalf("Content-Type = %q", contentType)
+	}
+	var payload models.ErrorResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Code != http.StatusForbidden || payload.ErrorCode != "access_denied" || payload.RequestID == "" {
+		t.Fatalf("payload=%#v", payload)
 	}
 }
 

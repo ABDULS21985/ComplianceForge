@@ -57,5 +57,58 @@
 
 @layer base {
   * { @apply border-border; }
-  body { @apply bg-background text-foreground font-sans antialiased; }
+  body {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-size-adjust: 100%;
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  img,
+  video,
+  canvas {
+    max-width: 100%;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    scroll-margin-block: 1rem;
+  }
+}
+
+@media (pointer: coarse) {
+  button,
+  input:not([type='hidden']),
+  select,
+  textarea,
+  [role='button'] {
+    min-block-size: 44px;
+  }
+}
+
+@media (forced-colors: active) {
+  [aria-current],
+  [aria-pressed='true'],
+  [aria-selected='true'] {
+    outline: 2px solid ButtonText;
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
 }

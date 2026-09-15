@@ -30,6 +30,23 @@ type PaginationResponse struct {
 	TotalPages int `json:"total_pages"`
 }
 
+// AsyncJob identifies work accepted for asynchronous processing. StatusURL is
+// omitted when the domain has not yet exposed a dedicated job-status resource.
+type AsyncJob struct {
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	Status      string    `json:"status"`
+	SubmittedAt time.Time `json:"submitted_at"`
+	StatusURL   string    `json:"status_url,omitempty"`
+}
+
+// AsyncJobResponse preserves the domain payload under data while adding a
+// transport-stable job descriptor that generic clients can consume.
+type AsyncJobResponse struct {
+	Data any      `json:"data"`
+	Job  AsyncJob `json:"job"`
+}
+
 // SortRequest holds sorting parameters from the client.
 type SortRequest struct {
 	Field     string `json:"field"`

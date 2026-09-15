@@ -67,6 +67,7 @@ func directoryHandlerRequest(method, path, body string, params map[string]string
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	ctx := context.WithValue(request.Context(), middleware.ContextKeyOrgID, directoryHandlerOrg)
 	ctx = context.WithValue(ctx, middleware.ContextKeyUserID, directoryHandlerActor)
+	ctx = handlerAllowedContext(ctx)
 	route := chi.NewRouteContext()
 	for key, value := range params {
 		route.URLParams.Add(key, value)

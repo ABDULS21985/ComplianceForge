@@ -2,14 +2,7 @@
 
 import * as React from 'react';
 import { AlertTriangle, Clock, History, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, ShieldCheck } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { EntitlementsPanel } from '@/components/feature-flags/entitlements-panel';
-import { FeatureFlagEditorDialog } from '@/components/feature-flags/feature-flag-editor-dialog';
-import { FeatureFlagHistoryDialog } from '@/components/feature-flags/feature-flag-history-dialog';
-import { FeatureFlagResetDialog } from '@/components/feature-flags/feature-flag-reset-dialog';
-import api from '@/lib/api';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import type { CapabilityMaturity, FeatureFlagEvaluation } from '@/types/feature-flag';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   featureEvaluationExplanation,
@@ -19,12 +12,19 @@ import {
   overrideWindowState,
   rolloutPercent,
 } from '@/lib/feature-flags';
-import { Input } from '@/components/ui/input';
-import { useCapabilityPermissions } from '@/hooks/use-capability-permissions';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { CapabilityMaturity, FeatureFlagEvaluation } from '@/types/feature-flag';
+import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { EntitlementsPanel } from '@/components/feature-flags/entitlements-panel';
+import { FeatureFlagEditorDialog } from '@/components/feature-flags/feature-flag-editor-dialog';
+import { FeatureFlagHistoryDialog } from '@/components/feature-flags/feature-flag-history-dialog';
+import { FeatureFlagResetDialog } from '@/components/feature-flags/feature-flag-reset-dialog';
+import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useCapabilityPermissions } from '@/hooks/use-capability-permissions';
+import { useQuery } from '@tanstack/react-query';
 
 type CapabilityFilter = 'all' | 'enabled' | 'disabled' | 'overridden' | 'scheduled';
 

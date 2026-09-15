@@ -9,17 +9,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { formatApiError, notificationPollInterval } from '@/lib/enterprise-settings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
-import { formatApiError, notificationPollInterval } from '@/lib/enterprise-settings';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
-import { useState } from 'react';
-import { toast } from 'sonner';
 import type { NotificationRecord } from '@/types/enterprise-settings';
+import { toast } from 'sonner';
+import { useState } from 'react';
 
 export function normalizeNotifications(value: unknown): Array<Pick<NotificationRecord, 'body' | 'created_at' | 'event_type' | 'id' | 'read_at' | 'subject'>> {
   const response =

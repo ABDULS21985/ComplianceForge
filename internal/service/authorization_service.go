@@ -65,7 +65,7 @@ func (a *RBACAuthorizer) Authorize(ctx context.Context, request authz.Request) (
 				u.is_super_admin
 				OR EXISTS (
 					SELECT 1
-					FROM user_roles ur
+					FROM effective_user_roles ur
 					JOIN roles role
 					  ON role.id = ur.role_id
 					 AND role.deleted_at IS NULL
@@ -115,7 +115,7 @@ func (a *RBACAuthorizer) GetUserPermissions(ctx context.Context, organizationID,
 			u.is_super_admin
 			OR EXISTS (
 				SELECT 1
-				FROM user_roles ur
+				FROM effective_user_roles ur
 				JOIN roles role
 				  ON role.id = ur.role_id
 				 AND role.deleted_at IS NULL

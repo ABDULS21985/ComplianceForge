@@ -48,7 +48,7 @@ func (h *OrganizationHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, org)
+	writeClassifiedJSON(w, r, http.StatusCreated, "organizations", org)
 }
 
 // GetByID handles GET /organizations/{id}.
@@ -65,7 +65,7 @@ func (h *OrganizationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, org)
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", org)
 }
 
 // Update handles PUT /organizations/{id}.
@@ -88,7 +88,7 @@ func (h *OrganizationHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, org)
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", org)
 }
 
 // Delete handles DELETE /organizations/{id}.
@@ -117,20 +117,7 @@ func (h *OrganizationHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	totalPages := 0
-	if pagination.PageSize > 0 {
-		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data": orgs,
-		"pagination": models.PaginationResponse{
-			Page:       pagination.Page,
-			PageSize:   pagination.PageSize,
-			TotalItems: total,
-			TotalPages: totalPages,
-		},
-	})
+	writeClassifiedPaginated(w, r, "organizations", orgs, total, pagination)
 }
 
 // parsePagination extracts pagination parameters from query string with defaults.

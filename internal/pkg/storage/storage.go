@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +18,9 @@ var (
 	ErrInvalidPath = errors.New("invalid storage path")
 	// ErrNotRegularFile is returned when a download target is not a regular file.
 	ErrNotRegularFile = errors.New("storage object is not a regular file")
+	// ErrIntegrityMismatch is returned when an object no longer matches the
+	// immutable size or SHA-256 digest recorded at ingestion.
+	ErrIntegrityMismatch = errors.New("storage object integrity mismatch")
 )
 
 // StorageService defines the interface for file storage operations.
@@ -27,6 +32,10 @@ type StorageService interface {
 	// Download returns a ReadCloser for the file at the given path.
 	// The caller is responsible for closing the returned reader.
 	Download(ctx context.Context, path string) (io.ReadCloser, error)
+
+	// Verify reads the private object and proves its exact byte count and
+	// SHA-256 digest before a caller exposes a stream or signed URL.
+	Verify(ctx context.Context, path, expectedSHA256 string, expectedSize int64) error
 
 	// Delete removes the file at the given path.
 	Delete(ctx context.Context, path string) error
@@ -99,8 +108,8 @@ func (s *LocalStorageService) Upload(ctx context.Context, filename string, data 
 	}
 
 	// The temporary object is created directly under the canonical root. Root's
-	// rename operation then proves both names remain contained even if a parent
-	// path is changed concurrently.
+	// hard-link operation proves both names remain contained and atomically fails
+	// when a destination already exists, preserving immutable object keys.
 	temporary, err := os.CreateTemp(s.basePath, ".upload-*")
 	if err != nil {
 		return "", fmt.Errorf("create temporary storage object: %w", err)
@@ -127,15 +136,14 @@ func (s *LocalStorageService) Upload(ctx context.Context, filename string, data 
 		return "", fmt.Errorf("close storage object: %w", err)
 	}
 
-	// Recheck immediately before the rename so a pre-existing symlink is never
-	// followed as the destination. Rename replaces a leaf symlink atomically.
+	// Recheck immediately before the link so a pre-existing symlink is never
+	// followed as the destination. Link also refuses to replace a regular leaf.
 	if err := s.rejectSymlinks(relativePath, false); err != nil {
 		return "", err
 	}
-	if err := root.Rename(filepath.Base(temporaryPath), relativePath); err != nil {
+	if err := root.Link(filepath.Base(temporaryPath), relativePath); err != nil {
 		return "", fmt.Errorf("commit storage object: %w", err)
 	}
-	keepTemporary = true
 
 	return fullPath, nil
 }
@@ -180,6 +188,14 @@ func (s *LocalStorageService) Download(ctx context.Context, path string) (io.Rea
 	}
 
 	return file, nil
+}
+
+func (s *LocalStorageService) Verify(ctx context.Context, path, expectedSHA256 string, expectedSize int64) error {
+	reader, err := s.Download(ctx, path)
+	if err != nil {
+		return err
+	}
+	return verifyObject(ctx, reader, expectedSHA256, expectedSize)
 }
 
 // Delete removes a file beneath the storage root without following symlinks in
@@ -273,4 +289,40 @@ func (r *contextReader) Read(buffer []byte) (int, error) {
 		return 0, err
 	}
 	return r.reader.Read(buffer)
+}
+
+func verifyObject(ctx context.Context, reader io.ReadCloser, expectedSHA256 string, expectedSize int64) error {
+	if reader == nil {
+		return ErrIntegrityMismatch
+	}
+	expectedSHA256 = strings.ToLower(strings.TrimSpace(expectedSHA256))
+	digest, err := hex.DecodeString(expectedSHA256)
+	if err != nil || len(digest) != sha256.Size || expectedSize < 0 {
+		_ = reader.Close()
+		return ErrIntegrityMismatch
+	}
+	hasher := sha256.New()
+	size, copyErr := io.Copy(hasher, &contextReader{ctx: ctx, reader: reader})
+	closeErr := reader.Close()
+	if copyErr != nil {
+		return fmt.Errorf("verify storage object: %w", copyErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close verified storage object: %w", closeErr)
+	}
+	if size != expectedSize || !equalDigest(hasher.Sum(nil), digest) {
+		return ErrIntegrityMismatch
+	}
+	return nil
+}
+
+func equalDigest(actual, expected []byte) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	var difference byte
+	for index := range actual {
+		difference |= actual[index] ^ expected[index]
+	}
+	return difference == 0
 }

@@ -1,22 +1,9 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, Loader2, LockKeyhole, ShieldCheck } from 'lucide-react';
-import { toast } from 'sonner';
-
-import api from '@/lib/api';
-import { formatApiError, isUuid, parseCommaList, parseJSONObject } from '@/lib/enterprise-settings';
-import type {
-  SSOConfiguration,
-  SSOProtocol,
-  UpdateSSOConfigurationInput,
-} from '@/types/enterprise-settings';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { formatApiError, isUuid, parseCommaList, parseJSONObject } from '@/lib/enterprise-settings';
+import { type FormEvent, useState } from 'react';
+import { KeyRound, Loader2, LockKeyhole, ShieldCheck } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -24,9 +11,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import type {
+  SSOConfiguration,
+  SSOProtocol,
+  UpdateSSOConfigurationInput,
+} from '@/types/enterprise-settings';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
 
 interface SSODraft {
   protocol: SSOProtocol;

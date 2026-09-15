@@ -150,6 +150,7 @@ VALUES
     ('abac','Attribute-based access control','Define contextual access policies in addition to persisted role permissions.','Identity','beta','enterprise','abac','{}'),
     ('field_level_security','Field-level security','Mask or restrict sensitive fields according to governed access policies.','Identity','beta','enterprise','field_level_security','{abac}'),
     ('custom_integrations','Custom integrations','Configure tenant-specific enterprise connectors and custom integration mappings.','Platform','beta','enterprise','custom_integrations','{api_access}'),
+    ('data_lifecycle','Data lifecycle governance','Configure tenant residency, retention schedules, legal holds, disposition review, and defensible deletion controls.','Data Governance','beta','enterprise','data_lifecycle','{}'),
     ('sla_guarantee','Enterprise SLA','Apply contracted enterprise availability and support service-level commitments.','Reliability','general_availability','enterprise','sla_guarantee','{priority_support}'),
     ('on_premise_option','Private deployment option','Support a separately governed private or customer-managed deployment model.','Platform','experimental','enterprise','on_premise_option','{}');
 

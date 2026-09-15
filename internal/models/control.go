@@ -99,31 +99,47 @@ type ControlImplementationPatch struct {
 
 type ControlEvidence struct {
 	BaseModel
-	OrganizationID          string          `json:"organization_id"`
-	ControlImplementationID string          `json:"control_implementation_id"`
-	Title                   string          `json:"title"`
-	Description             *string         `json:"description,omitempty"`
-	EvidenceType            string          `json:"evidence_type"`
-	FileName                *string         `json:"file_name,omitempty"`
-	FileSizeBytes           *int64          `json:"file_size_bytes,omitempty"`
-	MIMEType                *string         `json:"mime_type,omitempty"`
-	FileHash                *string         `json:"file_hash,omitempty"`
-	CollectionMethod        string          `json:"collection_method"`
-	CollectedAt             time.Time       `json:"collected_at"`
-	CollectedBy             *string         `json:"collected_by,omitempty"`
-	ValidFrom               *time.Time      `json:"valid_from,omitempty"`
-	ValidUntil              *time.Time      `json:"valid_until,omitempty"`
-	IsCurrent               bool            `json:"is_current"`
-	ReviewStatus            string          `json:"review_status"`
-	Metadata                json.RawMessage `json:"metadata"`
+	OrganizationID          string                  `json:"organization_id"`
+	ControlImplementationID string                  `json:"control_implementation_id"`
+	Title                   string                  `json:"title"`
+	Description             *string                 `json:"description,omitempty"`
+	EvidenceType            string                  `json:"evidence_type"`
+	ObjectKey               *string                 `json:"-"`
+	FileName                *string                 `json:"file_name,omitempty"`
+	FileSizeBytes           *int64                  `json:"file_size_bytes,omitempty"`
+	MIMEType                *string                 `json:"mime_type,omitempty"`
+	FileHash                *string                 `json:"file_hash,omitempty"`
+	CollectionMethod        string                  `json:"collection_method"`
+	CollectedAt             time.Time               `json:"collected_at"`
+	CollectedBy             *string                 `json:"collected_by,omitempty"`
+	ValidFrom               *time.Time              `json:"valid_from,omitempty"`
+	ValidUntil              *time.Time              `json:"valid_until,omitempty"`
+	IsCurrent               bool                    `json:"is_current"`
+	ReviewStatus            string                  `json:"review_status"`
+	ReviewedBy              *string                 `json:"reviewed_by,omitempty"`
+	ReviewedAt              *time.Time              `json:"reviewed_at,omitempty"`
+	ReviewNotes             *string                 `json:"review_notes,omitempty"`
+	Metadata                json.RawMessage         `json:"metadata"`
+	SeriesID                *string                 `json:"series_id,omitempty"`
+	VersionNumber           int                     `json:"version_number,omitempty"`
+	SupersedesEvidenceID    *string                 `json:"supersedes_evidence_id,omitempty"`
+	SupersededByEvidenceID  *string                 `json:"superseded_by_evidence_id,omitempty"`
+	SupersededAt            *time.Time              `json:"superseded_at,omitempty"`
+	LifecycleStatus         EvidenceLifecycleStatus `json:"lifecycle_status,omitempty"`
+	ExpiresAt               *time.Time              `json:"expires_at,omitempty"`
+	VersionReason           string                  `json:"version_reason,omitempty"`
+	ContentFingerprint      string                  `json:"content_fingerprint,omitempty"`
 }
 
 // AttachControlEvidenceInput registers metadata for content handled by a
 // separate upload/storage flow. It deliberately cannot set a server file path.
 type AttachControlEvidenceInput struct {
-	Title            string          `json:"title"`
-	Description      *string         `json:"description,omitempty"`
-	EvidenceType     string          `json:"evidence_type"`
+	Title        string  `json:"title"`
+	Description  *string `json:"description,omitempty"`
+	EvidenceType string  `json:"evidence_type"`
+	// ObjectKey is populated only by the trusted upload pipeline. JSON decoding
+	// cannot set it, so clients cannot register arbitrary server or cloud paths.
+	ObjectKey        *string         `json:"-"`
 	FileName         *string         `json:"file_name,omitempty"`
 	FileSizeBytes    *int64          `json:"file_size_bytes,omitempty"`
 	MIMEType         *string         `json:"mime_type,omitempty"`
@@ -132,4 +148,15 @@ type AttachControlEvidenceInput struct {
 	ValidFrom        *time.Time      `json:"valid_from,omitempty"`
 	ValidUntil       *time.Time      `json:"valid_until,omitempty"`
 	Metadata         json.RawMessage `json:"metadata,omitempty"`
+	// Supersession fields are populated only by the trusted lifecycle service.
+	// JSON clients cannot choose a predecessor or forge a version reason.
+	SupersedesEvidenceID *string `json:"-"`
+	VersionReason        string  `json:"-"`
+}
+
+type ReviewControlEvidenceInput struct {
+	Status  string  `json:"status"`
+	Comment *string `json:"comment,omitempty"`
+	// RequestID is copied from trusted request middleware for immutable history.
+	RequestID string `json:"-"`
 }

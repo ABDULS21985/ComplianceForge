@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,11 +34,16 @@ const (
 	testAssetID     = "c1000000-0000-0000-0000-000000000010"
 	testVendorID    = "d1000000-0000-0000-0000-000000000010"
 	testRoleID      = "e1000000-0000-0000-0000-000000000010"
+	testGroupID     = "f1000000-0000-0000-0000-000000000010"
 )
 
 type routerAuthService struct {
 	user *models.User
 }
+
+// routerLegacyAuthService intentionally exposes only the base authentication
+// contract so dependency validation can prove identity completion fails closed.
+type routerLegacyAuthService struct{ handler.AuthService }
 
 type routerEmailSender struct{}
 
@@ -51,6 +57,64 @@ func (routerAPIKeyLimiter) Allow(context.Context, string, int) (bool, time.Durat
 
 type routerAPIKeyAuthenticator struct {
 	permissions []string
+}
+
+type routerSCIMAuthenticator struct{ scopes []string }
+
+func (a routerSCIMAuthenticator) AuthenticateSCIMToken(_ context.Context, token, _ string) (*authdomain.SCIMPrincipal, error) {
+	if !strings.HasPrefix(token, "cfs_") {
+		return nil, authdomain.ErrInvalidSCIMToken
+	}
+	return &authdomain.SCIMPrincipal{TokenID: "30000000-0000-0000-0000-000000000099",
+		OrganizationID: testOrgID, CreatedByUserID: testUserID,
+		Scopes: append([]string(nil), a.scopes...), RateLimitPerMinute: 120}, nil
+}
+
+type routerSCIMService struct{ handler.SCIMHandlerService }
+
+func (routerSCIMService) ListTokens(context.Context, string, models.PaginationRequest) ([]models.SCIMToken, int, error) {
+	return []models.SCIMToken{}, 0, nil
+}
+
+func (routerSCIMService) ListUsers(context.Context, string, models.SCIMListRequest) ([]models.SCIMUser, int, error) {
+	return []models.SCIMUser{}, 0, nil
+}
+
+func (routerSCIMService) GetUser(context.Context, string, string) (*models.SCIMUser, error) {
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	return &models.SCIMUser{Schemas: []string{models.SCIMUserSchema}, ID: testUserID,
+		UserName: "user@example.com", Active: true, Groups: []models.SCIMGroupReference{}, Version: 1,
+		Meta: models.SCIMMeta{ResourceType: "User", Created: now, LastModified: now,
+			Location: "/api/scim/v2/Users/" + testUserID, Version: `W/"1"`}}, nil
+}
+
+type routerEvidenceObjectService struct{}
+
+func (routerEvidenceObjectService) Ready() bool { return true }
+func (routerEvidenceObjectService) Upload(context.Context, string, string, string, string, string, io.Reader, service.EvidenceUploadMetadata) (*models.ControlEvidence, error) {
+	return &models.ControlEvidence{BaseModel: models.BaseModel{ID: "70000000-0000-0000-0000-000000000010"}, OrganizationID: testOrgID}, nil
+}
+func (routerEvidenceObjectService) Supersede(context.Context, string, string, string, string, string, string, io.Reader, service.EvidenceUploadMetadata) (*models.ControlEvidence, error) {
+	return &models.ControlEvidence{BaseModel: models.BaseModel{ID: "70000000-0000-0000-0000-000000000010"}, OrganizationID: testOrgID}, nil
+}
+func (routerEvidenceObjectService) Download(context.Context, string, string, string) (*service.EvidenceDownload, error) {
+	return nil, service.ErrEvidenceObjectNotFound
+}
+func (routerEvidenceObjectService) Review(context.Context, string, string, string, string, models.ReviewControlEvidenceInput) (*models.ControlEvidence, error) {
+	return &models.ControlEvidence{BaseModel: models.BaseModel{ID: "70000000-0000-0000-0000-000000000010"}, OrganizationID: testOrgID}, nil
+}
+
+type routerEvidenceLifecycleService struct{}
+
+func (routerEvidenceLifecycleService) Ready() bool { return true }
+func (routerEvidenceLifecycleService) History(context.Context, string, string, string) (*models.EvidenceLifecycleRecord, error) {
+	return &models.EvidenceLifecycleRecord{}, nil
+}
+func (routerEvidenceLifecycleService) VerifyIntegrity(context.Context, string, string, string, string, string) (*models.EvidenceIntegrityResult, error) {
+	return &models.EvidenceIntegrityResult{}, nil
+}
+func (routerEvidenceLifecycleService) RecordDownloadAuthorization(context.Context, string, string, string, string, string, string) error {
+	return nil
 }
 
 func (a routerAPIKeyAuthenticator) AuthenticateAPIKey(context.Context, string, string) (*authdomain.APIKeyPrincipal, error) {
@@ -80,6 +144,58 @@ func (s *routerAuthService) Logout(context.Context, string, string, string) erro
 	return nil
 }
 
+func (s *routerAuthService) CompleteLoginMFA(context.Context, models.IdentityMFAProofInput, models.IdentityRequestMetadata) (*authdomain.TokenPair, error) {
+	return routerTokenPair(s.user), nil
+}
+
+func (s *routerAuthService) CompletePasskeyAuthentication(context.Context, models.IdentityPasskeyAuthenticationFinishInput, models.IdentityRequestMetadata) (*authdomain.TokenPair, error) {
+	return routerTokenPair(s.user), nil
+}
+
+type routerIdentityService struct {
+	handler.IdentityLifecycleService
+}
+
+func (routerIdentityService) GetPolicy(context.Context, string) (*models.IdentityPolicy, error) {
+	now := time.Now().UTC()
+	return &models.IdentityPolicy{
+		OrganizationID: testOrgID, AllowedMethods: []string{"totp", "recovery_code", "passkey"},
+		AuthenticationChallengeMins: 5, StepUpTTLMinutes: 5, Version: 1,
+		UpdatedBy: testUserID, UpdateReason: "Initial test policy", CreatedAt: now, UpdatedAt: now,
+	}, nil
+}
+
+func (routerIdentityService) IssueInvitation(context.Context, string, string, string, models.IdentityInvitationIssueInput, models.IdentityRequestMetadata) (*models.IdentityInvitation, error) {
+	now := time.Now().UTC()
+	return &models.IdentityInvitation{
+		ID: "11000000-0000-0000-0000-000000000010", OrganizationID: testOrgID,
+		UserID: testUserID, Email: "user@example.com", ExpiresAt: now.Add(72 * time.Hour),
+		CreatedBy: testUserID, CreatedAt: now, DeliveryQueued: true,
+	}, nil
+}
+
+func (routerIdentityService) AcceptInvitation(context.Context, models.IdentityInvitationAcceptInput, models.IdentityRequestMetadata) (*models.IdentityAcceptanceResult, error) {
+	return &models.IdentityAcceptanceResult{OrganizationID: testOrgID, UserID: testUserID, EmailVerifiedAt: time.Now().UTC()}, nil
+}
+
+func (routerIdentityService) RequestEmailVerification(context.Context, models.IdentityEmailRequest, models.IdentityRequestMetadata) error {
+	return nil
+}
+
+func (routerIdentityService) RequestPasswordReset(context.Context, models.IdentityEmailRequest, models.IdentityRequestMetadata) error {
+	return nil
+}
+
+func (routerIdentityService) BeginPasskeyAuthentication(context.Context, models.IdentityPasskeyAuthenticationBeginInput, models.IdentityRequestMetadata) (*models.IdentityPasskeyCeremony, error) {
+	return &models.IdentityPasskeyCeremony{
+		ChallengeToken: strings.Repeat("x", 32), Options: []byte(`{}`), ExpiresAt: time.Now().UTC().Add(5 * time.Minute),
+	}, nil
+}
+
+func (routerIdentityService) ListSessions(context.Context, string, string, string) ([]models.IdentitySession, error) {
+	return []models.IdentitySession{}, nil
+}
+
 type routerTokenValidator struct {
 	claims *authdomain.Claims
 }
@@ -92,7 +208,13 @@ type routerAuthorizer struct {
 
 func (a *routerAuthorizer) Authorize(_ context.Context, request authz.Request) (authz.Decision, error) {
 	a.requests = append(a.requests, request)
-	return authz.Decision{Allowed: a.allowed}, a.err
+	return authz.Decision{
+		Allowed:            a.allowed,
+		Reason:             "test authorization decision",
+		ReasonCode:         "test_authorization_decision",
+		ConstraintsApplied: false,
+		Obligations:        []authz.Obligation{},
+	}, a.err
 }
 
 func (v routerTokenValidator) ValidateAccessToken(context.Context, string) (*authdomain.Claims, error) {
@@ -137,6 +259,14 @@ func (routerPolicyService) ListCategories(context.Context, string) ([]models.Pol
 	return []models.PolicyCategory{}, nil
 }
 
+func (s routerPolicyService) SubmitForApproval(context.Context, string, string, string, models.PolicySubmitInput) (*models.PolicyApprovalWorkflow, error) {
+	return &models.PolicyApprovalWorkflow{PolicyID: s.policy.ID, OrganizationID: s.policy.OrganizationID, Status: "pending", Steps: []models.PolicyApprovalStep{}}, nil
+}
+
+func (s routerPolicyService) DecideApproval(context.Context, string, string, string, string, models.PolicyApprovalDecisionInput) (*models.PolicyApprovalWorkflow, error) {
+	return &models.PolicyApprovalWorkflow{PolicyID: s.policy.ID, OrganizationID: s.policy.OrganizationID, Status: "approved", Steps: []models.PolicyApprovalStep{}}, nil
+}
+
 type routerAuditService struct {
 	handler.AuditService
 	audit *models.Audit
@@ -158,7 +288,49 @@ type routerAccessAdministrationService struct {
 	role *models.ManagedRole
 }
 
+type routerUserAdministrationService struct {
+	handler.UserAdministrationService
+	user  *models.DirectoryUser
+	group *models.DirectoryGroup
+}
+
 type routerFeatureFlagService struct{}
+
+type routerDataGovernanceService struct {
+	handler.DataGovernanceService
+	policy *models.DataGovernancePolicy
+}
+
+type routerDiagnosticsService struct{}
+
+func (routerDiagnosticsService) GetSnapshot(_ context.Context, organizationID string) (*models.DiagnosticsSnapshot, error) {
+	return &models.DiagnosticsSnapshot{
+		OrganizationID: organizationID,
+		GeneratedAt:    time.Now().UTC(),
+		OverallStatus:  models.DiagnosticStatusHealthy,
+		Dependencies:   []models.DependencyDiagnostic{},
+		Migration: models.MigrationDiagnostic{
+			CurrentVersion: 53, SupportedVersion: 53, Status: models.DiagnosticStatusHealthy,
+		},
+		Queue:         models.QueueDiagnostic{Status: models.DiagnosticStatusHealthy},
+		Notifications: models.NotificationDiagnostic{Status: models.DiagnosticStatusHealthy},
+		Connectors:    models.ConnectorDiagnostic{Status: models.DiagnosticStatusHealthy},
+		Configuration: []models.ConfigurationDiagnostic{},
+	}, nil
+}
+
+func (s routerDataGovernanceService) GetPolicy(context.Context, string) (*models.DataGovernancePolicy, error) {
+	return s.policy, nil
+}
+
+func (s routerDataGovernanceService) UpsertPolicy(
+	_ context.Context, organizationID, actorID, _ string, input models.DataGovernancePolicyInput,
+) (*models.DataGovernancePolicy, error) {
+	item := *s.policy
+	item.OrganizationID, item.PrimaryRegion, item.AllowedRegions = organizationID, input.PrimaryRegion, input.AllowedRegions
+	item.UpdatedBy = actorID
+	return &item, nil
+}
 
 type routerFeatureEvaluator struct {
 	evaluation *models.FeatureFlagEvaluation
@@ -272,6 +444,94 @@ func (routerAccessAdministrationService) ListEvents(context.Context, string, str
 	return []models.RoleChangeEvent{}, 0, nil
 }
 
+func (s routerUserAdministrationService) CreateUser(context.Context, string, string, models.DirectoryUserCreateInput) (*models.DirectoryUser, error) {
+	return s.user, nil
+}
+
+func (s routerUserAdministrationService) GetUser(context.Context, string, string) (*models.DirectoryUser, error) {
+	return s.user, nil
+}
+
+func (s routerUserAdministrationService) ListUsers(context.Context, string, models.DirectoryUserListFilter) ([]models.DirectoryUser, int, error) {
+	return []models.DirectoryUser{*s.user}, 1, nil
+}
+
+func (s routerUserAdministrationService) UpdateUser(context.Context, string, string, string, models.DirectoryUserPatch) (*models.DirectoryUser, error) {
+	return s.user, nil
+}
+
+func (s routerUserAdministrationService) SuspendUser(context.Context, string, string, string, models.DirectoryUserStateInput) (*models.DirectoryUser, error) {
+	return s.user, nil
+}
+
+func (s routerUserAdministrationService) ReactivateUser(context.Context, string, string, string, models.DirectoryUserStateInput) (*models.DirectoryUser, error) {
+	return s.user, nil
+}
+
+func (s routerUserAdministrationService) PreviewOwnership(context.Context, string, string) (*models.DirectoryOwnershipImpact, error) {
+	return &models.DirectoryOwnershipImpact{UserID: s.user.ID}, nil
+}
+
+func (s routerUserAdministrationService) TransferOwnership(context.Context, string, string, string, models.DirectoryOwnershipTransferInput) (*models.DirectoryOwnershipImpact, *models.DirectoryUser, error) {
+	return &models.DirectoryOwnershipImpact{UserID: s.user.ID}, s.user, nil
+}
+
+func (routerUserAdministrationService) DeprovisionUser(context.Context, string, string, string, models.DirectoryUserDeprovisionInput) error {
+	return nil
+}
+
+func (routerUserAdministrationService) ListUserEvents(context.Context, string, string, models.PaginationRequest) ([]models.DirectoryChangeEvent, int, error) {
+	return []models.DirectoryChangeEvent{}, 0, nil
+}
+
+func (s routerUserAdministrationService) CreateGroup(context.Context, string, string, models.DirectoryGroupCreateInput) (*models.DirectoryGroup, error) {
+	return s.group, nil
+}
+
+func (s routerUserAdministrationService) GetGroup(context.Context, string, string) (*models.DirectoryGroup, error) {
+	return s.group, nil
+}
+
+func (s routerUserAdministrationService) ListGroups(context.Context, string, models.DirectoryGroupListFilter) ([]models.DirectoryGroup, int, error) {
+	return []models.DirectoryGroup{*s.group}, 1, nil
+}
+
+func (s routerUserAdministrationService) UpdateGroup(context.Context, string, string, string, models.DirectoryGroupPatch) (*models.DirectoryGroup, error) {
+	return s.group, nil
+}
+
+func (routerUserAdministrationService) DeleteGroup(context.Context, string, string, string, int64, string) error {
+	return nil
+}
+
+func (s routerUserAdministrationService) ListGroupMembers(context.Context, string, string, models.PaginationRequest) ([]models.DirectoryUser, int, error) {
+	return []models.DirectoryUser{*s.user}, 1, nil
+}
+
+func (s routerUserAdministrationService) AddGroupMember(context.Context, string, string, string, models.DirectoryGroupMemberInput) (*models.DirectoryGroup, error) {
+	return s.group, nil
+}
+
+func (s routerUserAdministrationService) RemoveGroupMember(context.Context, string, string, string, string, models.DirectoryGroupMemberRemoveInput) (*models.DirectoryGroup, error) {
+	return s.group, nil
+}
+
+func (s routerUserAdministrationService) ChangeGroupMembers(context.Context, string, string, string, models.DirectoryGroupBulkMembersInput) (*models.DirectoryGroup, error) {
+	return s.group, nil
+}
+
+func (routerUserAdministrationService) ListGroupEvents(context.Context, string, string, models.PaginationRequest) ([]models.DirectoryChangeEvent, int, error) {
+	return []models.DirectoryChangeEvent{}, 0, nil
+}
+
+func (routerUserAdministrationService) PreviewImport(context.Context, string, []byte) (*models.DirectoryImportPreview, error) {
+	return &models.DirectoryImportPreview{RowCount: 1, ValidCount: 1, CreateCount: 1}, nil
+}
+
+func (routerUserAdministrationService) ApplyImport(context.Context, string, string, string, string, []byte) (*models.DirectoryImportResult, error) {
+	return &models.DirectoryImportResult{ID: testGroupID, RowCount: 1, CreatedCount: 1}, nil
+}
+
 func (s routerVendorService) Create(_ context.Context, organizationID, actorID string, input models.VendorCreateInput) (*models.Vendor, error) {
 	item := *s.vendor
 	item.OrganizationID, item.CreatedBy, item.Name = organizationID, actorID, input.Name
@@ -288,6 +548,10 @@ func (s routerVendorService) List(context.Context, string, models.VendorListFilt
 
 func (routerVendorService) Statistics(context.Context, string) (*models.VendorStatistics, error) {
 	return &models.VendorStatistics{Total: 1, Active: 1, ByStatus: map[models.VendorStatus]int{}, ByTier: map[models.VendorTier]int{}, ByCriticality: map[models.VendorCriticality]int{}}, nil
+}
+
+func (s routerVendorService) RecordAssessment(context.Context, string, string, string, models.VendorAssessmentInput) (*models.Vendor, error) {
+	return s.vendor, nil
 }
 
 func (routerVendorService) ListDueForAssessment(context.Context, string, int, int) ([]models.Vendor, error) {
@@ -496,12 +760,20 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 	}{
 		{"auth handler", func(d *RouterDependencies) { d.Auth = nil }, "auth handler is required"},
 		{"unconfigured auth handler", func(d *RouterDependencies) { d.Auth = handler.NewAuthHandler(nil) }, "auth handler is required"},
+		{"auth identity completion", func(d *RouterDependencies) {
+			d.Auth = handler.NewAuthHandler(routerLegacyAuthService{AuthService: &routerAuthService{user: &models.User{}}})
+		}, "identity authentication completion is required"},
+		{"identity handler", func(d *RouterDependencies) { d.Identity = nil }, "identity lifecycle handler is required"},
+		{"unconfigured identity handler", func(d *RouterDependencies) { d.Identity = handler.NewIdentityLifecycleHandler(nil) }, "identity lifecycle handler is required"},
+		{"SCIM handler", func(d *RouterDependencies) { d.SCIM = nil }, "SCIM handler is required"},
+		{"unconfigured SCIM handler", func(d *RouterDependencies) { d.SCIM = handler.NewSCIMHandler(nil) }, "SCIM handler is required"},
 		{"organization handler", func(d *RouterDependencies) { d.Organizations = nil }, "organization handler is required"},
 		{"unconfigured organization handler", func(d *RouterDependencies) { d.Organizations = handler.NewOrganizationHandler(nil) }, "organization handler is required"},
 		{"framework handler", func(d *RouterDependencies) { d.Frameworks = nil }, "framework handler is required"},
 		{"unconfigured framework handler", func(d *RouterDependencies) { d.Frameworks = handler.NewFrameworkHandler(nil) }, "framework handler is required"},
 		{"control handler", func(d *RouterDependencies) { d.Controls = nil }, "control handler is required"},
 		{"unconfigured control handler", func(d *RouterDependencies) { d.Controls = handler.NewControlHandler(nil) }, "control handler is required"},
+		{"control evidence service", func(d *RouterDependencies) { d.Controls = handler.NewControlHandler(routerComplianceService{}) }, "control handler is required"},
 		{"risk handler", func(d *RouterDependencies) { d.Risks = nil }, "risk handler is required"},
 		{"unconfigured risk handler", func(d *RouterDependencies) { d.Risks = handler.NewRiskHandler(nil) }, "risk handler is required"},
 		{"policy handler", func(d *RouterDependencies) { d.Policies = nil }, "policy handler is required"},
@@ -516,8 +788,19 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"unconfigured vendor handler", func(d *RouterDependencies) { d.Vendors = handler.NewVendorHandler(nil) }, "vendor handler is required"},
 		{"access administration handler", func(d *RouterDependencies) { d.AccessAdministration = nil }, "access administration handler is required"},
 		{"unconfigured access administration handler", func(d *RouterDependencies) { d.AccessAdministration = handler.NewAccessAdministrationHandler(nil) }, "access administration handler is required"},
+		{"user administration handler", func(d *RouterDependencies) { d.UserAdministration = nil }, "user administration handler is required"},
+		{"unconfigured user administration handler", func(d *RouterDependencies) { d.UserAdministration = handler.NewUserAdministrationHandler(nil) }, "user administration handler is required"},
 		{"feature flag handler", func(d *RouterDependencies) { d.FeatureFlags = nil }, "feature flag handler is required"},
 		{"unconfigured feature flag handler", func(d *RouterDependencies) { d.FeatureFlags = handler.NewFeatureFlagHandler(nil) }, "feature flag handler is required"},
+		{"data governance handler", func(d *RouterDependencies) { d.DataGovernance = nil }, "data governance handler is required"},
+		{"unconfigured data governance handler", func(d *RouterDependencies) { d.DataGovernance = handler.NewDataGovernanceHandler(nil) }, "data governance handler is required"},
+		{"diagnostics handler", func(d *RouterDependencies) { d.Diagnostics = nil }, "diagnostics handler is required"},
+		{"unconfigured diagnostics handler", func(d *RouterDependencies) { d.Diagnostics = handler.NewDiagnosticsHandler(nil) }, "diagnostics handler is required"},
+		{"missing support bundle service", func(d *RouterDependencies) { d.Diagnostics = handler.NewDiagnosticsHandler(routerDiagnosticsService{}) }, "support bundle consent service is required"},
+		{"nil support bundle service", func(d *RouterDependencies) {
+			var nilProvider *routerSupportBundleService
+			d.Diagnostics = handler.NewDiagnosticsHandler(routerDiagnosticsService{}, handler.WithSupportBundleService(nilProvider))
+		}, "support bundle consent service is required"},
 		{"permission handler", func(d *RouterDependencies) { d.Permissions = nil }, "permission handler is required"},
 		{"unconfigured permission handler", func(d *RouterDependencies) { d.Permissions = handler.NewPermissionHandler(nil) }, "permission handler is required"},
 		{"notification handler", func(d *RouterDependencies) { d.Notifications = nil }, "notification handler is required"},
@@ -525,6 +808,7 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"integration handler", func(d *RouterDependencies) { d.Integrations = nil }, "integration handler is required"},
 		{"unconfigured integration handler", func(d *RouterDependencies) { d.Integrations = handler.NewIntegrationHandler(nil) }, "integration handler is required"},
 		{"API-key authenticator", func(d *RouterDependencies) { d.APIKeyAuthenticator = nil }, "API-key authenticator is required"},
+		{"SCIM authenticator", func(d *RouterDependencies) { d.SCIMAuthenticator = nil }, "SCIM authenticator is required"},
 		{"API-key rate limiter", func(d *RouterDependencies) { d.APIKeyRateLimiter = nil }, "API-key rate limiter is required"},
 		{"request rate limiter", func(d *RouterDependencies) { d.RequestRateLimiter = nil }, "request rate limiter is required"},
 		{"token validator", func(d *RouterDependencies) { d.AccessTokenValidator = nil }, "access-token validator is required"},
@@ -532,6 +816,7 @@ func TestNewRouterWithDependenciesFailsFast(t *testing.T) {
 		{"typed nil authorizer", func(d *RouterDependencies) { var authorizer *routerAuthorizer; d.Authorizer = authorizer }, "authorizer is required"},
 		{"feature evaluator", func(d *RouterDependencies) { d.FeatureEvaluator = nil }, "feature evaluator is required"},
 		{"entitlement checker", func(d *RouterDependencies) { d.EntitlementChecker = nil }, "entitlement checker is required"},
+		{"evidence scanner health check", func(d *RouterDependencies) { d.EvidenceScannerCheck = nil }, "evidence scanner health check is required"},
 		{"health check", func(d *RouterDependencies) { d.HealthCheck = nil }, "health check is required"},
 		{"tenant middleware", func(d *RouterDependencies) { d.TenantMiddleware = nil }, "tenant middleware is required"},
 	}
@@ -572,6 +857,7 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 		method     string
 		path       string
 		body       string
+		headers    map[string]string
 		authorized bool
 		wantStatus int
 	}{
@@ -596,6 +882,10 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 			body:       `{"refresh_token":"refresh-token"}`,
 			wantStatus: http.StatusOK,
 		},
+		{name: "accept invitation", method: http.MethodPost, path: "/api/v1/auth/invitations/accept", body: `{"token":"opaque-token","password":"correct-password"}`, wantStatus: http.StatusOK},
+		{name: "request password reset", method: http.MethodPost, path: "/api/v1/auth/password/forgot", body: `{"organization_id":"` + testOrgID + `","email":"user@example.com"}`, wantStatus: http.StatusAccepted},
+		{name: "begin passkey authentication", method: http.MethodPost, path: "/api/v1/auth/passkeys/authentication/options", body: `{"organization_id":"` + testOrgID + `","email":"user@example.com"}`, wantStatus: http.StatusOK},
+		{name: "complete login MFA", method: http.MethodPost, path: "/api/v1/auth/mfa/verify", body: `{"challenge_token":"opaque-token","method":"totp","code":"123456"}`, wantStatus: http.StatusOK},
 		{
 			name:       "me",
 			method:     http.MethodGet,
@@ -616,6 +906,8 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 			authorized: true,
 			wantStatus: http.StatusNoContent,
 		},
+		{name: "identity policy", method: http.MethodGet, path: "/api/v1/identity/policy", authorized: true, wantStatus: http.StatusOK},
+		{name: "identity sessions", method: http.MethodGet, path: "/api/v1/identity/sessions", authorized: true, wantStatus: http.StatusOK},
 		{
 			name:       "organization",
 			method:     http.MethodGet,
@@ -659,6 +951,10 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 		{name: "create feature flag override", method: http.MethodPut, path: "/api/v1/settings/feature-flags/advanced_reporting", body: `{"enabled":true,"reason":"Controlled rollout"}`, authorized: true, wantStatus: http.StatusCreated},
 		{name: "reset feature flag override", method: http.MethodPost, path: "/api/v1/settings/feature-flags/advanced_reporting/reset", body: `{"expected_version":1,"reason":"Return to plan default"}`, authorized: true, wantStatus: http.StatusNoContent},
 		{name: "feature flag history", method: http.MethodGet, path: "/api/v1/settings/feature-flags/advanced_reporting/history", authorized: true, wantStatus: http.StatusOK},
+		{name: "data governance policy", method: http.MethodGet, path: "/api/v1/settings/data-governance/policy", authorized: true, wantStatus: http.StatusOK},
+		{name: "save data governance policy", method: http.MethodPut, path: "/api/v1/settings/data-governance/policy", body: `{"primary_region":"eu-west-1","allowed_regions":["eu-west-1"],"cross_border_transfer_mode":"approved_regions","default_retention_days":365,"deletion_grace_days":30,"disposition_approval_mode":"single","legal_hold_enabled":true,"reason":"Approve data lifecycle baseline"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "administrator diagnostics", method: http.MethodGet, path: "/api/v1/settings/diagnostics", authorized: true, wantStatus: http.StatusOK},
+		{name: "list SCIM credentials", method: http.MethodGet, path: "/api/v1/settings/scim/tokens", authorized: true, wantStatus: http.StatusOK},
 		{name: "list incidents", method: http.MethodGet, path: "/api/v1/incidents", authorized: true, wantStatus: http.StatusOK},
 		{name: "create incident", method: http.MethodPost, path: "/api/v1/incidents", body: `{"title":"Database exposure","description":"A production snapshot was exposed","category":"privacy","severity":"high"}`, authorized: true, wantStatus: http.StatusCreated},
 		{name: "incident statistics", method: http.MethodGet, path: "/api/v1/incidents/statistics", authorized: true, wantStatus: http.StatusOK},
@@ -670,6 +966,29 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 		{name: "create vendor", method: http.MethodPost, path: "/api/v1/vendors", body: `{"name":"Nimbus Hosting","service_description":"Managed hosting","contact_name":"Ada Vendor","contact_email":"ada@example.test"}`, authorized: true, wantStatus: http.StatusCreated},
 		{name: "vendor statistics", method: http.MethodGet, path: "/api/v1/vendors/statistics", authorized: true, wantStatus: http.StatusOK},
 		{name: "vendor history", method: http.MethodGet, path: "/api/v1/vendors/" + testVendorID + "/timeline", authorized: true, wantStatus: http.StatusOK},
+		{name: "create directory user", method: http.MethodPost, path: "/api/v1/directory/users", body: `{"email":"new.user@example.test","first_name":"New","last_name":"User","reason":"Provision approved user"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "list directory users", method: http.MethodGet, path: "/api/v1/directory/users?search=user&status=active&sort_by=email&sort_dir=asc", authorized: true, wantStatus: http.StatusOK},
+		{name: "get directory user", method: http.MethodGet, path: "/api/v1/directory/users/" + testUserID, authorized: true, wantStatus: http.StatusOK},
+		{name: "update directory user", method: http.MethodPatch, path: "/api/v1/directory/users/" + testUserID, body: `{"expected_version":1,"department":"Security","reason":"Department transfer approved"}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "suspend directory user", method: http.MethodPost, path: "/api/v1/directory/users/" + testUserID + "/suspend", body: `{"expected_version":1,"reason":"Security investigation started"}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "reactivate directory user", method: http.MethodPost, path: "/api/v1/directory/users/" + testUserID + "/reactivate", body: `{"expected_version":1,"reason":"Security investigation completed"}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "preview ownership impact", method: http.MethodGet, path: "/api/v1/directory/users/" + testUserID + "/ownership-impact", authorized: true, wantStatus: http.StatusOK},
+		{name: "transfer directory ownership", method: http.MethodPost, path: "/api/v1/directory/users/" + testUserID + "/transfer-ownership", body: `{"expected_version":1,"replacement_user_id":"` + testUserID + `","reason":"Transfer responsibilities before departure"}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "deprovision directory user", method: http.MethodPost, path: "/api/v1/directory/users/" + testUserID + "/deprovision", body: `{"expected_version":1,"reason":"Employment ended after ownership transfer"}`, authorized: true, wantStatus: http.StatusNoContent},
+		{name: "directory user history", method: http.MethodGet, path: "/api/v1/directory/users/" + testUserID + "/history", authorized: true, wantStatus: http.StatusOK},
+		{name: "issue directory invitation", method: http.MethodPost, path: "/api/v1/directory/users/" + testUserID + "/invitation", body: `{"reason":"Approved onboarding invitation"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "preview directory import", method: http.MethodPost, path: "/api/v1/directory/users/import/preview", body: "email,first_name,last_name,role_slug\nnew.user@example.test,New,User,viewer\n", headers: map[string]string{"Content-Type": "text/csv"}, authorized: true, wantStatus: http.StatusOK},
+		{name: "apply directory import", method: http.MethodPost, path: "/api/v1/directory/users/import", body: "email,first_name,last_name,role_slug\nnew.user@example.test,New,User,viewer\n", headers: map[string]string{"Content-Type": "text/csv", "Idempotency-Key": "directory-import-1", "X-Change-Reason": "Approved HR roster"}, authorized: true, wantStatus: http.StatusCreated},
+		{name: "create directory group", method: http.MethodPost, path: "/api/v1/directory/groups", body: `{"name":"Reviewers","group_type":"static","reason":"Create reviewer cohort"}`, authorized: true, wantStatus: http.StatusCreated},
+		{name: "list directory groups", method: http.MethodGet, path: "/api/v1/directory/groups", authorized: true, wantStatus: http.StatusOK},
+		{name: "get directory group", method: http.MethodGet, path: "/api/v1/directory/groups/" + testGroupID, authorized: true, wantStatus: http.StatusOK},
+		{name: "update directory group", method: http.MethodPatch, path: "/api/v1/directory/groups/" + testGroupID, body: `{"expected_version":1,"description":"Control reviewers","reason":"Clarify group purpose"}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "list directory group members", method: http.MethodGet, path: "/api/v1/directory/groups/" + testGroupID + "/members", authorized: true, wantStatus: http.StatusOK},
+		{name: "add directory group member", method: http.MethodPost, path: "/api/v1/directory/groups/" + testGroupID + "/members", body: `{"expected_version":1,"user_id":"` + testUserID + `","reason":"Reviewer assignment approved"}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "remove directory group member", method: http.MethodDelete, path: "/api/v1/directory/groups/" + testGroupID + "/members/" + testUserID, body: `{"expected_version":1,"reason":"Reviewer assignment ended"}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "bulk change directory group members", method: http.MethodPost, path: "/api/v1/directory/groups/" + testGroupID + "/members/bulk", body: `{"expected_version":1,"add_user_ids":["` + testUserID + `"],"reason":"Quarterly membership review"}`, authorized: true, wantStatus: http.StatusOK},
+		{name: "directory group history", method: http.MethodGet, path: "/api/v1/directory/groups/" + testGroupID + "/history", authorized: true, wantStatus: http.StatusOK},
+		{name: "delete directory group", method: http.MethodDelete, path: "/api/v1/directory/groups/" + testGroupID + "?expected_version=1", headers: map[string]string{"X-Change-Reason": "Group retired after review"}, authorized: true, wantStatus: http.StatusNoContent},
 	}
 
 	for _, tt := range tests {
@@ -678,6 +997,9 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 			if tt.body != "" {
 				req.Header.Set("Content-Type", "application/json")
 			}
+			for key, value := range tt.headers {
+				req.Header.Set(key, value)
+			}
 			if tt.authorized {
 				req.Header.Set("Authorization", "Bearer access-token")
 			}
@@ -685,6 +1007,41 @@ func TestRouterMountsRequiredCoreRoutes(t *testing.T) {
 			router.ServeHTTP(response, req)
 			if response.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", response.Code, tt.wantStatus, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestRouterMountsSCIMProtocolAndKeepsAuthenticationIsolated(t *testing.T) {
+	dependencies := testRouterDependencies()
+	dependencies.SCIMAuthenticator = routerSCIMAuthenticator{scopes: []string{models.SCIMTokenScopeUsersRead}}
+	router, err := NewRouterWithDependencies(testRouterConfig(), dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name, path, authorization string
+		want                      int
+	}{
+		{name: "SCIM bearer required", path: "/api/scim/v2/ServiceProviderConfig", want: http.StatusUnauthorized},
+		{name: "browser JWT rejected", path: "/api/scim/v2/ServiceProviderConfig", authorization: "Bearer access-token", want: http.StatusUnauthorized},
+		{name: "discovery", path: "/api/scim/v2/ServiceProviderConfig", authorization: "Bearer cfs_protocol-token", want: http.StatusOK},
+		{name: "scoped users list", path: "/api/scim/v2/Users", authorization: "Bearer cfs_protocol-token", want: http.StatusOK},
+		{name: "groups scope denied", path: "/api/scim/v2/Groups", authorization: "Bearer cfs_protocol-token", want: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			if test.authorization != "" {
+				request.Header.Set("Authorization", test.authorization)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status=%d want=%d body=%s", response.Code, test.want, response.Body.String())
+			}
+			if response.Header().Get("Content-Type") != "application/scim+json" {
+				t.Fatalf("content-type=%q", response.Header().Get("Content-Type"))
 			}
 		})
 	}
@@ -966,11 +1323,33 @@ func testRouterDependencies() RouterDependencies {
 		ID: testRoleID, OrganizationID: &roleOrganizationID, Name: "Control reviewer", Slug: "control-reviewer",
 		IsCustom: true, Version: 1, Permissions: []models.PermissionGrant{},
 	}
+	directoryUser := &models.DirectoryUser{
+		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testUserID}, OrganizationID: testOrgID},
+		Email:       "user@example.com", FirstName: "A", LastName: "User", Status: models.UserStatusActive,
+		InvitationStatus: models.DirectoryInvitationNotRequired, Language: "en", Version: 1, RoleSlugs: []string{"viewer"},
+	}
+	directoryGroup := &models.DirectoryGroup{
+		TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: testGroupID}, OrganizationID: testOrgID},
+		Name:        "Reviewers", Slug: "reviewers", GroupType: models.DirectoryGroupStatic, Version: 1,
+		CreatedBy: testUserID, UpdatedBy: testUserID,
+	}
+	dataGovernancePolicy := &models.DataGovernancePolicy{
+		OrganizationID: testOrgID, PrimaryRegion: "eu-west-1", AllowedRegions: []string{"eu-west-1"},
+		CrossBorderTransferMode: "approved_regions", DefaultRetentionDays: 365,
+		DeletionGraceDays: 30, DispositionApprovalMode: "single", LegalHoldEnabled: true,
+		Version: 1, CreatedBy: testUserID, UpdatedBy: testUserID,
+	}
 	return RouterDependencies{
-		Auth:                 handler.NewAuthHandler(&routerAuthService{user: user}),
-		Organizations:        handler.NewOrganizationHandler(&routerOrganizationService{organization: organization}),
-		Frameworks:           handler.NewFrameworkHandler(routerComplianceService{}),
-		Controls:             handler.NewControlHandler(routerComplianceService{}),
+		Auth:          handler.NewAuthHandler(&routerAuthService{user: user}),
+		Identity:      handler.NewIdentityLifecycleHandler(routerIdentityService{}),
+		SCIM:          handler.NewSCIMHandler(routerSCIMService{}),
+		Organizations: handler.NewOrganizationHandler(&routerOrganizationService{organization: organization}),
+		Frameworks:    handler.NewFrameworkHandler(routerComplianceService{}),
+		Controls: handler.NewControlHandler(
+			routerComplianceService{},
+			handler.WithEvidenceObjectService(routerEvidenceObjectService{}, 1<<20),
+			handler.WithEvidenceLifecycleService(routerEvidenceLifecycleService{}),
+		),
 		Risks:                handler.NewRiskHandler(routerRiskService{risk: risk}),
 		Policies:             handler.NewPolicyHandler(routerPolicyService{policy: policy}),
 		Audits:               handler.NewAuditHandler(routerAuditService{audit: audit}),
@@ -978,11 +1357,19 @@ func testRouterDependencies() RouterDependencies {
 		Assets:               handler.NewAssetHandler(routerAssetService{asset: asset}),
 		Vendors:              handler.NewVendorHandler(routerVendorService{vendor: vendor}),
 		AccessAdministration: handler.NewAccessAdministrationHandler(routerAccessAdministrationService{role: managedRole}),
+		AccessGovernance:     handler.NewAccessGovernanceHandler(routerAccessGovernanceService{}),
+		UserAdministration:   handler.NewUserAdministrationHandler(routerUserAdministrationService{user: directoryUser, group: directoryGroup}),
 		FeatureFlags:         handler.NewFeatureFlagHandler(routerFeatureFlagService{}),
+		DataGovernance:       handler.NewDataGovernanceHandler(routerDataGovernanceService{policy: dataGovernancePolicy}),
+		Diagnostics:          handler.NewDiagnosticsHandler(routerDiagnosticsService{}, handler.WithSupportBundleService(&routerSupportBundleService{})),
+		DataQuality:          handler.NewDataQualityHandler(routerDataQualityService{}),
+		OrganizationProfile:  handler.NewOrganizationProfileHandler(routerOrganizationProfileService{}),
+		CalendarRead:         handler.NewCalendarReadHandler(routerCalendarReadService{}),
 		Permissions:          handler.NewPermissionHandler(routerPermissionService{}),
 		Notifications:        handler.NewNotificationHandler(dummyPool, notificationEngine, notificationProtector),
 		Integrations:         handler.NewIntegrationHandler(integrationService),
 		APIKeyAuthenticator:  routerAPIKeyAuthenticator{permissions: []string{"read:controls"}},
+		SCIMAuthenticator:    routerSCIMAuthenticator{scopes: []string{models.SCIMTokenScopeUsersRead}},
 		APIKeyRateLimiter:    routerAPIKeyLimiter{},
 		RequestRateLimiter:   routerAPIKeyLimiter{},
 		AccessTokenValidator: routerTokenValidator{claims: &authdomain.Claims{
@@ -995,12 +1382,16 @@ func testRouterDependencies() RouterDependencies {
 				Subject: testUserID,
 			},
 		}},
-		Authorizer:         &routerAuthorizer{allowed: true},
-		FeatureEvaluator:   routerFeatureFlagService{},
-		EntitlementChecker: routerFeatureFlagService{},
-		HealthCheck:        func(context.Context) error { return nil },
+		Authorizer:           &routerAuthorizer{allowed: true},
+		FeatureEvaluator:     routerFeatureFlagService{},
+		EntitlementChecker:   routerFeatureFlagService{},
+		EvidenceScannerCheck: func(context.Context) error { return nil },
+		HealthCheck:          func(context.Context) error { return nil },
 		TenantMiddleware: func(next http.Handler) http.Handler {
 			return next
+		},
+		Domains: DomainHandlers{
+			Access: handler.NewAccessHandler(routerPolicyAccessService{}, &routerAuthorizer{allowed: true}),
 		},
 	}
 }

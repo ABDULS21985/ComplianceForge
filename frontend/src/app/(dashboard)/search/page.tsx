@@ -5,9 +5,11 @@ import {
   type GlobalSearchResult,
   normalizeGlobalSearchResponse,
 } from '@/lib/navigation';
+import { ResourceState, StaleDataNotice } from '@/components/data/resource-state';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
+import { isForbiddenResourceError } from '@/lib/resource-errors';
 import Link from 'next/link';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +80,7 @@ export default function SearchPage() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [facets, setFacets] = useState<Facets>(EMPTY_FACETS);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -93,6 +96,7 @@ export default function SearchPage() {
       }
       setLoading(true);
       setError(null);
+      setForbidden(false);
       try {
         const params: Record<string, unknown> = {
           q: q.trim(),
@@ -114,7 +118,11 @@ export default function SearchPage() {
         setTotalPages(data.total_pages);
         setQueryTime(data.query_time_ms ?? null);
         setSuggestions(data.suggestions ?? []);
-      } catch {
+      } catch (cause: unknown) {
+        if (isForbiddenResourceError(cause)) {
+          setResults([]);
+          setForbidden(true);
+        }
         setError('Search failed. Please try again.');
       } finally {
         setLoading(false);
@@ -153,7 +161,12 @@ export default function SearchPage() {
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
     doSearch(query, newPage, facets);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({
+      top: 0,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'auto'
+        : 'smooth',
+    });
   };
 
   const clearFilters = () => {
@@ -181,6 +194,12 @@ export default function SearchPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Search ComplianceForge</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          Find governance records available to your current permissions.
+        </p>
+      </div>
       {/* Search bar */}
       <form onSubmit={handleSubmit}>
         <div className="relative">
@@ -189,20 +208,28 @@ export default function SearchPage() {
           </svg>
           <input
             ref={inputRef}
+            aria-label="Search all compliance data"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search across all compliance data..."
-            className="w-full pl-12 pr-24 py-3.5 text-base border border-gray-300 rounded-xl bg-white shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+            className="min-h-11 w-full rounded-xl border border-gray-300 bg-white py-3.5 pl-12 pr-24 text-base shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
           />
           <button
             type="submit"
-            className="absolute right-2 top-1/2 -translate-y-1/2 px-5 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+            className="absolute right-2 top-1/2 min-h-11 -translate-y-1/2 rounded-lg bg-indigo-700 px-5 py-2 text-sm font-medium text-white transition-colors motion-reduce:transition-none hover:bg-indigo-800"
           >
             Search
           </button>
         </div>
       </form>
+
+      {error && results.length > 0 && (
+        <StaleDataNotice
+          title="Showing results from the previous successful search"
+          onRefresh={() => void doSearch(query, page, facets)}
+        />
+      )}
 
       {/* Results meta */}
       {query.trim() && !loading && !error && (
@@ -219,7 +246,11 @@ export default function SearchPage() {
             )}
           </p>
           {hasActiveFilters && (
-            <button onClick={clearFilters} className="text-sm text-indigo-600 hover:text-indigo-700 font-medium">
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="min-h-11 rounded-md px-2 text-sm font-medium text-indigo-700 hover:text-indigo-800"
+            >
               Clear all filters
             </button>
           )}
@@ -234,11 +265,12 @@ export default function SearchPage() {
 
             {/* Entity type */}
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1.5 block">Entity Type</label>
+              <label htmlFor="search-entity-type" className="text-xs font-medium text-gray-600 mb-1.5 block">Entity Type</label>
               <select
+                id="search-entity-type"
                 value={facets.entity_type}
                 onChange={(e) => handleFacetChange('entity_type', e.target.value)}
-                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+                className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               >
                 <option value="">All Types</option>
                 {ENTITY_TYPES.map((t) => (
@@ -249,23 +281,25 @@ export default function SearchPage() {
 
             {/* Framework */}
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1.5 block">Framework</label>
+              <label htmlFor="search-framework" className="text-xs font-medium text-gray-600 mb-1.5 block">Framework</label>
               <input
+                id="search-framework"
                 type="text"
                 value={facets.framework}
                 onChange={(e) => handleFacetChange('framework', e.target.value)}
                 placeholder="e.g. ISO27001"
-                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+                className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
 
             {/* Status */}
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1.5 block">Status</label>
+              <label htmlFor="search-status" className="text-xs font-medium text-gray-600 mb-1.5 block">Status</label>
               <select
+                id="search-status"
                 value={facets.status}
                 onChange={(e) => handleFacetChange('status', e.target.value)}
-                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+                className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               >
                 <option value="">All</option>
                 {STATUS_OPTIONS.map((s) => (
@@ -276,11 +310,12 @@ export default function SearchPage() {
 
             {/* Severity */}
             <div>
-              <label className="text-xs font-medium text-gray-600 mb-1.5 block">Severity</label>
+              <label htmlFor="search-severity" className="text-xs font-medium text-gray-600 mb-1.5 block">Severity</label>
               <select
+                id="search-severity"
                 value={facets.severity}
                 onChange={(e) => handleFacetChange('severity', e.target.value)}
-                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+                className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               >
                 <option value="">All</option>
                 {SEVERITY_OPTIONS.map((s) => (
@@ -290,67 +325,75 @@ export default function SearchPage() {
             </div>
 
             {/* Date range */}
-            <div>
-              <label className="text-xs font-medium text-gray-600 mb-1.5 block">Date Range</label>
+            <fieldset>
+              <legend className="text-xs font-medium text-gray-600 mb-1.5 block">Date Range</legend>
               <div className="space-y-1.5">
+                <label htmlFor="search-date-from" className="sr-only">Updated from</label>
                 <input
+                  id="search-date-from"
+                  aria-label="Updated from"
                   type="date"
                   value={facets.date_from}
                   onChange={(e) => handleFacetChange('date_from', e.target.value)}
-                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+                  className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 />
+                <label htmlFor="search-date-to" className="sr-only">Updated through</label>
                 <input
+                  id="search-date-to"
+                  aria-label="Updated through"
                   type="date"
                   value={facets.date_to}
                   onChange={(e) => handleFacetChange('date_to', e.target.value)}
-                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+                  className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 />
               </div>
-            </div>
+            </fieldset>
           </div>
         </div>
 
         {/* Results list */}
         <div className="flex-1">
-          {loading ? (
-            <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="bg-white border border-gray-200 rounded-xl p-4 animate-pulse">
-                  <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-                  <div className="h-3 bg-gray-100 rounded w-full mb-1" />
-                  <div className="h-3 bg-gray-100 rounded w-1/2" />
-                </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl">
-              <p className="font-semibold">Search Error</p>
-              <p className="text-sm mt-1">{error}</p>
-            </div>
+          {forbidden ? (
+            <ResourceState kind="forbidden" surface="plain" title="Search access unavailable" />
+          ) : loading && results.length === 0 ? (
+            <ResourceState
+              surface="plain"
+              kind="loading"
+              loadingLayout="cards"
+              title="Searching governance records"
+            />
+          ) : error && results.length === 0 ? (
+            <ResourceState
+              surface="plain"
+              kind="error"
+              title="Search could not be completed"
+              description={error}
+              onRetry={() => void doSearch(query, page, facets)}
+            />
           ) : results.length === 0 && query.trim() ? (
-            <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
-              <svg className="mx-auto w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <h3 className="text-lg font-semibold text-gray-700">No results found</h3>
-              <p className="text-sm text-gray-500 mt-1">Try different keywords or adjust your filters.</p>
-              {suggestions.length > 0 && (
+            <ResourceState
+              surface="plain"
+              kind="empty"
+              title="No results found"
+              description="Try different keywords or adjust your filters."
+              action={suggestions.length > 0 ? (
                 <div className="mt-4">
                   <p className="text-sm text-gray-500 mb-2">Did you mean:</p>
                   <div className="flex flex-wrap justify-center gap-2">
                     {suggestions.map((s) => (
                       <button
                         key={s}
+                        type="button"
                         onClick={() => { setQuery(s); doSearch(s, 1, facets); }}
-                        className="text-sm text-indigo-600 hover:text-indigo-700 font-medium bg-indigo-50 px-3 py-1 rounded-full hover:bg-indigo-100"
+                        className="min-h-11 rounded-full bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800"
                       >
                         {s}
                       </button>
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
+              ) : undefined}
+            />
           ) : results.length > 0 ? (
             <>
               <div className="space-y-3">
@@ -361,7 +404,7 @@ export default function SearchPage() {
                     className="block bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md hover:border-indigo-200 transition-all"
                   >
                     <div className="flex items-start gap-3">
-                      <span className="text-xl flex-shrink-0 mt-0.5">{ENTITY_ICON_MAP[r.entity_type] ?? '📎'}</span>
+                      <span aria-hidden="true" className="text-xl flex-shrink-0 mt-0.5">{ENTITY_ICON_MAP[r.entity_type] ?? '📎'}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           {r.entity_ref && (
@@ -398,9 +441,10 @@ export default function SearchPage() {
               {totalPages > 1 && (
                 <div className="flex items-center justify-center gap-1 mt-6">
                   <button
+                    type="button"
                     onClick={() => handlePageChange(page - 1)}
                     disabled={page <= 1}
-                    className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Previous
                   </button>
@@ -418,8 +462,11 @@ export default function SearchPage() {
                     return (
                       <button
                         key={pageNum}
+                        type="button"
+                        aria-current={pageNum === page ? 'page' : undefined}
+                        aria-label={`Page ${pageNum}`}
                         onClick={() => handlePageChange(pageNum)}
-                        className={`w-9 h-9 text-sm rounded-lg ${
+                        className={`h-11 w-11 text-sm rounded-lg ${
                           pageNum === page
                             ? 'bg-indigo-600 text-white'
                             : 'border border-gray-300 text-gray-600 hover:bg-gray-50'
@@ -430,9 +477,10 @@ export default function SearchPage() {
                     );
                   })}
                   <button
+                    type="button"
                     onClick={() => handlePageChange(page + 1)}
                     disabled={page >= totalPages}
-                    className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="min-h-11 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Next
                   </button>
@@ -441,15 +489,12 @@ export default function SearchPage() {
             </>
           ) : (
             /* Initial state - no query yet */
-            <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
-              <svg className="mx-auto w-16 h-16 text-gray-200 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <h3 className="text-lg font-semibold text-gray-700">Search ComplianceForge</h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Search across frameworks, controls, risks, policies, audits, incidents, vendors, and more.
-              </p>
-            </div>
+            <ResourceState
+              surface="plain"
+              kind="empty"
+              title="Start a search"
+              description="Search across frameworks, controls, risks, policies, audits, incidents, vendors, and more."
+            />
           )}
         </div>
       </div>

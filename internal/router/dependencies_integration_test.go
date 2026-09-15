@@ -32,11 +32,21 @@ func TestRequiredDependenciesComposeAgainstMigratedPostgres(t *testing.T) {
 		},
 		Encryption: config.EncryptionConfig{
 			IntegrationKey:  strings.Repeat("ab", 32),
+			IdentityKey:     strings.Repeat("ef", 32),
 			NotificationKey: strings.Repeat("cd", 32),
+		},
+		Identity: config.IdentityConfig{
+			RPID: "localhost", RPDisplayName: "ComplianceForge test",
+			RPOrigins: []string{"http://localhost:3000"},
 		},
 		SMTP: config.SMTPConfig{
 			Host: "127.0.0.1", Port: 2525, From: "noreply@example.test",
 			TLSMode: "disabled", TimeoutSeconds: 1,
+		},
+		Storage: config.StorageConfig{Type: "local", Path: t.TempDir()},
+		Evidence: config.EvidenceConfig{
+			MaximumUploadBytes: 1 << 20, ScannerNetwork: "tcp", ScannerAddress: "127.0.0.1:3310",
+			ScannerTimeoutSeconds: 1, SignedDownloadSeconds: 60,
 		},
 		CORS:      config.CORSConfig{AllowedOrigins: []string{"http://localhost:3000"}},
 		RateLimit: config.RateLimitConfig{RPS: 100},
@@ -48,7 +58,9 @@ func TestRequiredDependenciesComposeAgainstMigratedPostgres(t *testing.T) {
 	if err := dependencies.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if dependencies.Policies == nil || dependencies.Notifications == nil || dependencies.Integrations == nil {
+	if dependencies.Identity == nil || dependencies.SCIM == nil || dependencies.SCIMAuthenticator == nil ||
+		dependencies.Policies == nil || dependencies.Notifications == nil || dependencies.Integrations == nil ||
+		dependencies.DataQuality == nil || dependencies.OrganizationProfile == nil || dependencies.CalendarRead == nil {
 		t.Fatal("required enterprise handlers were not composed")
 	}
 	if _, err := NewRouterWithDependencies(cfg, dependencies); err != nil {

@@ -1,10 +1,8 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-
 import { CSRF_ERROR_HEADER, CSRF_TOKEN_HEADER } from '@/lib/auth-constants';
 import { publicRequestOrigin, sessionCookiePolicy } from '@/lib/request-security';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 
 const ACCESS_TOKEN_FALLBACK_MAX_AGE_SECONDS = 15 * 60;
 const ACCESS_TOKEN_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;

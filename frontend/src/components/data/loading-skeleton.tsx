@@ -1,19 +1,31 @@
-import React from 'react';
-
-import { cn } from '@/lib/utils';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import React from 'react';
+import { Skeleton } from '@/components/ui/skeleton';
 
 // ---- Table Skeleton ----
 interface TableSkeletonProps {
   rows?: number;
   cols?: number;
   className?: string;
+  label?: string;
 }
 
-export function TableSkeleton({ rows = 5, cols = 4, className }: TableSkeletonProps) {
+export function TableSkeleton({
+  rows = 5,
+  cols = 4,
+  className,
+  label = 'Loading table',
+}: TableSkeletonProps) {
   return (
-    <div className={cn('w-full', className)}>
+    <div
+      aria-busy="true"
+      aria-label={label}
+      className={cn('w-full', className)}
+      role="status"
+    >
+      <span className="sr-only">{label}</span>
+      <div aria-hidden="true">
       {/* Header row */}
       <div className="flex gap-4 border-b pb-3">
         {Array.from({ length: cols }).map((_, c) => (
@@ -31,6 +43,7 @@ export function TableSkeleton({ rows = 5, cols = 4, className }: TableSkeletonPr
           ))}
         </div>
       ))}
+      </div>
     </div>
   );
 }
@@ -39,11 +52,22 @@ export function TableSkeleton({ rows = 5, cols = 4, className }: TableSkeletonPr
 interface CardGridSkeletonProps {
   count?: number;
   className?: string;
+  label?: string;
 }
 
-export function CardGridSkeleton({ count = 6, className }: CardGridSkeletonProps) {
+export function CardGridSkeleton({
+  count = 6,
+  className,
+  label = 'Loading cards',
+}: CardGridSkeletonProps) {
   return (
-    <div className={cn('grid gap-4 sm:grid-cols-2 lg:grid-cols-3', className)}>
+    <div
+      aria-busy="true"
+      aria-label={label}
+      className={cn('grid gap-4 sm:grid-cols-2 lg:grid-cols-3', className)}
+      role="status"
+    >
+      <span className="sr-only">{label}</span>
       {Array.from({ length: count }).map((_, i) => (
         <Card key={i}>
           <CardHeader>
@@ -64,11 +88,22 @@ export function CardGridSkeleton({ count = 6, className }: CardGridSkeletonProps
 interface StatCardSkeletonProps {
   count?: number;
   className?: string;
+  label?: string;
 }
 
-export function StatCardSkeleton({ count = 4, className }: StatCardSkeletonProps) {
+export function StatCardSkeleton({
+  count = 4,
+  className,
+  label = 'Loading metrics',
+}: StatCardSkeletonProps) {
   return (
-    <div className={cn('grid gap-4 sm:grid-cols-2 lg:grid-cols-4', className)}>
+    <div
+      aria-busy="true"
+      aria-label={label}
+      className={cn('grid gap-4 sm:grid-cols-2 lg:grid-cols-4', className)}
+      role="status"
+    >
+      <span className="sr-only">{label}</span>
       {Array.from({ length: count }).map((_, i) => (
         <Card key={i}>
           <CardContent className="p-6">
@@ -88,11 +123,21 @@ export function StatCardSkeleton({ count = 4, className }: StatCardSkeletonProps
 // ---- Detail Page Skeleton ----
 interface DetailPageSkeletonProps {
   className?: string;
+  label?: string;
 }
 
-export function DetailPageSkeleton({ className }: DetailPageSkeletonProps) {
+export function DetailPageSkeleton({
+  className,
+  label = 'Loading details',
+}: DetailPageSkeletonProps) {
   return (
-    <div className={cn('space-y-6', className)}>
+    <div
+      aria-busy="true"
+      aria-label={label}
+      className={cn('space-y-6', className)}
+      role="status"
+    >
+      <span className="sr-only">{label}</span>
       {/* Title area */}
       <div className="flex items-center justify-between">
         <div className="space-y-2">

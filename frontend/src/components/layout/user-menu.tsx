@@ -1,10 +1,5 @@
 'use client';
 
-import React from 'react';
-import Link from 'next/link';
-import { LogOut, Settings, User as UserIcon, ScrollText } from 'lucide-react';
-
-import { getInitials } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -15,7 +10,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Fingerprint, LogOut, ScrollText, Settings, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getInitials } from '@/lib/utils';
+import Link from 'next/link';
+import React from 'react';
+import { ROUTES } from '@/lib/routes';
 
 interface UserMenuProps {
   user: {
@@ -58,6 +58,12 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
             <Link href="/settings/profile" className="flex items-center">
               <UserIcon className="mr-2 h-4 w-4" />
               <span>Profile</span>
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link href={ROUTES.security} className="flex items-center">
+              <Fingerprint className="mr-2 h-4 w-4" />
+              <span>Security</span>
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>

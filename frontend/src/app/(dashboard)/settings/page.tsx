@@ -1,24 +1,21 @@
 'use client';
 
+import type { AuditLogEntry, User as UserType } from '@/types';
 import {
-  Activity,
-  AlertCircle,
   Building2,
   ChevronLeft,
   ChevronRight,
-  Clock,
-  Edit,
-  Globe,
+  Gauge,
   Lock,
   Plus,
   ScrollText,
   Search,
   ShieldCheck,
+  Stethoscope,
   Users,
   UserX,
 } from 'lucide-react';
-import type { AuditLogEntry, Organization, User as UserType } from '@/types';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -29,13 +26,12 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { formatDateTime, getStatusColor } from '@/lib/utils';
+import { ResourceBoundary, StaleDataNotice } from '@/components/data/resource-state';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   useAuditLog,
   useCreateUser,
   useDeactivateUser,
-  useOrganization,
-  useUpdateOrganization,
   useUsers,
 } from '@/lib/api-hooks';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +40,7 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Link from 'next/link';
+import { OrganizationProfilePanel } from '@/components/settings/organization-profile-panel';
 import type { PaginatedResponse } from '@/lib/api';
 import { useForm } from 'react-hook-form';
 import { useSearchParams } from 'next/navigation';
@@ -66,162 +63,8 @@ const createUserSchema = z.object({
 
 type CreateUserValues = z.infer<typeof createUserSchema>;
 
-const updateOrgSchema = z.object({
-  name: z.string().min(1, 'Organisation name is required').max(200),
-  legal_name: z.string().max(200).optional(),
-  industry: z.string().max(100).optional(),
-  country_code: z.string().max(10).optional(),
-  timezone: z.string().max(50).optional(),
-  employee_count_range: z.string().max(50).optional(),
-});
-
-type UpdateOrgValues = z.infer<typeof updateOrgSchema>;
-
-// ---------------------------------------------------------------------------
-// Organisation Tab
-// ---------------------------------------------------------------------------
-
 function OrganisationTab() {
-  const [editing, setEditing] = useState(false);
-  const orgQuery = useOrganization();
-  const updateOrg = useUpdateOrganization();
-  const org = orgQuery.data as Organization | undefined;
-
-  const form = useForm<UpdateOrgValues>({
-    resolver: zodResolver(updateOrgSchema),
-    values: {
-      name: org?.name ?? '',
-      legal_name: org?.legal_name ?? '',
-      industry: org?.industry ?? '',
-      country_code: org?.country_code ?? '',
-      timezone: org?.timezone ?? '',
-      employee_count_range: org?.employee_count_range ?? '',
-    },
-  });
-
-  const onSubmit = (values: UpdateOrgValues) => {
-    updateOrg.mutate(values, {
-      onSuccess: () => setEditing(false),
-    });
-  };
-
-  if (orgQuery.isLoading) {
-    return (
-      <Card>
-        <CardContent className="p-6">
-          <div className="animate-pulse space-y-4">
-            <div className="h-6 w-48 rounded bg-muted" />
-            <div className="h-4 w-full rounded bg-muted" />
-            <div className="h-4 w-3/4 rounded bg-muted" />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (orgQuery.error) {
-    return (
-      <Card>
-        <CardContent className="flex items-center gap-2 p-6 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <span>Failed to load organisation details.</span>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!org) return null;
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="text-lg">Organisation Details</CardTitle>
-          <CardDescription>Manage your organisation profile and settings.</CardDescription>
-        </div>
-        {!editing && (
-          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-            <Edit className="mr-2 h-4 w-4" />
-            Edit
-          </Button>
-        )}
-      </CardHeader>
-      <CardContent>
-        {editing ? (
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="org-name">Organisation Name *</Label>
-                <Input id="org-name" {...form.register('name')} />
-                {form.formState.errors.name && (
-                  <p className="text-xs text-destructive">{form.formState.errors.name.message}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="org-legal">Legal Name</Label>
-                <Input id="org-legal" {...form.register('legal_name')} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="org-industry">Industry</Label>
-                <Input id="org-industry" {...form.register('industry')} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="org-country">Country Code</Label>
-                <Input id="org-country" {...form.register('country_code')} placeholder="GB" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="org-tz">Timezone</Label>
-                <Input id="org-tz" {...form.register('timezone')} placeholder="Europe/London" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="org-emp">Employee Count Range</Label>
-                <Input id="org-emp" {...form.register('employee_count_range')} placeholder="50-249" />
-              </div>
-            </div>
-            <div className="flex gap-3 pt-2">
-              <Button type="submit" disabled={updateOrg.isPending}>
-                {updateOrg.isPending ? 'Saving...' : 'Save Changes'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <InfoItem icon={Building2} label="Name" value={org.name} />
-            <InfoItem icon={Building2} label="Legal Name" value={org.legal_name} />
-            <InfoItem icon={Globe} label="Industry" value={org.industry} />
-            <InfoItem icon={Globe} label="Country" value={org.country_code} />
-            <InfoItem icon={Clock} label="Timezone" value={org.timezone} />
-            <InfoItem icon={Users} label="Employee Range" value={org.employee_count_range} />
-            <InfoItem icon={ShieldCheck} label="Tier" value={org.tier} />
-            <InfoItem icon={Activity} label="Status" value={org.status} />
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function InfoItem({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value?: string | null;
-}) {
-  return (
-    <div className="flex items-start gap-3 py-2">
-      <Icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
-      <div>
-        <p className="text-xs font-medium text-muted-foreground">{label}</p>
-        <p className="mt-0.5 text-sm">{value || '—'}</p>
-      </div>
-    </div>
-  );
+  return <OrganizationProfilePanel />;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +82,9 @@ function UsersTab() {
   const deactivateUser = useDeactivateUser();
 
   const usersData = usersQuery.data as PaginatedResponse<UserType> | undefined;
+  const users = usersData?.items ?? [];
+  const usersPage = usersData?.page ?? page;
+  const usersTotalPages = usersData?.total_pages ?? 1;
 
   const form = useForm<CreateUserValues>({
     resolver: zodResolver(createUserSchema),
@@ -352,6 +198,14 @@ function UsersTab() {
         </Dialog>
       </div>
 
+      {Boolean(usersQuery.error) && Boolean(usersQuery.data) && (
+        <StaleDataNotice
+          isRefreshing={usersQuery.isFetching}
+          lastUpdatedAt={usersQuery.dataUpdatedAt}
+          onRefresh={() => void usersQuery.refetch()}
+        />
+      )}
+
       {/* Deactivate Confirmation Dialog */}
       <Dialog open={!!deactivateId} onOpenChange={(open) => !open && setDeactivateId(null)}>
         <DialogContent>
@@ -378,36 +232,34 @@ function UsersTab() {
       </Dialog>
 
       {/* Users Table */}
-      {usersQuery.isLoading ? (
-        <Card>
-          <CardContent className="p-6">
-            <div className="animate-pulse space-y-4">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex gap-4">
-                  <div className="h-4 w-1/4 rounded bg-muted" />
-                  <div className="h-4 w-1/4 rounded bg-muted" />
-                  <div className="h-4 w-1/6 rounded bg-muted" />
-                  <div className="h-4 w-1/6 rounded bg-muted" />
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : usersQuery.error ? (
-        <Card>
-          <CardContent className="flex items-center gap-2 p-6 text-destructive">
-            <AlertCircle className="h-5 w-5" />
-            <span>Failed to load users.</span>
-          </CardContent>
-        </Card>
-      ) : !usersData?.items?.length ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-            <Users className="h-12 w-12 text-muted-foreground/50" />
-            <h3 className="mt-4 text-lg font-semibold">No users found</h3>
-          </CardContent>
-        </Card>
-      ) : (
+      <ResourceBoundary
+        isEmpty={users.length === 0}
+        isError={Boolean(usersQuery.error) && !usersQuery.data}
+        isLoading={usersQuery.isLoading}
+        loadingLayout="table"
+        loadingTitle="Loading users"
+        emptyTitle={search ? 'No users match this search' : 'No users found'}
+        emptyDescription={
+          search
+            ? 'Clear the search or use a broader name or email address.'
+            : 'Add a user to begin assigning governance responsibilities.'
+        }
+        emptyAction={
+          search ? (
+            <Button type="button" variant="outline" onClick={() => setSearch('')}>
+              Clear search
+            </Button>
+          ) : (
+            <Button type="button" onClick={() => setAddOpen(true)}>
+              Add user
+            </Button>
+          )
+        }
+        errorTitle="Users could not be loaded"
+        errorDescription="The directory service did not return the user list. Retry without losing your search."
+        onRetry={() => void usersQuery.refetch()}
+        retrying={usersQuery.isFetching}
+      >
         <Card>
           <CardContent className="pt-6">
             <div className="overflow-x-auto">
@@ -424,7 +276,7 @@ function UsersTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {usersData.items.map((user) => (
+                  {users.map((user) => (
                     <tr key={user.id} className="border-b last:border-0 hover:bg-muted/50">
                       <td className="py-3 pr-4 font-medium">
                         {user.first_name} {user.last_name}
@@ -466,10 +318,10 @@ function UsersTab() {
               </table>
             </div>
 
-            {usersData.total_pages > 1 && (
+            {usersTotalPages > 1 && (
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Page {usersData.page} of {usersData.total_pages}
+                  Page {usersPage} of {usersTotalPages}
                 </p>
                 <div className="flex gap-2">
                   <Button
@@ -485,7 +337,7 @@ function UsersTab() {
                     variant="outline"
                     size="sm"
                     onClick={() => setPage((p) => p + 1)}
-                    disabled={page >= usersData.total_pages}
+                    disabled={page >= usersTotalPages}
                   >
                     Next
                     <ChevronRight className="h-4 w-4" />
@@ -495,7 +347,7 @@ function UsersTab() {
             )}
           </CardContent>
         </Card>
-      )}
+      </ResourceBoundary>
     </div>
   );
 }
@@ -511,6 +363,50 @@ function RolesTab() {
         <div className="rounded-full bg-primary/10 p-3"><ShieldCheck aria-hidden="true" className="h-8 w-8 text-primary" /></div>
         <div><h3 className="text-lg font-semibold">Enterprise role administration</h3><p className="mt-1 max-w-xl text-sm text-muted-foreground">Review the canonical permission catalogue, manage custom and system roles, assess permission impact, assign users, and inspect append-only change history.</p></div>
         <Button asChild><Link href="/settings/access-policies">Manage roles and permissions</Link></Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CapabilitiesTab() {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center gap-4 p-12 text-center">
+        <div className="rounded-full bg-primary/10 p-3">
+          <Gauge aria-hidden="true" className="h-8 w-8 text-primary" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold">Capabilities and plan entitlements</h3>
+          <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+            Review live feature evaluations, plan features and resource limits, schedule audited
+            tenant overrides, and inspect immutable change history.
+          </p>
+        </div>
+        <Button asChild>
+          <Link href="/settings/capabilities">View capabilities and usage</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DiagnosticsTab() {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center gap-4 p-12 text-center">
+        <div className="rounded-full bg-primary/10 p-3">
+          <Stethoscope aria-hidden="true" className="h-8 w-8 text-primary" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold">Administrator diagnostics</h3>
+          <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+            Review tenant-scoped dependencies, migrations, worker backlogs, connector health, and
+            safe configuration posture without exposing secrets.
+          </p>
+        </div>
+        <Button asChild>
+          <Link href="/settings/diagnostics">Open diagnostics centre</Link>
+        </Button>
       </CardContent>
     </Card>
   );
@@ -535,6 +431,9 @@ function AuditLogTab() {
   const [page, setPage] = useState(1);
   const auditLogQuery = useAuditLog({ page, page_size: 25 });
   const auditData = auditLogQuery.data as PaginatedResponse<AuditLogEntry> | undefined;
+  const auditEntries = auditData?.items ?? [];
+  const auditPage = auditData?.page ?? page;
+  const auditTotalPages = auditData?.total_pages ?? 1;
 
   return (
     <div className="space-y-4">
@@ -543,36 +442,27 @@ function AuditLogTab() {
         <span>Immutable audit trail &mdash; ISO 27001 A.8.15 compliant</span>
       </div>
 
-      {auditLogQuery.isLoading ? (
-        <Card>
-          <CardContent className="p-6">
-            <div className="animate-pulse space-y-4">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="flex gap-4">
-                  <div className="h-4 w-1/6 rounded bg-muted" />
-                  <div className="h-4 w-1/6 rounded bg-muted" />
-                  <div className="h-4 w-1/6 rounded bg-muted" />
-                  <div className="h-4 w-1/4 rounded bg-muted" />
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : auditLogQuery.error ? (
-        <Card>
-          <CardContent className="flex items-center gap-2 p-6 text-destructive">
-            <AlertCircle className="h-5 w-5" />
-            <span>Failed to load audit log.</span>
-          </CardContent>
-        </Card>
-      ) : !auditData?.items?.length ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-            <ScrollText className="h-12 w-12 text-muted-foreground/50" />
-            <h3 className="mt-4 text-lg font-semibold">No audit entries</h3>
-          </CardContent>
-        </Card>
-      ) : (
+      {Boolean(auditLogQuery.error) && Boolean(auditLogQuery.data) && (
+        <StaleDataNotice
+          isRefreshing={auditLogQuery.isFetching}
+          lastUpdatedAt={auditLogQuery.dataUpdatedAt}
+          onRefresh={() => void auditLogQuery.refetch()}
+        />
+      )}
+
+      <ResourceBoundary
+        isEmpty={auditEntries.length === 0}
+        isError={Boolean(auditLogQuery.error) && !auditLogQuery.data}
+        isLoading={auditLogQuery.isLoading}
+        loadingLayout="table"
+        loadingTitle="Loading audit log"
+        emptyTitle="No audit entries"
+        emptyDescription="Recorded administrative activity will appear in this immutable trail."
+        errorTitle="Audit log could not be loaded"
+        errorDescription="The service did not return audit history. Retry without leaving settings."
+        onRetry={() => void auditLogQuery.refetch()}
+        retrying={auditLogQuery.isFetching}
+      >
         <Card>
           <CardContent className="pt-6">
             <div className="overflow-x-auto">
@@ -588,7 +478,7 @@ function AuditLogTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {auditData.items.map((entry) => {
+                  {auditEntries.map((entry) => {
                     const actionBase = entry.action.split('.')[0] ?? entry.action;
                     return (
                       <tr key={entry.id} className="border-b last:border-0 hover:bg-muted/50">
@@ -619,10 +509,10 @@ function AuditLogTab() {
               </table>
             </div>
 
-            {auditData.total_pages > 1 && (
+            {auditTotalPages > 1 && (
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Page {auditData.page} of {auditData.total_pages}
+                  Page {auditPage} of {auditTotalPages}
                 </p>
                 <div className="flex gap-2">
                   <Button
@@ -638,7 +528,7 @@ function AuditLogTab() {
                     variant="outline"
                     size="sm"
                     onClick={() => setPage((p) => p + 1)}
-                    disabled={page >= auditData.total_pages}
+                    disabled={page >= auditTotalPages}
                   >
                     Next
                     <ChevronRight className="h-4 w-4" />
@@ -648,7 +538,7 @@ function AuditLogTab() {
             )}
           </CardContent>
         </Card>
-      )}
+      </ResourceBoundary>
     </div>
   );
 }
@@ -673,7 +563,7 @@ export default function SettingsPage() {
 
       {/* Tabs */}
       <Tabs defaultValue={defaultTab} className="space-y-6">
-        <TabsList>
+        <TabsList className="h-auto max-w-full flex-wrap justify-start">
           <TabsTrigger value="organisation" className="gap-2">
             <Building2 className="h-4 w-4" />
             Organisation
@@ -685,6 +575,14 @@ export default function SettingsPage() {
           <TabsTrigger value="roles" className="gap-2">
             <ShieldCheck className="h-4 w-4" />
             Roles
+          </TabsTrigger>
+          <TabsTrigger value="capabilities" className="gap-2">
+            <Gauge className="h-4 w-4" />
+            Capabilities
+          </TabsTrigger>
+          <TabsTrigger value="diagnostics" className="gap-2">
+            <Stethoscope className="h-4 w-4" />
+            Diagnostics
           </TabsTrigger>
           <TabsTrigger value="audit-log" className="gap-2">
             <ScrollText className="h-4 w-4" />
@@ -702,6 +600,14 @@ export default function SettingsPage() {
 
         <TabsContent value="roles">
           <RolesTab />
+        </TabsContent>
+
+        <TabsContent value="capabilities">
+          <CapabilitiesTab />
+        </TabsContent>
+
+        <TabsContent value="diagnostics">
+          <DiagnosticsTab />
         </TabsContent>
 
         <TabsContent value="audit-log">

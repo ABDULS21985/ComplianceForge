@@ -1,56 +1,53 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import Link from "next/link";
-import { ArrowLeft, Loader2, CheckCircle2 } from "lucide-react";
+import * as React from 'react';
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react';
 import {
-  forgotPasswordSchema,
-  type ForgotPasswordFormValues,
-} from "@/lib/validations";
-import { ROUTES } from "@/lib/routes";
+  organizationIdentitySchema,
+  type OrganizationIdentityValues,
+} from '@/lib/identity-validation';
+import api from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { formatApiError } from '@/lib/enterprise-settings';
+import { Input } from '@/components/ui/input';
+import Link from 'next/link';
+import { ROUTES } from '@/lib/routes';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 export default function ForgotPasswordPage() {
-  const [submitted, setSubmitted] = useState(false);
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<ForgotPasswordFormValues>({
-    resolver: zodResolver(forgotPasswordSchema),
-    defaultValues: { email: "" },
+  const [submitted, setSubmitted] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const form = useForm<OrganizationIdentityValues>({
+    resolver: zodResolver(organizationIdentitySchema),
+    defaultValues: { email: '', organization_id: '' },
   });
 
-  async function onSubmit(_values: ForgotPasswordFormValues) {
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setSubmitted(true);
+  async function submit(values: OrganizationIdentityValues) {
+    setError('');
+    try {
+      await api.auth.forgotPassword(values);
+      setSubmitted(true);
+    } catch (caught) {
+      setError(formatApiError(caught, 'Password-reset delivery is temporarily unavailable.'));
+    }
   }
 
   if (submitted) {
     return (
       <div className="space-y-6 text-center">
-        <div className="flex justify-center">
-          <CheckCircle2 className="h-12 w-12 text-green-500" />
-        </div>
+        <CheckCircle2 aria-hidden="true" className="mx-auto h-12 w-12 text-primary" />
         <div className="space-y-2">
-          <h2 className="text-lg font-semibold">Check your email</h2>
+          <h1 className="text-lg font-semibold">Check your email</h1>
           <p className="text-sm text-muted-foreground">
-            If an account exists with that email, we&apos;ve sent password reset
-            instructions.
+            If the account is eligible, password-reset instructions have been queued. This neutral
+            response protects account privacy.
           </p>
         </div>
-        <Link href={ROUTES.auth.login}>
-          <Button variant="outline" className="w-full">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to login
-          </Button>
-        </Link>
+        <Button asChild variant="outline" className="w-full">
+          <Link href={ROUTES.auth.login}><ArrowLeft aria-hidden="true" className="mr-2 h-4 w-4" />Back to sign in</Link>
+        </Button>
       </div>
     );
   }
@@ -58,45 +55,33 @@ export default function ForgotPasswordPage() {
   return (
     <div className="space-y-6">
       <div className="space-y-2 text-center">
-        <h2 className="text-lg font-semibold">Reset your password</h2>
+        <h1 className="text-lg font-semibold">Reset your password</h1>
         <p className="text-sm text-muted-foreground">
-          Enter your email address and we&apos;ll send you a link to reset your
-          password.
+          Enter the organization ID and account email supplied by your administrator.
         </p>
       </div>
-
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <div className="space-y-2">
-          <label htmlFor="email" className="text-sm font-medium">
-            Email
-          </label>
-          <Input
-            id="email"
-            type="email"
-            placeholder="name@company.com"
-            autoComplete="email"
-            {...register("email")}
-          />
-          {errors.email && (
-            <p className="text-xs text-destructive">{errors.email.message}</p>
-          )}
-        </div>
-
-        <Button type="submit" className="w-full" disabled={isSubmitting}>
-          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+      {error && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
+      <form className="space-y-4" onSubmit={form.handleSubmit(submit)} noValidate>
+        <Field label="Organization ID" error={form.formState.errors.organization_id?.message}>
+          <Input autoComplete="organization" spellCheck={false} {...form.register('organization_id')} />
+        </Field>
+        <Field label="Email address" error={form.formState.errors.email?.message}>
+          <Input type="email" autoComplete="email" {...form.register('email')} />
+        </Field>
+        <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting && <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />}
           Send reset link
         </Button>
       </form>
-
       <div className="text-center">
-        <Link
-          href={ROUTES.auth.login}
-          className="inline-flex items-center text-sm text-primary hover:underline"
-        >
-          <ArrowLeft className="mr-1 h-3 w-3" />
-          Back to login
+        <Link href={ROUTES.auth.login} className="inline-flex items-center text-sm text-primary hover:underline">
+          <ArrowLeft aria-hidden="true" className="mr-1 h-3 w-3" />Back to sign in
         </Link>
       </div>
     </div>
   );
+}
+
+function Field({ children, error, label }: { children: React.ReactNode; error?: string; label: string }) {
+  return <label className="block space-y-2"><span className="text-sm font-medium">{label}</span>{children}{error && <span role="alert" className="block text-xs text-destructive">{error}</span>}</label>;
 }

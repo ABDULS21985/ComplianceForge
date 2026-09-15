@@ -94,6 +94,9 @@ func (r *accessAdministrationRepo) createRole(ctx context.Context, organizationI
 	querier := database.QuerierFromContext(ctx, r.pool)
 	var created *models.ManagedRole
 	err := withTransaction(ctx, querier, func(tx pgx.Tx) error {
+		if err := governanceLock(ctx, tx, organizationID, actorID); err != nil {
+			return err
+		}
 		var roleID string
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO roles
@@ -202,6 +205,9 @@ func (r *accessAdministrationRepo) UpdateRole(ctx context.Context, organizationI
 	querier := database.QuerierFromContext(ctx, r.pool)
 	var updated *models.ManagedRole
 	err := withTransaction(ctx, querier, func(tx pgx.Tx) error {
+		if err := governanceLock(ctx, tx, organizationID, actorID); err != nil {
+			return err
+		}
 		before, err := lockManagedCustomRole(ctx, tx, organizationID, roleID)
 		if err != nil {
 			return err
@@ -247,6 +253,9 @@ func (r *accessAdministrationRepo) UpdateRole(ctx context.Context, organizationI
 func (r *accessAdministrationRepo) DeleteRole(ctx context.Context, organizationID, roleID, actorID string, expectedVersion int64) error {
 	querier := database.QuerierFromContext(ctx, r.pool)
 	return withTransaction(ctx, querier, func(tx pgx.Tx) error {
+		if err := governanceLock(ctx, tx, organizationID, actorID); err != nil {
+			return err
+		}
 		before, err := lockManagedCustomRole(ctx, tx, organizationID, roleID)
 		if err != nil {
 			return err
@@ -322,7 +331,8 @@ func (r *accessAdministrationRepo) ListAssignments(ctx context.Context, organiza
 		return nil, err
 	}
 	rows, err := database.QuerierFromContext(ctx, r.pool).Query(ctx, `
-		SELECT ur.role_id,ur.user_id,u.email,COALESCE(u.first_name,''),COALESCE(u.last_name,''),ur.assigned_by,ur.assigned_at
+		SELECT ur.assignment_id,ur.role_id,ur.user_id,u.email,COALESCE(u.first_name,''),COALESCE(u.last_name,''),ur.assigned_by,ur.assigned_at,
+		NULLIF(ur.valid_from,'-infinity'::timestamptz),ur.expires_at,ur.version
 		FROM user_roles ur JOIN users u ON u.id=ur.user_id AND u.organization_id=ur.organization_id
 		WHERE ur.organization_id=$1::uuid AND ur.role_id=$2::uuid AND u.deleted_at IS NULL
 		ORDER BY lower(u.email),u.id`, organizationID, roleID)
@@ -333,7 +343,8 @@ func (r *accessAdministrationRepo) ListAssignments(ctx context.Context, organiza
 	items := make([]models.ManagedRoleAssignment, 0)
 	for rows.Next() {
 		var item models.ManagedRoleAssignment
-		if err := rows.Scan(&item.RoleID, &item.UserID, &item.Email, &item.FirstName, &item.LastName, &item.AssignedBy, &item.AssignedAt); err != nil {
+		if err := rows.Scan(&item.AssignmentID, &item.RoleID, &item.UserID, &item.Email, &item.FirstName, &item.LastName, &item.AssignedBy, &item.AssignedAt,
+			&item.ValidFrom, &item.ExpiresAt, &item.Version); err != nil {
 			return nil, fmt.Errorf("scan role assignment: %w", err)
 		}
 		items = append(items, item)
@@ -347,6 +358,9 @@ func (r *accessAdministrationRepo) ListAssignments(ctx context.Context, organiza
 func (r *accessAdministrationRepo) AssignRole(ctx context.Context, organizationID, roleID, actorID string, input models.ManagedRoleAssignmentInput) error {
 	querier := database.QuerierFromContext(ctx, r.pool)
 	return withTransaction(ctx, querier, func(tx pgx.Tx) error {
+		if err := governanceLock(ctx, tx, organizationID, actorID); err != nil {
+			return err
+		}
 		role, err := getManagedRoleWithQuerier(ctx, tx, organizationID, roleID)
 		if err != nil {
 			return err
@@ -354,8 +368,16 @@ func (r *accessAdministrationRepo) AssignRole(ctx context.Context, organizationI
 		if err := ensureManagedRoleUser(ctx, tx, organizationID, input.UserID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO user_roles(user_id,role_id,organization_id,assigned_by)
-			VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, input.UserID, roleID, organizationID, actorID); err != nil {
+		if input.ExpiresAt != nil {
+			if actorID == input.UserID {
+				return ErrAccessGovernanceSeparation
+			}
+			if err := ensureIndependentPermanentAdmin(ctx, tx, organizationID, roleID, "00000000-0000-0000-0000-000000000000", input.UserID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO user_roles(user_id,role_id,organization_id,assigned_by,valid_from,expires_at,assignment_reason,window_approved_by)
+			VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,COALESCE($5::timestamptz,'-infinity'::timestamptz),$6,$7,CASE WHEN $6::timestamptz IS NOT NULL THEN $4::uuid ELSE NULL END)`, input.UserID, roleID, organizationID, actorID, input.ValidFrom, input.ExpiresAt, input.Reason); err != nil {
 			return classifyManagedRoleAssignment(err)
 		}
 		return r.recordManagedRoleEvent(ctx, tx, organizationID, role, actorID, &input.UserID, "assigned", input.Reason, nil,
@@ -366,6 +388,9 @@ func (r *accessAdministrationRepo) AssignRole(ctx context.Context, organizationI
 func (r *accessAdministrationRepo) UnassignRole(ctx context.Context, organizationID, roleID, userID, actorID string, input models.ManagedRoleUnassignmentInput) error {
 	querier := database.QuerierFromContext(ctx, r.pool)
 	return withTransaction(ctx, querier, func(tx pgx.Tx) error {
+		if err := governanceLock(ctx, tx, organizationID, actorID); err != nil {
+			return err
+		}
 		role, err := getManagedRoleWithQuerier(ctx, tx, organizationID, roleID)
 		if err != nil {
 			return err
@@ -513,7 +538,7 @@ func removingAdministrativeGrantWouldLockOut(ctx context.Context, querier databa
 		EXISTS (
 			SELECT 1
 			FROM users u
-			JOIN user_roles ur ON ur.user_id=u.id AND ur.organization_id=u.organization_id
+			JOIN effective_user_roles ur ON ur.user_id=u.id AND ur.organization_id=u.organization_id
 			WHERE u.organization_id=$1::uuid AND u.status='active' AND u.deleted_at IS NULL
 			  AND ur.role_id=$2::uuid AND ($3='' OR ur.user_id=$3::uuid)
 		),
@@ -524,12 +549,15 @@ func removingAdministrativeGrantWouldLockOut(ctx context.Context, querier databa
 			  AND (
 				u.is_super_admin
 				OR EXISTS (
-					SELECT 1 FROM user_roles ur
+					SELECT 1 FROM effective_user_roles ur
 					JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
 					JOIN role_permissions rp ON rp.role_id=role.id
 					JOIN permissions permission ON permission.id=rp.permission_id
 					WHERE ur.user_id=u.id AND ur.organization_id=u.organization_id
 					  AND permission.resource='settings' AND permission.action::text='configure'
+					  AND ur.expires_at IS NULL
+					  AND NOT EXISTS(SELECT 1 FROM access_sod_rules rule WHERE rule.organization_id=ur.organization_id
+					    AND rule.enabled AND ur.role_id IN(rule.role_a_id,rule.role_b_id))
 					  AND NOT (ur.role_id=$2::uuid AND ($3='' OR ur.user_id=$3::uuid))
 				)
 			  )

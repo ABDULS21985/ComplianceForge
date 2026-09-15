@@ -1,8 +1,5 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
-import type { ReactNode } from 'react';
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +13,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button, type ButtonProps } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Loader2 } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 interface ConfirmActionProps {
   actionLabel: string;

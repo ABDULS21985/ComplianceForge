@@ -1,6 +1,5 @@
-import React from 'react';
-
 import { cn, getStatusColor } from '@/lib/utils';
+import React from 'react';
 
 interface BadgeStatusProps {
   status: string;

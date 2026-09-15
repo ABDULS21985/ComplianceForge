@@ -105,11 +105,16 @@ func Load(ctx context.Context, filename string) (*Contract, error) {
 			if operation.Responses == nil || operation.Responses.Len() == 0 {
 				return nil, fmt.Errorf("%s must declare responses", route)
 			}
-			if err := validateSuccessResponse(route, operation.Responses); err != nil {
+			if err := validateSuccessResponse(route, operation); err != nil {
 				return nil, err
 			}
+			if operation.Deprecated {
+				if err := validateDeprecationHeaders(route, operation.Responses); err != nil {
+					return nil, err
+				}
+			}
 			if len(*operation.Security) > 0 {
-				for _, status := range []string{"401", "403", "429", "500"} {
+				for _, status := range []string{"401", "403", "429", "500", "503"} {
 					if operation.Responses.Value(status) == nil {
 						return nil, fmt.Errorf("%s must document %s error responses", route, status)
 					}
@@ -124,7 +129,26 @@ func Load(ctx context.Context, filename string) (*Contract, error) {
 	return contract, nil
 }
 
-func validateSuccessResponse(route Route, responses *openapi3.Responses) error {
+func validateDeprecationHeaders(route Route, responses *openapi3.Responses) error {
+	for _, status := range responses.Keys() {
+		if !strings.HasPrefix(status, "2") {
+			continue
+		}
+		response := responses.Value(status)
+		if response == nil || response.Value == nil {
+			continue
+		}
+		for _, header := range []string{"Deprecation", "Sunset", "Link"} {
+			if response.Value.Headers == nil || response.Value.Headers[header] == nil {
+				return fmt.Errorf("%s deprecated %s response must document the %s header", route, status, header)
+			}
+		}
+	}
+	return nil
+}
+
+func validateSuccessResponse(route Route, operation *openapi3.Operation) error {
+	responses := operation.Responses
 	for _, status := range responses.Keys() {
 		if !strings.HasPrefix(status, "2") {
 			continue
@@ -136,9 +160,15 @@ func validateSuccessResponse(route Route, responses *openapi3.Responses) error {
 		if status == "204" {
 			return nil
 		}
-		mediaType := response.Value.Content.Get("application/json")
+		responseMediaType := "application/json"
+		if binary, _ := operation.Extensions["x-binary-response"].(bool); binary {
+			responseMediaType = "application/octet-stream"
+		} else if scimProtocol, _ := operation.Extensions["x-scim-protocol"].(bool); scimProtocol {
+			responseMediaType = "application/scim+json"
+		}
+		mediaType := response.Value.Content.Get(responseMediaType)
 		if mediaType == nil || mediaType.Schema == nil {
-			return fmt.Errorf("%s %s response must have an application/json schema", route, status)
+			return fmt.Errorf("%s %s response must have an %s schema", route, status, responseMediaType)
 		}
 		return nil
 	}

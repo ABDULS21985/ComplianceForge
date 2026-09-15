@@ -61,6 +61,7 @@ func TestResolveMigrationSource(t *testing.T) {
 
 func TestDatabaseDSNPrefersEnvironment(t *testing.T) {
 	const want = "postgres://test:test@localhost:5432/test?sslmode=disable"
+	t.Setenv("MIGRATION_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", want)
 	got, err := databaseDSN()
 	if err != nil {
@@ -68,6 +69,19 @@ func TestDatabaseDSNPrefersEnvironment(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("databaseDSN() = %q, want %q", got, want)
+	}
+}
+
+func TestDatabaseDSNPrefersDedicatedMigrationEnvironment(t *testing.T) {
+	const want = "postgres://migrator:secret@localhost:5432/test?sslmode=require"
+	t.Setenv("MIGRATION_DATABASE_URL", want)
+	t.Setenv("DATABASE_URL", "postgres://runtime:must-not-be-used@localhost:5432/test?sslmode=require")
+	got, err := databaseDSN()
+	if err != nil {
+		t.Fatalf("databaseDSN() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("databaseDSN() = %q, want dedicated migration URL %q", got, want)
 	}
 }
 

@@ -14,9 +14,18 @@ const nextConfig = {
       { key: 'X-Content-Type-Options', value: 'nosniff' },
       { key: 'X-Frame-Options', value: 'DENY' },
     ];
+    const oneTimeCredentialHeaders = [
+      { key: 'Cache-Control', value: 'no-store' },
+      { key: 'Referrer-Policy', value: 'no-referrer' },
+      { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+    ];
 
     return [
       { source: '/:path*', headers: baseline },
+      ...['/accept-invitation', '/reset-password', '/verify-email'].map((source) => ({
+        source,
+        headers: oneTimeCredentialHeaders,
+      })),
       {
         source: '/vendor-portal',
         headers: [

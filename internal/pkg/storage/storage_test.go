@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -46,6 +48,38 @@ func TestLocalStorageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLocalStorageVerifiesImmutableObjectDigestAndSize(t *testing.T) {
+	store, err := NewLocalStorageService(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("verified evidence")
+	path, err := store.Upload(context.Background(), "tenant/evidence.bin", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	hash := hex.EncodeToString(digest[:])
+	if err := store.Verify(context.Background(), path, hash, int64(len(payload))); err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	for _, test := range []struct {
+		name string
+		hash string
+		size int64
+	}{
+		{name: "digest mismatch", hash: strings.Repeat("0", 64), size: int64(len(payload))},
+		{name: "size mismatch", hash: hash, size: int64(len(payload) + 1)},
+		{name: "invalid digest", hash: "not-sha256", size: int64(len(payload))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := store.Verify(context.Background(), path, test.hash, test.size); !errors.Is(err, ErrIntegrityMismatch) {
+				t.Fatalf("Verify() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestLocalStorageRejectsPathsOutsideRoot(t *testing.T) {
 	root := t.TempDir()
 	store, err := NewLocalStorageService(root)
@@ -72,6 +106,24 @@ func TestLocalStorageRejectsPathsOutsideRoot(t *testing.T) {
 				t.Fatalf("Delete(%q) error = %v, want ErrInvalidPath", path, err)
 			}
 		})
+	}
+}
+
+func TestLocalStorageNeverOverwritesAnExistingObjectKey(t *testing.T) {
+	store, err := NewLocalStorageService(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := store.Upload(context.Background(), "tenant/immutable.txt", strings.NewReader("original"))
+	if err != nil {
+		t.Fatalf("first Upload() error = %v", err)
+	}
+	if _, err := store.Upload(context.Background(), "tenant/immutable.txt", strings.NewReader("replacement")); err == nil {
+		t.Fatal("second Upload() error = nil")
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil || string(contents) != "original" {
+		t.Fatalf("stored contents=%q error=%v", contents, err)
 	}
 }
 

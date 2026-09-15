@@ -1,6 +1,3 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { afterEach, describe, expect, it } from 'vitest';
-
 import {
   ACCESS_TOKEN_COOKIE,
   CSRF_ERROR_HEADER,
@@ -10,6 +7,7 @@ import {
   DEVELOPMENT_CSRF_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
 } from '@/lib/auth-constants';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   clearSessionCookies,
   csrfErrorResponse,
@@ -17,6 +15,7 @@ import {
   setSessionCookies,
   verifyCsrf,
 } from '@/lib/server/session-security';
+import { NextRequest, NextResponse } from 'next/server';
 
 function csrfRequest(overrides: Record<string, string> = {}) {
   return new NextRequest('https://app.example.test/api/bff/risks', {

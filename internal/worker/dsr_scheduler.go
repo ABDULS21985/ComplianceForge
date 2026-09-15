@@ -7,6 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/complianceforge/platform/internal/database"
 )
 
 // DSRScheduler runs daily to update DSR SLA statuses and emit deadline notifications.
@@ -21,54 +23,68 @@ func NewDSRScheduler(pool *pgxpool.Pool) *DSRScheduler {
 // Run updates SLA status for all active DSR requests and logs any that are at-risk or overdue.
 func (ds *DSRScheduler) Run(ctx context.Context) error {
 	log.Info().Msg("dsr_scheduler: running daily SLA status update")
+	return runForScheduledTenants(ctx, ds.pool, "DSR lifecycle", ds.runForTenant)
+}
 
+func (ds *DSRScheduler) runForTenant(ctx context.Context, organizationID string) error {
 	now := time.Now()
+	querier := database.QuerierFromContext(ctx, ds.pool)
 
 	// Update overdue: response_deadline < today AND status NOT IN completed/rejected/withdrawn
-	tagOverdue, err := ds.pool.Exec(ctx, `
+	tagOverdue, err := querier.Exec(ctx, `
 		UPDATE dsr_requests
 		SET sla_status = 'overdue',
 		    days_remaining = EXTRACT(DAY FROM (
-		        COALESCE(extended_deadline, response_deadline)::timestamp - $1::timestamp
+		        (CASE WHEN status = 'extended' THEN COALESCE(extended_deadline, response_deadline)
+		              ELSE response_deadline END)::timestamp - $1::timestamp
 		    ))::INT
 		WHERE status NOT IN ('completed', 'rejected', 'withdrawn')
 		  AND deleted_at IS NULL
-		  AND COALESCE(extended_deadline, response_deadline) < $1::date
+		  AND (CASE WHEN status = 'extended' THEN COALESCE(extended_deadline, response_deadline)
+		            ELSE response_deadline END) < $1::date
 		  AND sla_status != 'overdue'
-	`, now)
+		  AND organization_id = $2::uuid
+	`, now, organizationID)
 	if err != nil {
 		return fmt.Errorf("updating overdue DSRs: %w", err)
 	}
 
 	// Update at_risk: deadline within 7 days
-	tagAtRisk, err := ds.pool.Exec(ctx, `
+	tagAtRisk, err := querier.Exec(ctx, `
 		UPDATE dsr_requests
 		SET sla_status = 'at_risk',
 		    days_remaining = EXTRACT(DAY FROM (
-		        COALESCE(extended_deadline, response_deadline)::timestamp - $1::timestamp
+		        (CASE WHEN status = 'extended' THEN COALESCE(extended_deadline, response_deadline)
+		              ELSE response_deadline END)::timestamp - $1::timestamp
 		    ))::INT
 		WHERE status NOT IN ('completed', 'rejected', 'withdrawn')
 		  AND deleted_at IS NULL
-		  AND COALESCE(extended_deadline, response_deadline) >= $1::date
-		  AND COALESCE(extended_deadline, response_deadline) <= ($1::date + INTERVAL '7 days')
-		  AND sla_status NOT IN ('at_risk', 'overdue')
-	`, now)
+		  AND (CASE WHEN status = 'extended' THEN COALESCE(extended_deadline, response_deadline)
+		            ELSE response_deadline END) >= $1::date
+		  AND (CASE WHEN status = 'extended' THEN COALESCE(extended_deadline, response_deadline)
+		            ELSE response_deadline END) <= ($1::date + INTERVAL '7 days')
+		  AND sla_status != 'at_risk'
+		  AND organization_id = $2::uuid
+	`, now, organizationID)
 	if err != nil {
 		return fmt.Errorf("updating at-risk DSRs: %w", err)
 	}
 
 	// Update on_track: everything else still active
-	tagOnTrack, err := ds.pool.Exec(ctx, `
+	tagOnTrack, err := querier.Exec(ctx, `
 		UPDATE dsr_requests
 		SET sla_status = 'on_track',
 		    days_remaining = EXTRACT(DAY FROM (
-		        COALESCE(extended_deadline, response_deadline)::timestamp - $1::timestamp
+		        (CASE WHEN status = 'extended' THEN COALESCE(extended_deadline, response_deadline)
+		              ELSE response_deadline END)::timestamp - $1::timestamp
 		    ))::INT
 		WHERE status NOT IN ('completed', 'rejected', 'withdrawn')
 		  AND deleted_at IS NULL
-		  AND COALESCE(extended_deadline, response_deadline) > ($1::date + INTERVAL '7 days')
+		  AND (CASE WHEN status = 'extended' THEN COALESCE(extended_deadline, response_deadline)
+		            ELSE response_deadline END) > ($1::date + INTERVAL '7 days')
 		  AND sla_status != 'on_track'
-	`, now)
+		  AND organization_id = $2::uuid
+	`, now, organizationID)
 	if err != nil {
 		return fmt.Errorf("updating on-track DSRs: %w", err)
 	}

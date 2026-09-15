@@ -68,18 +68,32 @@ type ManagedRoleImpact struct {
 }
 
 type ManagedRoleAssignment struct {
-	RoleID     string    `json:"role_id"`
-	UserID     string    `json:"user_id"`
-	Email      string    `json:"email"`
-	FirstName  string    `json:"first_name"`
-	LastName   string    `json:"last_name"`
-	AssignedBy *string   `json:"assigned_by,omitempty"`
-	AssignedAt time.Time `json:"assigned_at"`
+	AssignmentID string     `json:"assignment_id"`
+	RoleID       string     `json:"role_id"`
+	UserID       string     `json:"user_id"`
+	Email        string     `json:"email"`
+	FirstName    string     `json:"first_name"`
+	LastName     string     `json:"last_name"`
+	AssignedBy   *string    `json:"assigned_by,omitempty"`
+	AssignedAt   time.Time  `json:"assigned_at"`
+	ValidFrom    *time.Time `json:"valid_from,omitempty"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	Version      int64      `json:"version"`
 }
 
 type ManagedRoleAssignmentInput struct {
-	UserID string `json:"user_id"`
-	Reason string `json:"reason"`
+	UserID    string     `json:"user_id"`
+	Reason    string     `json:"reason"`
+	ValidFrom *time.Time `json:"valid_from,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+type ManagedRoleWindowInput struct {
+	AssignmentID    string    `json:"assignment_id"`
+	ValidFrom       time.Time `json:"valid_from"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	ExpectedVersion int64     `json:"expected_version"`
+	Reason          string    `json:"reason"`
 }
 
 type ManagedRoleUnassignmentInput struct {

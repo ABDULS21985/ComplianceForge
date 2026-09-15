@@ -44,7 +44,7 @@ func (h *ReportHandler) GenerateReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, run)
+	writeClassifiedJSON(w, r, http.StatusAccepted, "reports", run)
 }
 
 // GetRunStatus handles GET /reports/status/{id}.
@@ -62,7 +62,7 @@ func (h *ReportHandler) GetRunStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, run)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", run)
 }
 
 // DownloadReport handles GET /reports/download/{id}.
@@ -80,7 +80,7 @@ func (h *ReportHandler) DownloadReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeAttachment(w, file.FileName, file.ContentType, file.Data)
+	writeClassifiedAttachment(w, r, "reports", file.FileName, file.ContentType, file.Data)
 }
 
 // ListDefinitions handles GET /reports/definitions.
@@ -99,7 +99,7 @@ func (h *ReportHandler) ListDefinitions(w http.ResponseWriter, r *http.Request) 
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": defs,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -131,7 +131,7 @@ func (h *ReportHandler) CreateDefinition(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, def)
+	writeClassifiedJSON(w, r, http.StatusCreated, "reports", def)
 }
 
 // UpdateDefinition handles PUT /reports/definitions/{id}.
@@ -156,7 +156,7 @@ func (h *ReportHandler) UpdateDefinition(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, def)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", def)
 }
 
 // DeleteDefinition handles DELETE /reports/definitions/{id}.
@@ -192,7 +192,7 @@ func (h *ReportHandler) GenerateFromDefinition(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, run)
+	writeClassifiedJSON(w, r, http.StatusAccepted, "reports", run)
 }
 
 // ListSchedules handles GET /reports/schedules.
@@ -211,7 +211,7 @@ func (h *ReportHandler) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": schedules,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -243,7 +243,7 @@ func (h *ReportHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, sched)
+	writeClassifiedJSON(w, r, http.StatusCreated, "reports", sched)
 }
 
 // UpdateSchedule handles PUT /reports/schedules/{id}.
@@ -268,7 +268,7 @@ func (h *ReportHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, sched)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", sched)
 }
 
 // DeleteSchedule handles DELETE /reports/schedules/{id}.
@@ -304,7 +304,7 @@ func (h *ReportHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": runs,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,

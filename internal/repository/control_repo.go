@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -12,6 +14,8 @@ import (
 	"github.com/complianceforge/platform/internal/models"
 )
 
+var ErrEvidenceReviewConflict = errors.New("evidence review request conflicts with a prior review")
+
 type ControlRepository interface {
 	ListByFramework(ctx context.Context, orgID, frameworkID string, pagination models.PaginationRequest) ([]models.Control, int, error)
 	ListAdopted(ctx context.Context, orgID, frameworkID string, pagination models.PaginationRequest) ([]models.Control, int, error)
@@ -19,6 +23,9 @@ type ControlRepository interface {
 	UpdateImplementation(ctx context.Context, orgID, controlID string, patch models.ControlImplementationPatch) (*models.ControlImplementation, error)
 	AttachEvidence(ctx context.Context, orgID, userID, controlID string, input models.AttachControlEvidenceInput) (*models.ControlEvidence, error)
 	ListEvidence(ctx context.Context, orgID, controlID string, pagination models.PaginationRequest) ([]models.ControlEvidence, int, error)
+	GetEvidence(ctx context.Context, orgID, controlID, evidenceID string) (*models.ControlEvidence, error)
+	ReviewEvidence(ctx context.Context, orgID, userID, controlID, evidenceID string, input models.ReviewControlEvidenceInput) (*models.ControlEvidence, error)
+	SupersedeEvidence(ctx context.Context, orgID, userID, controlID, evidenceID string, input models.AttachControlEvidenceInput) (*models.ControlEvidence, error)
 }
 
 type controlRepo struct{ pool *pgxpool.Pool }
@@ -153,6 +160,80 @@ func (r *controlRepo) UpdateImplementation(ctx context.Context, orgID, controlID
 
 func (r *controlRepo) AttachEvidence(ctx context.Context, orgID, userID, controlID string, input models.AttachControlEvidenceInput) (*models.ControlEvidence, error) {
 	q := database.QuerierFromContext(ctx, r.pool)
+	input.SupersedesEvidenceID = nil
+	input.VersionReason = "Initial evidence version"
+	var evidence *models.ControlEvidence
+	err := withTransaction(ctx, q, func(tx pgx.Tx) error {
+		if input.FileSizeBytes != nil && *input.FileSizeBytes > 0 {
+			if err := EnsureEntitlementCapacity(ctx, tx, orgID, "storage_bytes", *input.FileSizeBytes); err != nil {
+				return err
+			}
+		}
+		var err error
+		evidence, err = insertControlEvidence(ctx, tx, orgID, userID, controlID, input)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("attaching control evidence: %w", err)
+	}
+	return evidence, nil
+}
+
+func (r *controlRepo) SupersedeEvidence(
+	ctx context.Context, orgID, userID, controlID, evidenceID string, input models.AttachControlEvidenceInput,
+) (*models.ControlEvidence, error) {
+	q := database.QuerierFromContext(ctx, r.pool)
+	input.SupersedesEvidenceID = &evidenceID
+	var evidence *models.ControlEvidence
+	err := withTransaction(ctx, q, func(tx pgx.Tx) error {
+		if input.FileSizeBytes != nil && *input.FileSizeBytes > 0 {
+			if err := EnsureEntitlementCapacity(ctx, tx, orgID, "storage_bytes", *input.FileSizeBytes); err != nil {
+				return err
+			}
+		}
+		item, err := insertControlEvidence(ctx, tx, orgID, userID, controlID, input)
+		if err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE control_evidence AS evidence
+			SET lifecycle_status=CASE WHEN lifecycle_status='expired' THEN 'expired' ELSE 'superseded' END,
+				is_current=FALSE,superseded_by_evidence_id=$4::uuid,
+				superseded_at=statement_timestamp(),updated_at=statement_timestamp()
+			FROM control_implementations AS implementation
+			WHERE evidence.organization_id=$1::uuid AND evidence.id=$3::uuid
+			  AND implementation.id=evidence.control_implementation_id
+			  AND implementation.organization_id=$1::uuid
+			  AND implementation.framework_control_id=$2::uuid
+			  AND evidence.deleted_at IS NULL AND implementation.deleted_at IS NULL
+			  AND evidence.superseded_by_evidence_id IS NULL`, orgID, controlID, evidenceID, item.ID)
+		if err != nil {
+			return fmt.Errorf("linking superseded evidence: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			return pgx.ErrNoRows
+		}
+		tag, err = tx.Exec(ctx, `UPDATE control_evidence
+			SET is_current=TRUE,updated_at=statement_timestamp()
+			WHERE organization_id=$1::uuid AND id=$2::uuid
+			  AND lifecycle_status='active' AND NOT is_current`, orgID, item.ID)
+		if err != nil {
+			return fmt.Errorf("activating replacement evidence: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			return errors.New("replacement evidence could not be activated")
+		}
+		evidence, err = getLifecycleEvidence(ctx, tx, orgID, controlID, item.ID)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("superseding control evidence: %w", err)
+	}
+	return evidence, nil
+}
+
+func insertControlEvidence(
+	ctx context.Context, tx pgx.Tx, orgID, userID, controlID string, input models.AttachControlEvidenceInput,
+) (*models.ControlEvidence, error) {
 	method := input.CollectionMethod
 	if method == "" {
 		method = "manual_upload"
@@ -161,52 +242,36 @@ func (r *controlRepo) AttachEvidence(ctx context.Context, orgID, userID, control
 	if len(metadata) == 0 {
 		metadata = []byte(`{}`)
 	}
-	var evidence *models.ControlEvidence
-	err := withTransaction(ctx, q, func(tx pgx.Tx) error {
-		if input.FileSizeBytes != nil && *input.FileSizeBytes > 0 {
-			if err := EnsureEntitlementCapacity(ctx, tx, orgID, "storage_bytes", *input.FileSizeBytes); err != nil {
-				return err
-			}
-		}
-		item := &models.ControlEvidence{}
-		var raw []byte
-		if err := tx.QueryRow(ctx, `INSERT INTO control_evidence (
-			organization_id, control_implementation_id, title, description,
-			evidence_type, file_name, file_size_bytes, mime_type, file_hash,
-			collection_method, collected_by, valid_from, valid_until, metadata)
-		SELECT $1::uuid, ci.id, $3, $4, $5, $6, $7, $8, $9, $10,
-			CASE WHEN EXISTS (SELECT 1 FROM users u WHERE u.id=$11::uuid AND u.organization_id=$1::uuid AND u.deleted_at IS NULL) THEN $11::uuid ELSE NULL END,
-			$12::date, $13::date, $14::jsonb
-		FROM control_implementations ci
-		JOIN framework_controls fc ON fc.id = ci.framework_control_id
-		JOIN compliance_frameworks cf ON cf.id = fc.framework_id
-		WHERE ci.framework_control_id = $2::uuid AND ci.organization_id = $1::uuid
-		  AND ci.deleted_at IS NULL AND cf.deleted_at IS NULL
-		  AND (cf.organization_id IS NULL OR cf.organization_id = $1::uuid)
-		RETURNING id, organization_id, control_implementation_id, title, description,
-			evidence_type, file_name, file_size_bytes, mime_type, file_hash,
-			collection_method, collected_at, collected_by, valid_from, valid_until,
-			is_current, review_status, metadata, created_at, updated_at, deleted_at`,
-			orgID, controlID, input.Title, input.Description, input.EvidenceType,
-			input.FileName, input.FileSizeBytes, input.MIMEType, input.FileHash, method,
-			userID, input.ValidFrom, input.ValidUntil, metadata).Scan(
-			&item.ID, &item.OrganizationID, &item.ControlImplementationID,
-			&item.Title, &item.Description, &item.EvidenceType,
-			&item.FileName, &item.FileSizeBytes, &item.MIMEType,
-			&item.FileHash, &item.CollectionMethod, &item.CollectedAt,
-			&item.CollectedBy, &item.ValidFrom, &item.ValidUntil,
-			&item.IsCurrent, &item.ReviewStatus, &raw, &item.CreatedAt,
-			&item.UpdatedAt, &item.DeletedAt); err != nil {
-			return err
-		}
-		item.Metadata = raw
-		evidence = item
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("attaching control evidence: %w", err)
+	supersedes := ""
+	if input.SupersedesEvidenceID != nil {
+		supersedes = *input.SupersedesEvidenceID
 	}
-	return evidence, nil
+	versionReason := input.VersionReason
+	if versionReason == "" {
+		versionReason = "Initial evidence version"
+	}
+	return scanLifecycleEvidence(tx.QueryRow(ctx, `INSERT INTO control_evidence AS ce (
+		organization_id,control_implementation_id,title,description,evidence_type,
+		file_path,file_name,file_size_bytes,mime_type,file_hash,collection_method,
+		collected_by,valid_from,valid_until,metadata,supersedes_evidence_id,version_reason)
+	SELECT $1::uuid,implementation.id,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+		CASE WHEN EXISTS (
+			SELECT 1 FROM users AS account WHERE account.id=$12::uuid
+			  AND account.organization_id=$1::uuid AND account.deleted_at IS NULL
+		) THEN $12::uuid ELSE NULL END,
+		$13::date,$14::date,$15::jsonb,NULLIF($16::text,'')::uuid,$17
+	FROM control_implementations AS implementation
+	JOIN framework_controls AS control ON control.id=implementation.framework_control_id
+	JOIN compliance_frameworks AS framework ON framework.id=control.framework_id
+	WHERE implementation.framework_control_id=$2::uuid
+	  AND implementation.organization_id=$1::uuid
+	  AND implementation.deleted_at IS NULL AND framework.deleted_at IS NULL
+	  AND (framework.organization_id IS NULL OR framework.organization_id=$1::uuid)
+	RETURNING `+evidenceLifecycleColumns,
+		orgID, controlID, input.Title, input.Description, input.EvidenceType,
+		input.ObjectKey, input.FileName, input.FileSizeBytes, input.MIMEType,
+		input.FileHash, method, userID, input.ValidFrom, input.ValidUntil,
+		metadata, supersedes, versionReason))
 }
 
 func (r *controlRepo) ListEvidence(ctx context.Context, orgID, controlID string, p models.PaginationRequest) ([]models.ControlEvidence, int, error) {
@@ -218,11 +283,7 @@ func (r *controlRepo) ListEvidence(ctx context.Context, orgID, controlID string,
 		JOIN control_implementations ci ON ci.id=ce.control_implementation_id WHERE `+filter, orgID, controlID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("counting control evidence: %w", err)
 	}
-	rows, err := q.Query(ctx, `SELECT ce.id, ce.organization_id, ce.control_implementation_id,
-		ce.title, ce.description, ce.evidence_type, ce.file_name, ce.file_size_bytes,
-		ce.mime_type, ce.file_hash, ce.collection_method, ce.collected_at,
-		ce.collected_by, ce.valid_from, ce.valid_until, ce.is_current,
-		ce.review_status, ce.metadata, ce.created_at, ce.updated_at, ce.deleted_at
+	rows, err := q.Query(ctx, `SELECT `+evidenceLifecycleColumns+`
 		FROM control_evidence ce JOIN control_implementations ci ON ci.id=ce.control_implementation_id
 		WHERE `+filter+` ORDER BY ce.collected_at DESC LIMIT $3 OFFSET $4`, orgID, controlID, p.PageSize, (p.Page-1)*p.PageSize)
 	if err != nil {
@@ -231,20 +292,57 @@ func (r *controlRepo) ListEvidence(ctx context.Context, orgID, controlID string,
 	defer rows.Close()
 	items := make([]models.ControlEvidence, 0)
 	for rows.Next() {
-		var item models.ControlEvidence
-		var metadata []byte
-		if err := rows.Scan(&item.ID, &item.OrganizationID, &item.ControlImplementationID,
-			&item.Title, &item.Description, &item.EvidenceType, &item.FileName,
-			&item.FileSizeBytes, &item.MIMEType, &item.FileHash, &item.CollectionMethod,
-			&item.CollectedAt, &item.CollectedBy, &item.ValidFrom, &item.ValidUntil,
-			&item.IsCurrent, &item.ReviewStatus, &metadata, &item.CreatedAt,
-			&item.UpdatedAt, &item.DeletedAt); err != nil {
+		item, err := scanLifecycleEvidence(rows)
+		if err != nil {
 			return nil, 0, err
 		}
-		item.Metadata = metadata
-		items = append(items, item)
+		items = append(items, *item)
 	}
 	return items, total, rows.Err()
+}
+
+func (r *controlRepo) GetEvidence(ctx context.Context, orgID, controlID, evidenceID string) (*models.ControlEvidence, error) {
+	q := database.QuerierFromContext(ctx, r.pool)
+	item, err := getLifecycleEvidence(ctx, q, orgID, controlID, evidenceID)
+	if err != nil {
+		return nil, fmt.Errorf("getting control evidence: %w", err)
+	}
+	return item, nil
+}
+
+func (r *controlRepo) ReviewEvidence(ctx context.Context, orgID, userID, controlID, evidenceID string, input models.ReviewControlEvidenceInput) (*models.ControlEvidence, error) {
+	q := database.QuerierFromContext(ctx, r.pool)
+	requestID := strings.TrimSpace(input.RequestID)
+	var evidence *models.ControlEvidence
+	err := withTransaction(ctx, q, func(tx pgx.Tx) error {
+		var reviewID string
+		err := tx.QueryRow(ctx, `SELECT review_id FROM submit_evidence_review(
+			$1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,NULLIF($7::text,''))`,
+			orgID, controlID, evidenceID, userID, input.Status,
+			input.Comment, requestID).Scan(&reviewID)
+		if errors.Is(err, pgx.ErrNoRows) && requestID != "" {
+			var sameRequest bool
+			err = tx.QueryRow(ctx, `SELECT reviewer_id=$3::uuid
+				AND decision=lower(BTRIM($4::text))
+				AND comment IS NOT DISTINCT FROM NULLIF(BTRIM($5::text),'')
+				FROM evidence_reviews
+				WHERE organization_id=$1::uuid AND evidence_id=$2::uuid
+				  AND request_id=$6`, orgID, evidenceID, userID, input.Status,
+				input.Comment, requestID).Scan(&sameRequest)
+			if err == nil && !sameRequest {
+				return ErrEvidenceReviewConflict
+			}
+		}
+		if err != nil {
+			return err
+		}
+		evidence, err = getLifecycleEvidence(ctx, tx, orgID, controlID, evidenceID)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reviewing control evidence: %w", err)
+	}
+	return evidence, nil
 }
 
 func collectControls(rows pgx.Rows, total int) ([]models.Control, int, error) {

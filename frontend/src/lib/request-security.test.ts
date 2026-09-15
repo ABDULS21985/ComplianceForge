@@ -1,15 +1,14 @@
-import { NextRequest } from 'next/server';
-import { afterEach, describe, expect, it } from 'vitest';
-
 import {
   ACCESS_TOKEN_COOKIE,
   DEVELOPMENT_ACCESS_TOKEN_COOKIE,
 } from '@/lib/auth-constants';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   publicRequestOrigin,
   requestUsesSecureCookies,
   sessionCookiePolicy,
 } from '@/lib/request-security';
+import { NextRequest } from 'next/server';
 
 const originalEnvironment = {
   APP_ENV: process.env.APP_ENV,

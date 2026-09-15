@@ -56,7 +56,7 @@ func (h *IncidentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to create incident")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "incidents", item)
 }
 
 func (h *IncidentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +65,7 @@ func (h *IncidentHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to get incident")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", item)
 }
 
 func (h *IncidentHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +79,7 @@ func (h *IncidentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to update incident")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", item)
 }
 
 func (h *IncidentHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +117,7 @@ func (h *IncidentHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pagination := normalizedHandlerPagination(filter.PaginationRequest)
-	writePaginated(w, items, total, pagination)
+	writeClassifiedPaginated(w, r, "incidents", items, total, pagination)
 }
 
 func (h *IncidentHandler) Transition(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +135,7 @@ func (h *IncidentHandler) Transition(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to change incident lifecycle")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", item)
 }
 
 // UpdateStatus retains the original endpoint while using the same validated
@@ -170,7 +170,7 @@ func (h *IncidentHandler) changeWithReason(w http.ResponseWriter, r *http.Reques
 		writeIncidentError(w, r, err, "Failed to change incident lifecycle")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", item)
 }
 
 func (h *IncidentHandler) Escalate(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +184,7 @@ func (h *IncidentHandler) Escalate(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to escalate incident")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", item)
 }
 
 func (h *IncidentHandler) AssessBreach(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +198,7 @@ func (h *IncidentHandler) AssessBreach(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to record breach assessment")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", item)
 }
 
 func (h *IncidentHandler) NotifyDPA(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +212,7 @@ func (h *IncidentHandler) NotifyDPA(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to record supervisory authority notification")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", item)
 }
 
 func (h *IncidentHandler) GetBreachNotifiable(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +231,7 @@ func (h *IncidentHandler) GetBreachNotifiable(w http.ResponseWriter, r *http.Req
 		writeIncidentError(w, r, err, "Failed to list breach deadlines")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]any{"data": items})
 }
 
 func (h *IncidentHandler) Statistics(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +240,7 @@ func (h *IncidentHandler) Statistics(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to calculate incident statistics")
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", stats)
 }
 
 func (h *IncidentHandler) CreateAssignment(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +254,7 @@ func (h *IncidentHandler) CreateAssignment(w http.ResponseWriter, r *http.Reques
 		writeIncidentError(w, r, err, "Failed to assign incident responder")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"assignment": assignment, "incident": incident})
+	writeClassifiedJSON(w, r, http.StatusCreated, "incidents", map[string]any{"assignment": assignment, "incident": incident})
 }
 
 func (h *IncidentHandler) Unassign(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +268,7 @@ func (h *IncidentHandler) Unassign(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to unassign incident responder")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"assignment": assignment, "incident": incident})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]any{"assignment": assignment, "incident": incident})
 }
 
 func (h *IncidentHandler) ListAssignments(w http.ResponseWriter, r *http.Request) {
@@ -286,7 +286,7 @@ func (h *IncidentHandler) ListAssignments(w http.ResponseWriter, r *http.Request
 		writeIncidentError(w, r, err, "Failed to list incident assignments")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]any{"data": items})
 }
 
 func (h *IncidentHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +296,7 @@ func (h *IncidentHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		writeIncidentError(w, r, err, "Failed to list incident timeline")
 		return
 	}
-	writePaginated(w, items, total, pagination)
+	writeClassifiedPaginated(w, r, "incidents", items, total, pagination)
 }
 
 func incidentOrgID(r *http.Request) string  { return middleware.GetOrgIDFromContext(r.Context()) }

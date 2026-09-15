@@ -1,11 +1,10 @@
-import { describe, expect, it } from 'vitest';
-
 import {
   buildPortalApiUrl,
   cleanPortalUrl,
   getPortalEntryToken,
   PORTAL_API_ROUTES,
 } from '@/lib/portal-routes';
+import { describe, expect, it } from 'vitest';
 
 describe('portal API route contracts', () => {
   it('uses the same-origin portal BFF by default', () => {

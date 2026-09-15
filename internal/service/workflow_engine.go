@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/complianceforge/platform/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
@@ -179,9 +180,9 @@ func (we *WorkflowEngine) StartWorkflow(
 		EntityID:   entityID,
 		EntityRef:  entityRef,
 		Data: map[string]interface{}{
-			"workflow_instance_id":    inst.ID,
-			"workflow_definition_id":  def.ID,
-			"workflow_type":           workflowType,
+			"workflow_instance_id":   inst.ID,
+			"workflow_definition_id": def.ID,
+			"workflow_type":          workflowType,
 			"started_by":             startedBy,
 		},
 		Timestamp: time.Now(),
@@ -312,9 +313,9 @@ func (we *WorkflowEngine) ProcessStep(
 		EntityRef:  inst.EntityRef,
 		Data: map[string]interface{}{
 			"workflow_instance_id": inst.ID,
-			"execution_id":        executionID,
-			"action":              action,
-			"actor_id":            actorID,
+			"execution_id":         executionID,
+			"action":               action,
+			"actor_id":             actorID,
 		},
 		Timestamp: now,
 	})
@@ -429,8 +430,8 @@ func (we *WorkflowEngine) advanceToStep(
 			EntityRef:  instance.EntityRef,
 			Data: map[string]interface{}{
 				"workflow_instance_id": instance.ID,
-				"step_id":             step.ID,
-				"step_name":           step.Name,
+				"step_id":              step.ID,
+				"step_name":            step.Name,
 			},
 			Timestamp: time.Now(),
 		})
@@ -699,8 +700,8 @@ func (we *WorkflowEngine) CancelWorkflow(
 		EntityRef:  inst.EntityRef,
 		Data: map[string]interface{}{
 			"workflow_instance_id": instanceID,
-			"cancelled_by":        cancelledBy,
-			"reason":              reason,
+			"cancelled_by":         cancelledBy,
+			"reason":               reason,
 		},
 		Timestamp: now,
 	})
@@ -970,7 +971,7 @@ func (we *WorkflowEngine) completeWorkflow(ctx context.Context, inst *WorkflowIn
 		EntityRef:  inst.EntityRef,
 		Data: map[string]interface{}{
 			"workflow_instance_id": inst.ID,
-			"outcome":             outcome,
+			"outcome":              outcome,
 		},
 		Timestamp: time.Now(),
 	})
@@ -1040,11 +1041,10 @@ func (we *WorkflowEngine) resolveApprover(
 
 	case "role":
 		// Find users with the specified role.
-		rows, err := we.pool.Query(ctx, `
-			SELECT user_id FROM user_roles
-			WHERE organization_id = $1
-			  AND role = $2
-			  AND is_active = true`,
+		rows, err := database.QuerierFromContext(ctx, we.pool).Query(ctx, `
+			SELECT ur.user_id FROM effective_user_roles ur
+			JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
+			WHERE ur.organization_id = $1 AND role.slug = $2`,
 			orgID, step.ApprovalMode, // approval_mode reused to store role name when approver_type=role
 		)
 		if err != nil {

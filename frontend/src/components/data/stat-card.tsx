@@ -1,10 +1,9 @@
 'use client';
 
-import React from 'react';
-import { TrendingUp, TrendingDown, Minus, type LucideIcon } from 'lucide-react';
-
-import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
+import { type LucideIcon, Minus, TrendingDown, TrendingUp } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import React from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface StatCardProps {

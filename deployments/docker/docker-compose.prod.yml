@@ -3,7 +3,6 @@
 
 x-backend-environment: &backend-environment
   APP_ENV: production
-  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL with sslmode=require or verify-full is required}
   REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
   RABBITMQ_URL: ${RABBITMQ_URL:?RABBITMQ_URL with non-guest credentials is required}
   NOTIFICATION_DELIVERY_TENANT_BATCH: ${NOTIFICATION_DELIVERY_TENANT_BATCH:-100}
@@ -30,6 +29,20 @@ x-backend-environment: &backend-environment
   STORAGE_TYPE: s3
   S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
   S3_REGION: ${S3_REGION:?S3_REGION is required}
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+  S3_KMS_KEY_ID: ${S3_KMS_KEY_ID:-}
+  S3_EXPECTED_BUCKET_OWNER: ${S3_EXPECTED_BUCKET_OWNER:?S3_EXPECTED_BUCKET_OWNER is required}
+  EVIDENCE_MAXIMUM_UPLOAD_BYTES: ${EVIDENCE_MAXIMUM_UPLOAD_BYTES:-26214400}
+  EVIDENCE_SCANNER_NETWORK: ${EVIDENCE_SCANNER_NETWORK:-tcp}
+  EVIDENCE_SCANNER_ADDRESS: ${EVIDENCE_SCANNER_ADDRESS:?EVIDENCE_SCANNER_ADDRESS must identify an isolated clamd service}
+  EVIDENCE_SCANNER_TIMEOUT_SECONDS: ${EVIDENCE_SCANNER_TIMEOUT_SECONDS:-30}
+  EVIDENCE_SIGNED_DOWNLOAD_SECONDS: ${EVIDENCE_SIGNED_DOWNLOAD_SECONDS:-300}
+  HTTP_READ_HEADER_TIMEOUT_SECONDS: ${HTTP_READ_HEADER_TIMEOUT_SECONDS:-5}
+  HTTP_READ_TIMEOUT_SECONDS: ${HTTP_READ_TIMEOUT_SECONDS:-120}
+  HTTP_WRITE_TIMEOUT_SECONDS: ${HTTP_WRITE_TIMEOUT_SECONDS:-360}
+  HTTP_IDLE_TIMEOUT_SECONDS: ${HTTP_IDLE_TIMEOUT_SECONDS:-60}
+  HTTP_SHUTDOWN_TIMEOUT_SECONDS: ${HTTP_SHUTDOWN_TIMEOUT_SECONDS:-30}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   LOG_FORMAT: json
   OBSERVABILITY_METRICS_ENABLED: "true"
@@ -50,6 +63,9 @@ services:
     image: ${API_IMAGE:-complianceforge-api}:${IMAGE_TAG:?IMAGE_TAG is required}
     environment:
       <<: *backend-environment
+      # Dedicated non-owner runtime login. Schema changes use the separately
+      # supplied MIGRATION_DATABASE_URL outside the API container lifecycle.
+      DATABASE_URL: ${API_DATABASE_URL:?API_DATABASE_URL for a dedicated non-owner API login with TLS is required}
       API_TRUST_PROXY_HEADERS: "true"
     expose:
       - "8080"
@@ -83,7 +99,11 @@ services:
       dockerfile: deployments/docker/Dockerfile.api
       target: worker
     image: ${WORKER_IMAGE:-complianceforge-worker}:${IMAGE_TAG:?IMAGE_TAG is required}
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      # The worker login is separate from both the API and migration identities.
+      # Grant only the scheduler and tenant-scoped worker capabilities it needs.
+      DATABASE_URL: ${WORKER_DATABASE_URL:?WORKER_DATABASE_URL for a dedicated non-owner worker login with TLS is required}
     expose:
       - "9091"
     secrets:

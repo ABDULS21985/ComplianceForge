@@ -1,4 +1,4 @@
-.PHONY: help build test lint migrate-up migrate-down seed bootstrap-db validate-migrations docker-build docker-up docker-down generate-sqlc generate-proto swagger run clean test-integration test-e2e lint-all docker-build-all docker-push security-tools security-scan backup-db restore-db restore-drill coverage-report
+.PHONY: help build test test-fuzz-smoke lint migrate-up migrate-down seed bootstrap-db validate-migrations validate-runtime-roles validate-security-governance docker-build docker-up docker-down generate-sqlc generate-proto openapi-generate openapi-validate swagger run clean test-integration test-e2e lint-all docker-build-all docker-push security-tools security-scan backup-db restore-db restore-drill coverage-report
 
 APP_NAME := complianceforge
 API_BINARY := bin/$(APP_NAME)-api
@@ -25,6 +25,10 @@ build:
 test:
 	go test -race -cover ./...
 
+## test-fuzz-smoke: run bounded fuzzing of security and state-machine boundaries
+test-fuzz-smoke:
+	./scripts/run-fuzz-smoke.sh
+
 ## lint: run golangci-lint
 lint:
 	golangci-lint run ./...
@@ -48,6 +52,14 @@ bootstrap-db: migrate-up seed
 validate-migrations:
 	./scripts/validate-migrations.sh
 
+## validate-runtime-roles: prove convergent grants and split-role API/worker behavior on a disposable migrated database
+validate-runtime-roles:
+	./scripts/validate-runtime-database-roles.sh
+
+## validate-security-governance: verify threat/risk traceability and secure-SDLC review gates
+validate-security-governance:
+	./scripts/validate-security-governance.sh
+
 ## docker-build: build Docker images
 docker-build:
 	docker compose build
@@ -68,9 +80,16 @@ generate-sqlc:
 generate-proto:
 	protoc --go_out=. --go-grpc_out=. proto/**/*.proto
 
-## swagger: regenerate Swagger/OpenAPI documentation
-swagger:
-	swag init -g $(CMD_API) -o docs/swagger
+## openapi-generate: regenerate the deterministic OpenAPI 3.1 artifact
+openapi-generate:
+	go run ./cmd/openapi generate
+
+## openapi-validate: validate generated spec, mounted routes, and Go/frontend contracts
+openapi-validate:
+	./scripts/validate-openapi.sh
+
+## swagger: backward-compatible alias for OpenAPI generation
+swagger: openapi-generate
 
 ## run: build and run the API server locally
 run: build

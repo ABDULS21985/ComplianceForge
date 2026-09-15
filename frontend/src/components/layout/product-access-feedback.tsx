@@ -2,9 +2,6 @@
 
 import * as React from 'react';
 import { AlertTriangle, CreditCard, RefreshCw, ToggleLeft } from 'lucide-react';
-import Link from 'next/link';
-
-import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +16,8 @@ import {
   PRODUCT_ACCESS_EVENT,
   type ProductAccessFailure,
 } from '@/lib/product-access';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 export function ProductAccessFeedback() {
   const [failure, setFailure] = React.useState<ProductAccessFailure | null>(null);

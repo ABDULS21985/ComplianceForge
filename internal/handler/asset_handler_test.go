@@ -77,6 +77,7 @@ func assetHandlerRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	ctx := context.WithValue(request.Context(), middleware.ContextKeyOrgID, assetHandlerOrgID)
 	ctx = context.WithValue(ctx, middleware.ContextKeyUserID, assetHandlerUserID)
+	ctx = handlerAllowedContext(ctx)
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("id", assetHandlerID)
 	ctx = context.WithValue(ctx, chi.RouteCtxKey, routeContext)

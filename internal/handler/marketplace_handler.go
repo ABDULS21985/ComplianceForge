@@ -46,22 +46,22 @@ type PackageFilters struct {
 
 // MarketplacePackage represents a marketplace package listing.
 type MarketplacePackage struct {
-	ID             string   `json:"id"`
-	PublisherID    string   `json:"publisher_id"`
-	PublisherName  string   `json:"publisher_name"`
-	Slug           string   `json:"slug" validate:"required"`
-	Name           string   `json:"name" validate:"required"`
-	Description    string   `json:"description"`
-	Category       string   `json:"category" validate:"required"` // framework, policy_template, report_template, integration, control_pack
-	Tags           []string `json:"tags,omitempty"`
-	IconURL        string   `json:"icon_url,omitempty"`
-	LatestVersion  string   `json:"latest_version"`
-	TotalInstalls  int      `json:"total_installs"`
-	AverageRating  float64  `json:"average_rating"`
-	ReviewCount    int      `json:"review_count"`
-	IsFeatured     bool     `json:"is_featured"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
+	ID            string   `json:"id"`
+	PublisherID   string   `json:"publisher_id"`
+	PublisherName string   `json:"publisher_name"`
+	Slug          string   `json:"slug" validate:"required"`
+	Name          string   `json:"name" validate:"required"`
+	Description   string   `json:"description"`
+	Category      string   `json:"category" validate:"required"` // framework, policy_template, report_template, integration, control_pack
+	Tags          []string `json:"tags,omitempty"`
+	IconURL       string   `json:"icon_url,omitempty"`
+	LatestVersion string   `json:"latest_version"`
+	TotalInstalls int      `json:"total_installs"`
+	AverageRating float64  `json:"average_rating"`
+	ReviewCount   int      `json:"review_count"`
+	IsFeatured    bool     `json:"is_featured"`
+	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
 }
 
 // MarketplacePackageDetail extends MarketplacePackage with versions and full description.
@@ -107,15 +107,15 @@ type InstallPackageRequest struct {
 
 // InstalledPackage represents a package installed in an organization.
 type InstalledPackage struct {
-	ID              string `json:"id"`
-	OrganizationID  string `json:"organization_id"`
-	PackageID       string `json:"package_id"`
-	PackageName     string `json:"package_name"`
-	VersionID       string `json:"version_id"`
+	ID               string `json:"id"`
+	OrganizationID   string `json:"organization_id"`
+	PackageID        string `json:"package_id"`
+	PackageName      string `json:"package_name"`
+	VersionID        string `json:"version_id"`
 	InstalledVersion string `json:"installed_version"`
-	Status          string `json:"status"` // active, disabled, update_available
-	InstalledBy     string `json:"installed_by"`
-	InstalledAt     string `json:"installed_at"`
+	Status           string `json:"status"` // active, disabled, update_available
+	InstalledBy      string `json:"installed_by"`
+	InstalledAt      string `json:"installed_at"`
 }
 
 // Publisher represents a marketplace publisher.
@@ -173,7 +173,7 @@ func (h *MarketplaceHandler) SearchPackages(w http.ResponseWriter, r *http.Reque
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{
 		"data": packages,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -192,7 +192,7 @@ func (h *MarketplaceHandler) GetFeaturedPackages(w http.ResponseWriter, r *http.
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": packages})
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{"data": packages})
 }
 
 // GetPackageDetail handles GET /marketplace/packages/{publisher}/{slug}.
@@ -210,7 +210,7 @@ func (h *MarketplaceHandler) GetPackageDetail(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", detail)
 }
 
 // GetPackageReviews handles GET /marketplace/packages/{publisher}/{slug}/reviews.
@@ -235,7 +235,7 @@ func (h *MarketplaceHandler) GetPackageReviews(w http.ResponseWriter, r *http.Re
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{
 		"data": reviews,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -268,7 +268,7 @@ func (h *MarketplaceHandler) InstallPackage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, installed)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", installed)
 }
 
 // UninstallPackage handles DELETE /marketplace/install/{id}.
@@ -304,7 +304,7 @@ func (h *MarketplaceHandler) ListInstalled(w http.ResponseWriter, r *http.Reques
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", map[string]interface{}{
 		"data": packages,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -341,7 +341,7 @@ func (h *MarketplaceHandler) SubmitReview(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, review)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", review)
 }
 
 // RegisterPublisher handles POST /marketplace/publishers.
@@ -365,7 +365,7 @@ func (h *MarketplaceHandler) RegisterPublisher(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, pub)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", pub)
 }
 
 // GetPublisherStats handles GET /marketplace/publishers/me/stats.
@@ -378,7 +378,7 @@ func (h *MarketplaceHandler) GetPublisherStats(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, stats)
+	writeClassifiedJSON(w, r, http.StatusOK, "frameworks", stats)
 }
 
 // CreatePackageEntry handles POST /marketplace/publishers/me/packages.
@@ -401,7 +401,7 @@ func (h *MarketplaceHandler) CreatePackageEntry(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, pkg)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", pkg)
 }
 
 // PublishVersion handles POST /marketplace/publishers/me/packages/{id}/versions.
@@ -429,5 +429,5 @@ func (h *MarketplaceHandler) PublishVersion(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, version)
+	writeClassifiedJSON(w, r, http.StatusCreated, "frameworks", version)
 }

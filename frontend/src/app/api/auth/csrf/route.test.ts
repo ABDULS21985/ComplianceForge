@@ -1,8 +1,7 @@
-import { NextRequest } from 'next/server';
 import { describe, expect, it } from 'vitest';
-
 import { CSRF_TOKEN_COOKIE } from '@/lib/auth-constants';
 import { GET } from './route';
+import { NextRequest } from 'next/server';
 
 describe('CSRF bootstrap route', () => {
   it('issues a secure cookie and reuses it across browser tabs', async () => {

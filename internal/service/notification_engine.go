@@ -818,7 +818,7 @@ func (ne *NotificationEngine) findUsersByRoleSlugs(ctx context.Context, orgID st
 	query := `
 		SELECT DISTINCT u.id
 		FROM users u
-		JOIN user_roles ur ON ur.user_id = u.id AND ur.organization_id = u.organization_id
+		JOIN effective_user_roles ur ON ur.user_id = u.id AND ur.organization_id = u.organization_id
 		JOIN roles r ON r.id = ur.role_id
 		WHERE u.organization_id = $1
 		  AND r.slug = ANY($2::text[])
@@ -856,7 +856,7 @@ func (ne *NotificationEngine) findUsersByRoleIDs(ctx context.Context, orgID stri
 	query := `
 		SELECT DISTINCT u.id
 		FROM users u
-		JOIN user_roles ur ON ur.user_id = u.id AND ur.organization_id = u.organization_id
+		JOIN effective_user_roles ur ON ur.user_id = u.id AND ur.organization_id = u.organization_id
 		JOIN roles r ON r.id = ur.role_id
 		WHERE u.organization_id = $1
 		  AND r.id = ANY($2::uuid[])

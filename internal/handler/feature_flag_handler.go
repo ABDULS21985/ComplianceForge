@@ -39,7 +39,7 @@ func (h *FeatureFlagHandler) ListCapabilities(w http.ResponseWriter, r *http.Req
 		writeFeatureFlagError(w, r, err, "Failed to list product capabilities")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]any{"data": items})
 }
 
 func (h *FeatureFlagHandler) Evaluate(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,7 @@ func (h *FeatureFlagHandler) Evaluate(w http.ResponseWriter, r *http.Request) {
 		writeFeatureFlagError(w, r, err, "Failed to evaluate feature flag")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", item)
 }
 
 func (h *FeatureFlagHandler) GetEntitlements(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +57,7 @@ func (h *FeatureFlagHandler) GetEntitlements(w http.ResponseWriter, r *http.Requ
 		writeFeatureFlagError(w, r, err, "Failed to load subscription entitlements")
 		return
 	}
-	writeJSON(w, http.StatusOK, snapshot)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", snapshot)
 }
 
 func (h *FeatureFlagHandler) CheckLimit(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +71,7 @@ func (h *FeatureFlagHandler) CheckLimit(w http.ResponseWriter, r *http.Request) 
 		writeFeatureFlagError(w, r, err, "Failed to check subscription limit")
 		return
 	}
-	writeJSON(w, http.StatusOK, decision)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", decision)
 }
 
 func (h *FeatureFlagHandler) UpsertOverride(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +92,7 @@ func (h *FeatureFlagHandler) UpsertOverride(w http.ResponseWriter, r *http.Reque
 	if input.ExpectedVersion == nil {
 		status = http.StatusCreated
 	}
-	writeJSON(w, status, item)
+	writeClassifiedJSON(w, r, status, "settings", item)
 }
 
 func (h *FeatureFlagHandler) ResetOverride(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func (h *FeatureFlagHandler) ListEvents(w http.ResponseWriter, r *http.Request) 
 		writeFeatureFlagError(w, r, err, "Failed to list feature flag history")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(pagination))
+	writeClassifiedPaginated(w, r, "settings", items, total, normalizedHandlerPagination(pagination))
 }
 
 func featureFlagOrgID(r *http.Request) string   { return middleware.GetOrgIDFromContext(r.Context()) }

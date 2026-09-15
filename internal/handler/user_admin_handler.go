@@ -61,7 +61,7 @@ func (h *UserAdministrationHandler) CreateUser(w http.ResponseWriter, r *http.Re
 		writeUserAdministrationError(w, r, err, "Failed to create directory user")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "users", item)
 }
 
 func (h *UserAdministrationHandler) GetUser(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +70,7 @@ func (h *UserAdministrationHandler) GetUser(w http.ResponseWriter, r *http.Reque
 		writeUserAdministrationError(w, r, err, "Failed to get directory user")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", item)
 }
 
 func (h *UserAdministrationHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +83,7 @@ func (h *UserAdministrationHandler) ListUsers(w http.ResponseWriter, r *http.Req
 		writeUserAdministrationError(w, r, err, "Failed to list directory users")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(filter.PaginationRequest))
+	writeClassifiedPaginated(w, r, "users", items, total, normalizedHandlerPagination(filter.PaginationRequest))
 }
 
 func (h *UserAdministrationHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +97,7 @@ func (h *UserAdministrationHandler) UpdateUser(w http.ResponseWriter, r *http.Re
 		writeUserAdministrationError(w, r, err, "Failed to update directory user")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", item)
 }
 
 func (h *UserAdministrationHandler) SuspendUser(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +121,7 @@ func (h *UserAdministrationHandler) changeUserState(w http.ResponseWriter, r *ht
 		writeUserAdministrationError(w, r, err, fallback)
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", item)
 }
 
 func (h *UserAdministrationHandler) PreviewOwnership(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +130,7 @@ func (h *UserAdministrationHandler) PreviewOwnership(w http.ResponseWriter, r *h
 		writeUserAdministrationError(w, r, err, "Failed to preview user ownership impact")
 		return
 	}
-	writeJSON(w, http.StatusOK, impact)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", impact)
 }
 
 func (h *UserAdministrationHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) {
@@ -144,7 +144,7 @@ func (h *UserAdministrationHandler) TransferOwnership(w http.ResponseWriter, r *
 		writeUserAdministrationError(w, r, err, "Failed to transfer user ownership")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": item, "transferred": impact})
+	writeClassifiedJSON(w, r, http.StatusOK, "users", map[string]any{"user": item, "transferred": impact})
 }
 
 func (h *UserAdministrationHandler) DeprovisionUser(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +175,7 @@ func (h *UserAdministrationHandler) CreateGroup(w http.ResponseWriter, r *http.R
 		writeUserAdministrationError(w, r, err, "Failed to create directory group")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "users", item)
 }
 
 func (h *UserAdministrationHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +184,7 @@ func (h *UserAdministrationHandler) GetGroup(w http.ResponseWriter, r *http.Requ
 		writeUserAdministrationError(w, r, err, "Failed to get directory group")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", item)
 }
 
 func (h *UserAdministrationHandler) ListGroups(w http.ResponseWriter, r *http.Request) {
@@ -195,7 +195,7 @@ func (h *UserAdministrationHandler) ListGroups(w http.ResponseWriter, r *http.Re
 		writeUserAdministrationError(w, r, err, "Failed to list directory groups")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(filter.PaginationRequest))
+	writeClassifiedPaginated(w, r, "users", items, total, normalizedHandlerPagination(filter.PaginationRequest))
 }
 
 func (h *UserAdministrationHandler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +209,7 @@ func (h *UserAdministrationHandler) UpdateGroup(w http.ResponseWriter, r *http.R
 		writeUserAdministrationError(w, r, err, "Failed to update directory group")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", item)
 }
 
 func (h *UserAdministrationHandler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +232,7 @@ func (h *UserAdministrationHandler) ListGroupMembers(w http.ResponseWriter, r *h
 		writeUserAdministrationError(w, r, err, "Failed to list directory group members")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(pagination))
+	writeClassifiedPaginated(w, r, "users", items, total, normalizedHandlerPagination(pagination))
 }
 
 func (h *UserAdministrationHandler) AddGroupMember(w http.ResponseWriter, r *http.Request) {
@@ -246,7 +246,7 @@ func (h *UserAdministrationHandler) AddGroupMember(w http.ResponseWriter, r *htt
 		writeUserAdministrationError(w, r, err, "Failed to add directory group member")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", item)
 }
 
 func (h *UserAdministrationHandler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +260,7 @@ func (h *UserAdministrationHandler) RemoveGroupMember(w http.ResponseWriter, r *
 		writeUserAdministrationError(w, r, err, "Failed to remove directory group member")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", item)
 }
 
 func (h *UserAdministrationHandler) ChangeGroupMembers(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +274,7 @@ func (h *UserAdministrationHandler) ChangeGroupMembers(w http.ResponseWriter, r 
 		writeUserAdministrationError(w, r, err, "Failed to update directory group members")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", item)
 }
 
 func (h *UserAdministrationHandler) ListGroupEvents(w http.ResponseWriter, r *http.Request) {
@@ -294,7 +294,7 @@ func (h *UserAdministrationHandler) listEvents(w http.ResponseWriter, r *http.Re
 		writeUserAdministrationError(w, r, err, "Failed to list directory history")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(pagination))
+	writeClassifiedPaginated(w, r, "users", items, total, normalizedHandlerPagination(pagination))
 }
 
 func (h *UserAdministrationHandler) PreviewImport(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +308,7 @@ func (h *UserAdministrationHandler) PreviewImport(w http.ResponseWriter, r *http
 		writeUserAdministrationError(w, r, err, "Failed to preview directory import")
 		return
 	}
-	writeJSON(w, http.StatusOK, preview)
+	writeClassifiedJSON(w, r, http.StatusOK, "users", preview)
 }
 
 func (h *UserAdministrationHandler) ApplyImport(w http.ResponseWriter, r *http.Request) {
@@ -326,7 +326,7 @@ func (h *UserAdministrationHandler) ApplyImport(w http.ResponseWriter, r *http.R
 	if result.Replayed {
 		status = http.StatusOK
 	}
-	writeJSON(w, status, result)
+	writeClassifiedJSON(w, r, status, "users", result)
 }
 
 func readDirectoryCSV(w http.ResponseWriter, r *http.Request) ([]byte, error) {

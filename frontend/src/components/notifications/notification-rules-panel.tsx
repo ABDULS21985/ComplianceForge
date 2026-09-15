@@ -1,28 +1,7 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, PowerOff } from 'lucide-react';
-import { toast } from 'sonner';
-
-import api from '@/lib/api';
-import {
-  formatApiError,
-  isNotificationToken,
-  isUuid,
-  parseCommaList,
-  parseJSONObject,
-} from '@/lib/enterprise-settings';
-import type {
-  NotificationRecipientType,
-  NotificationRule,
-  NotificationRuleInput,
-  NotificationSeverity,
-} from '@/types/enterprise-settings';
-import { ConfirmAction } from '@/components/settings/confirm-action';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, PowerOff } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -31,12 +10,32 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  formatApiError,
+  isNotificationToken,
+  isUuid,
+  parseCommaList,
+  parseJSONObject,
+} from '@/lib/enterprise-settings';
+import { type FormEvent, useState } from 'react';
+import type {
+  NotificationRecipientType,
+  NotificationRule,
+  NotificationRuleInput,
+  NotificationSeverity,
+} from '@/types/enterprise-settings';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ConfirmAction } from '@/components/settings/confirm-action';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
 
 const PAGE_SIZE = 20;
 const SEVERITIES: readonly NotificationSeverity[] = ['low', 'medium', 'high', 'critical'];

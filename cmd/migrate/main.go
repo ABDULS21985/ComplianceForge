@@ -132,6 +132,9 @@ func parseOptions(args []string) (options, error) {
 }
 
 func databaseDSN() (string, error) {
+	if dsn := strings.TrimSpace(os.Getenv("MIGRATION_DATABASE_URL")); dsn != "" {
+		return dsn, nil
+	}
 	if dsn := strings.TrimSpace(os.Getenv("DATABASE_URL")); dsn != "" {
 		return dsn, nil
 	}

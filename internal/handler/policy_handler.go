@@ -61,7 +61,7 @@ func (h *PolicyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to create policy")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", item)
 }
 
 func (h *PolicyHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +70,7 @@ func (h *PolicyHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to get policy")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +84,7 @@ func (h *PolicyHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to update policy")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) AssignOwner(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +101,7 @@ func (h *PolicyHandler) AssignOwner(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to assign policy ownership")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +134,7 @@ func (h *PolicyHandler) List(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to list policies")
 		return
 	}
-	writePolicyPaginated(w, items, total, filter.PaginationRequest)
+	writePolicyPaginated(w, r, items, total, filter.PaginationRequest)
 }
 
 func (h *PolicyHandler) GetDueForReview(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +145,7 @@ func (h *PolicyHandler) GetDueForReview(w http.ResponseWriter, r *http.Request) 
 		writePolicyError(w, err, "Failed to list policies due for review")
 		return
 	}
-	writePolicyPaginated(w, items, total, pagination)
+	writePolicyPaginated(w, r, items, total, pagination)
 }
 
 func (h *PolicyHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +154,7 @@ func (h *PolicyHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to list policy categories")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]any{"data": items})
 }
 
 func (h *PolicyHandler) CreateVersion(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +168,7 @@ func (h *PolicyHandler) CreateVersion(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to create policy version")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", item)
 }
 
 func (h *PolicyHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +177,7 @@ func (h *PolicyHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to get policy version")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +187,7 @@ func (h *PolicyHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to list policy versions")
 		return
 	}
-	writePolicyPaginated(w, items, total, p)
+	writePolicyPaginated(w, r, items, total, p)
 }
 
 func (h *PolicyHandler) SubmitForApproval(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +201,7 @@ func (h *PolicyHandler) SubmitForApproval(w http.ResponseWriter, r *http.Request
 		writePolicyError(w, err, "Failed to submit policy for approval")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", item)
 }
 
 // SubmitForReview preserves the old route name while using the canonical
@@ -216,7 +216,7 @@ func (h *PolicyHandler) GetActiveApproval(w http.ResponseWriter, r *http.Request
 		writePolicyError(w, err, "Failed to get policy approval workflow")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) DecideApproval(w http.ResponseWriter, r *http.Request) {
@@ -230,7 +230,7 @@ func (h *PolicyHandler) DecideApproval(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to decide policy approval")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 // Approve is the legacy alias. Its request body is still explicit and audited.
@@ -248,7 +248,7 @@ func (h *PolicyHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to approve policy")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) Publish(w http.ResponseWriter, r *http.Request) {
@@ -257,7 +257,7 @@ func (h *PolicyHandler) Publish(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to publish policy")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +271,7 @@ func (h *PolicyHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to create policy review")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", item)
 }
 
 func (h *PolicyHandler) GetReview(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +280,7 @@ func (h *PolicyHandler) GetReview(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to get policy review")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) UpdateReview(w http.ResponseWriter, r *http.Request) {
@@ -294,7 +294,7 @@ func (h *PolicyHandler) UpdateReview(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to update policy review")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) ListReviews(w http.ResponseWriter, r *http.Request) {
@@ -304,7 +304,7 @@ func (h *PolicyHandler) ListReviews(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to list policy reviews")
 		return
 	}
-	writePolicyPaginated(w, items, total, p)
+	writePolicyPaginated(w, r, items, total, p)
 }
 
 func (h *PolicyHandler) Acknowledge(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +318,7 @@ func (h *PolicyHandler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to acknowledge policy")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) ListAttestations(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +328,7 @@ func (h *PolicyHandler) ListAttestations(w http.ResponseWriter, r *http.Request)
 		writePolicyError(w, err, "Failed to list policy attestations")
 		return
 	}
-	writePolicyPaginated(w, items, total, p)
+	writePolicyPaginated(w, r, items, total, p)
 }
 
 func (h *PolicyHandler) CreateException(w http.ResponseWriter, r *http.Request) {
@@ -342,7 +342,7 @@ func (h *PolicyHandler) CreateException(w http.ResponseWriter, r *http.Request) 
 		writePolicyError(w, err, "Failed to request policy exception")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", item)
 }
 
 func (h *PolicyHandler) GetException(w http.ResponseWriter, r *http.Request) {
@@ -351,7 +351,7 @@ func (h *PolicyHandler) GetException(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to get policy exception")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) DecideException(w http.ResponseWriter, r *http.Request) {
@@ -365,7 +365,7 @@ func (h *PolicyHandler) DecideException(w http.ResponseWriter, r *http.Request) 
 		writePolicyError(w, err, "Failed to decide policy exception")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", item)
 }
 
 func (h *PolicyHandler) ListExceptions(w http.ResponseWriter, r *http.Request) {
@@ -375,7 +375,7 @@ func (h *PolicyHandler) ListExceptions(w http.ResponseWriter, r *http.Request) {
 		writePolicyError(w, err, "Failed to list policy exceptions")
 		return
 	}
-	writePolicyPaginated(w, items, total, p)
+	writePolicyPaginated(w, r, items, total, p)
 }
 
 func policyOrgID(r *http.Request) string  { return middleware.GetOrgIDFromContext(r.Context()) }
@@ -405,7 +405,7 @@ func decodePolicyJSON(w http.ResponseWriter, r *http.Request, destination any) e
 	return nil
 }
 
-func writePolicyPaginated(w http.ResponseWriter, data any, total int, p models.PaginationRequest) {
+func writePolicyPaginated(w http.ResponseWriter, r *http.Request, data any, total int, p models.PaginationRequest) {
 	if p.Page < 1 {
 		p.Page = 1
 	}
@@ -415,7 +415,7 @@ func writePolicyPaginated(w http.ResponseWriter, data any, total int, p models.P
 	if p.PageSize > 100 {
 		p.PageSize = 100
 	}
-	writePaginated(w, data, total, p)
+	writeClassifiedPaginated(w, r, "policies", data, total, p)
 }
 
 func writePolicyError(w http.ResponseWriter, err error, fallback string) {

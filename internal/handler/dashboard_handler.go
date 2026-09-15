@@ -31,7 +31,7 @@ func (h *DashboardHandler) GetDashboard(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": dashboard})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": dashboard})
 }
 
 // GetComplianceScore handles GET /dashboard/compliance-score/{frameworkID}.
@@ -48,5 +48,5 @@ func (h *DashboardHandler) GetComplianceScore(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": score})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": score})
 }

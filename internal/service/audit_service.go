@@ -581,6 +581,9 @@ func applyFindingPatch(finding *models.AuditFinding, patch models.AuditFindingPa
 }
 
 func validFindingTransition(from, to models.FindingStatus) bool {
+	if !allowed(string(from), findingStatuses()...) || !allowed(string(to), findingStatuses()...) {
+		return false
+	}
 	if from == to {
 		return true
 	}

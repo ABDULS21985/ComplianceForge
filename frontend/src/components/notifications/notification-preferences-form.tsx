@@ -1,11 +1,7 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, Clock3, Loader2, Mail, MessageSquare } from 'lucide-react';
-import { toast } from 'sonner';
-
-import api from '@/lib/api';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   DEFAULT_NOTIFICATION_PREFERENCE,
   formatApiError,
@@ -16,10 +12,7 @@ import type {
   NotificationPreference,
   UpdateNotificationPreferenceInput,
 } from '@/types/enterprise-settings';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { type FormEvent, useState } from 'react';
 import {
   Select,
   SelectContent,
@@ -27,8 +20,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { toast } from 'sonner';
 
 const TIMEZONE_SUGGESTIONS = [
   'UTC',

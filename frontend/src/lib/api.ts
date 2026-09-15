@@ -1,6 +1,7 @@
 // ComplianceForge API Client
 // Singleton same-origin BFF client with retry logic and typed endpoint methods
 
+import type * as Identity from '@/types/identity';
 import type {
   APIKeyRecord,
   CreateAPIKeyInput,
@@ -39,6 +40,7 @@ import type {
   AssetStats,
 } from '@/types/asset';
 import { ASSET_API_ROUTES, normalizeAssetCollection } from './asset';
+import { attachmentErrorMetadata, type AttachmentResponse, readBoundedAttachment } from './attachment';
 import type {
   Audit,
   AuditCollectionEnvelope,
@@ -56,7 +58,63 @@ import type {
 } from '@/types/audit';
 import { AUDIT_API_ROUTES, normalizeAuditCollection } from './audit';
 import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from "./routes";
+import {
+  CONTROL_EVIDENCE_ROUTES,
+  serializeEvidenceSupersede,
+  serializeEvidenceUpload,
+} from './control-evidence';
+import type {
+  ControlEnvelope,
+  ControlEvidence,
+  ControlEvidenceEnvelope,
+  ControlEvidenceListParams,
+  ControlEvidenceReviewInput,
+  ControlEvidenceSupersedeInput,
+  ControlEvidenceUploadInput,
+  ControlImplementationPatch,
+  ControlRecord,
+  EvidenceIntegrityResult,
+  EvidenceLifecycleRecord,
+} from '@/types/control-evidence';
+import type {
+  DataGovernanceEvent,
+  DataGovernanceEventListParams,
+  DataGovernancePolicy,
+  DataGovernancePolicyInput,
+  GovernanceChainVerification,
+  LegalHold,
+  LegalHoldInput,
+  LegalHoldPatch,
+  LegalHoldRecord,
+  LegalHoldRecordInput,
+  LegalHoldRecordReleaseInput,
+  LegalHoldReleaseInput,
+  LegalHoldStatus,
+  RecordDispositionDecision,
+  RecordRetentionAssignment,
+  RetentionAssignmentInput,
+  RetentionException,
+  RetentionExceptionDecisionInput,
+  RetentionExceptionInput,
+  RetentionReviewInput,
+  RetentionSchedule,
+  RetentionScheduleInput,
+  RetentionScheduleListParams,
+  RetentionSchedulePatch,
+  RetireRetentionScheduleInput,
+} from '@/types/data-governance';
+import type { DirectoryUser, DirectoryUserListParams } from '@/types/directory';
+import type {
+  EntitlementLimitDecision,
+  EntitlementSnapshot,
+  FeatureFlagChangeEvent,
+  FeatureFlagEvaluation,
+  FeatureFlagOverrideInput,
+  FeatureFlagResetInput,
+  TenantFeatureFlagOverride,
+} from '@/types/feature-flag';
 import { fetchWithCsrf, resetCsrfToken } from "./csrf-client";
+import { IDENTITY_ROUTES, PUBLIC_IDENTITY_ROUTES, STEP_UP_TOKEN_HEADER } from './identity';
 import type {
   Incident,
   IncidentAssignment,
@@ -79,16 +137,6 @@ import type {
 } from '@/types/incident';
 import { INCIDENT_API_ROUTES, normalizeIncidentCollection } from './incident';
 import type {
-  EntitlementLimitDecision,
-  EntitlementSnapshot,
-  FeatureFlagChangeEvent,
-  FeatureFlagEvaluation,
-  FeatureFlagOverrideInput,
-  FeatureFlagResetInput,
-  TenantFeatureFlagOverride,
-} from '@/types/feature-flag';
-import { FEATURE_FLAG_ROUTES } from './feature-flags';
-import type {
   ManagedRole,
   ManagedRoleAssignment,
   ManagedRoleAssignmentInput,
@@ -101,15 +149,29 @@ import type {
   PermissionGrant,
   RoleChangeEvent,
 } from '@/types/access-admin';
-import { ACCESS_ADMIN_ROUTES } from './access-admin';
+import { normalizeOrganizationProfile, ORGANIZATION_PROFILE_ROUTE, serializeOrganizationProfileUpdate } from './organization-profile';
+import type { OrganizationProfileEnvelope, OrganizationProfileUpdateInput } from '@/types/organization-profile';
 import { productAccessFailure, publishProductAccessFailure } from './product-access';
+import { SUPPORT_BUNDLE_MAX_BYTES, SUPPORT_BUNDLE_ROUTE } from './support-bundle-contract';
+import { ACCESS_ADMIN_ROUTES } from './access-admin';
+import { DATA_GOVERNANCE_ROUTES } from './data-governance';
+import { DIAGNOSTICS_ROUTE } from './diagnostics';
+import type { DiagnosticsSnapshot } from '@/types/diagnostics';
+import { DIRECTORY_ROUTES } from './directory';
+import { FEATURE_FLAG_ROUTES } from './feature-flags';
 import type { PermissionMap } from '@/types/access';
 import { SESSION_EXPIRED_EVENT } from "./auth-constants";
+import type { SupportBundleRequest } from '@/types/support-bundle';
 import type { User } from "@/types";
 
 const BFF_BASE_URL = "/api/bff";
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 500;
+const PUBLIC_BROWSER_AUTH_PATHS = new Set<string>([
+  '/api/auth/login',
+  '/api/auth/register',
+  ...Object.values(PUBLIC_IDENTITY_ROUTES),
+]);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -141,8 +203,21 @@ export interface ApiError {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? Object.assign(new Error('Request cancelled'), { name: 'AbortError' }));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? Object.assign(new Error('Request cancelled'), { name: 'AbortError' }));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function buildQuery(params?: Record<string, unknown>): string {
@@ -207,6 +282,9 @@ class ApiClient {
       headers?: Record<string, string>;
       isFormData?: boolean;
       retries?: number;
+      attachment?: { maximumBytes: number };
+      replayRejectedCsrf?: boolean;
+      redirect?: RequestRedirect;
     } = {}
   ): Promise<T> {
     const { body, params, signal, headers: extraHeaders, isFormData, retries = 0 } = options;
@@ -222,6 +300,7 @@ class ApiClient {
       headers,
       signal,
       credentials: "same-origin",
+      ...(options.redirect ? { redirect: options.redirect } : {}),
     };
     if (body !== undefined) {
       init.body = isFormData ? (body as FormData) : JSON.stringify(body);
@@ -229,11 +308,16 @@ class ApiClient {
 
     let response: Response;
     try {
-      response = await fetchWithCsrf(url, init);
+      response = await fetchWithCsrf(url, init, {
+        replayRejectedCsrf: options.replayRejectedCsrf,
+      });
     } catch (err) {
+      if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        throw err;
+      }
       // Only idempotent reads are safe to replay after an ambiguous failure.
       if (["GET", "HEAD"].includes(method) && retries < MAX_RETRIES) {
-        await sleep(INITIAL_BACKOFF_MS * Math.pow(2, retries));
+        await sleep(INITIAL_BACKOFF_MS * Math.pow(2, retries), signal);
         return this.request<T>(method, path, { ...options, retries: retries + 1 });
       }
       throw err;
@@ -241,10 +325,8 @@ class ApiClient {
 
     // A terminal BFF 401 means its server-side cookies have been cleared.
     if (response.status === 401) {
-      if (
-        !path.startsWith("/api/auth/login") &&
-        !path.startsWith("/api/auth/register")
-      ) {
+      if (options.attachment) await response.body?.cancel().catch(() => undefined);
+      if (!PUBLIC_BROWSER_AUTH_PATHS.has(path)) {
         redirectToLogin();
       }
       throw { status: 401, message: "Unauthorized" } satisfies ApiError;
@@ -256,17 +338,25 @@ class ApiClient {
       ["GET", "HEAD"].includes(method) &&
       retries < MAX_RETRIES
     ) {
-      await sleep(INITIAL_BACKOFF_MS * Math.pow(2, retries));
+      await sleep(INITIAL_BACKOFF_MS * Math.pow(2, retries), signal);
       return this.request<T>(method, path, { ...options, retries: retries + 1 });
     }
 
     // Parse body
     const contentType = response.headers.get("content-type") ?? "";
+    const contentDisposition = response.headers.get('content-disposition') ?? '';
     let data: unknown;
-    if (contentType.includes("application/json")) {
-      data = await response.json();
-    } else if (contentType.includes("application/octet-stream") || contentType.includes("application/pdf")) {
+    if (options.attachment) {
+      const attachment = await readBoundedAttachment(response, options.attachment.maximumBytes, signal);
+      data = response.ok ? attachment : await attachmentErrorMetadata(attachment);
+    } else if (
+      contentDisposition.toLowerCase().startsWith('attachment') ||
+      contentType.includes("application/octet-stream") ||
+      contentType.includes("application/pdf")
+    ) {
       data = await response.blob();
+    } else if (contentType.includes("application/json")) {
+      data = await response.json();
     } else {
       data = await response.text();
     }
@@ -274,7 +364,8 @@ class ApiClient {
     if (!response.ok) {
       const apiError: ApiError = {
         status: response.status,
-        message: (data as Record<string, string>)?.message ?? response.statusText,
+        message: options.attachment ? 'The support bundle request failed' :
+          (data as Record<string, string>)?.message ?? response.statusText,
         detail: data,
       };
       const accessFailure = productAccessFailure(apiError, path);
@@ -291,7 +382,11 @@ class ApiClient {
     return this.request<T>("GET", path, { params, signal });
   }
 
-  post<T>(path: string, body?: unknown, opts?: { signal?: AbortSignal; isFormData?: boolean }) {
+  post<T>(
+    path: string,
+    body?: unknown,
+    opts?: { signal?: AbortSignal; isFormData?: boolean; headers?: Record<string, string> },
+  ) {
     return this.request<T>("POST", path, { body, ...opts });
   }
 
@@ -312,11 +407,35 @@ class ApiClient {
   // ========================================================================
 
   auth = {
-    login: (data: { email: string; password: string }) =>
-      this.post<{ expires_at: string; user: User }>("/api/auth/login", data),
+    login: (data: { email: string; password: string; organization_id?: string }) =>
+      this.post<Identity.BrowserAuthenticationResponse>("/api/auth/login", data),
 
     register: (data: { email: string; password: string; first_name: string; last_name: string; organization_id: string }) =>
-      this.post<{ expires_at: string; user: User }>("/api/auth/register", data),
+      this.post<Identity.BrowserAuthenticationResponse>("/api/auth/register", data),
+
+    acceptInvitation: (data: Identity.IdentityInvitationAcceptInput) =>
+      this.post<Identity.IdentityAcceptanceResult>(PUBLIC_IDENTITY_ROUTES.acceptInvitation, data),
+
+    requestEmailVerification: (data: Identity.IdentityEmailRequest) =>
+      this.post<MessageResponse>(PUBLIC_IDENTITY_ROUTES.requestEmailVerification, data),
+
+    confirmEmailVerification: (data: { token: string }) =>
+      this.post<void>(PUBLIC_IDENTITY_ROUTES.confirmEmailVerification, data),
+
+    forgotPassword: (data: Identity.IdentityEmailRequest) =>
+      this.post<MessageResponse>(PUBLIC_IDENTITY_ROUTES.forgotPassword, data),
+
+    resetPassword: (data: Identity.IdentityPasswordResetInput) =>
+      this.post<void>(PUBLIC_IDENTITY_ROUTES.resetPassword, data),
+
+    verifyMFA: (data: Identity.IdentityMFAProofInput) =>
+      this.post<Identity.AuthenticatedSessionResponse>(PUBLIC_IDENTITY_ROUTES.verifyLoginMFA, data),
+
+    beginPasskeyAuthentication: (data: Identity.IdentityPasskeyAuthenticationBeginInput) =>
+      this.post<Identity.IdentityPasskeyCeremony>(PUBLIC_IDENTITY_ROUTES.beginPasskeyAuthentication, data),
+
+    verifyPasskeyAuthentication: (data: Identity.IdentityPasskeyAuthenticationFinishInput) =>
+      this.post<Identity.AuthenticatedSessionResponse>(PUBLIC_IDENTITY_ROUTES.verifyPasskeyAuthentication, data),
 
     refresh: () =>
       this.post<{ expires_at: string; user: User }>("/api/auth/refresh"),
@@ -606,26 +725,68 @@ class ApiClient {
   // ========================================================================
 
   controls = {
-    get: (id: string) =>
-      this.get<unknown>(`/controls/${id}`),
+    list: (params?: ControlEvidenceListParams) =>
+      this.get<ControlEnvelope>(
+        CONTROL_EVIDENCE_ROUTES.controls,
+        params as Record<string, unknown>,
+      ),
 
-    update: (id: string, data: unknown) =>
-      this.put<unknown>(`/controls/${id}`, data),
+    get: (id: string) => this.get<ControlRecord>(CONTROL_EVIDENCE_ROUTES.control(id)),
 
-    uploadEvidence: (controlId: string, formData: FormData) =>
-      this.post<unknown>(`/controls/${controlId}/evidence`, formData, { isFormData: true }),
+    updateImplementation: (id: string, data: ControlImplementationPatch) =>
+      this.patch<ControlRecord['implementation']>(CONTROL_EVIDENCE_ROUTES.implementation(id), data),
 
-    listEvidence: (controlId: string, params?: PaginationParams) =>
-      this.get<PaginatedResponse<unknown>>(`/controls/${controlId}/evidence`, params as Record<string, unknown>),
+    uploadEvidence: (
+      controlId: string,
+      data: ControlEvidenceUploadInput,
+      signal?: AbortSignal,
+    ) =>
+      this.post<ControlEvidence>(
+        CONTROL_EVIDENCE_ROUTES.evidence(controlId),
+        serializeEvidenceUpload(data),
+        { isFormData: true, signal },
+      ),
 
-    downloadEvidence: (controlId: string, evidenceId: string) =>
-      this.get<Blob>(`/controls/${controlId}/evidence/${evidenceId}/download`),
+    listEvidence: (controlId: string, params?: ControlEvidenceListParams) =>
+      this.get<ControlEvidenceEnvelope>(
+        CONTROL_EVIDENCE_ROUTES.evidence(controlId),
+        params as Record<string, unknown>,
+      ),
 
-    reviewEvidence: (controlId: string, evidenceId: string, data: { status: string; comment?: string }) =>
-      this.post<unknown>(`/controls/${controlId}/evidence/${evidenceId}/review`, data),
+    downloadEvidence: (controlId: string, evidenceId: string, signal?: AbortSignal) =>
+      this.get<Blob>(CONTROL_EVIDENCE_ROUTES.download(controlId, evidenceId), undefined, signal),
 
-    recordTest: (controlId: string, data: unknown) =>
-      this.post<unknown>(`/controls/${controlId}/tests`, data),
+    reviewEvidence: (
+      controlId: string,
+      evidenceId: string,
+      data: ControlEvidenceReviewInput,
+    ) => this.post<ControlEvidence>(CONTROL_EVIDENCE_ROUTES.review(controlId, evidenceId), data),
+
+    evidenceHistory: (controlId: string, evidenceId: string, signal?: AbortSignal) =>
+      this.get<EvidenceLifecycleRecord>(
+        CONTROL_EVIDENCE_ROUTES.history(controlId, evidenceId),
+        undefined,
+        signal,
+      ),
+
+    verifyEvidenceIntegrity: (controlId: string, evidenceId: string, signal?: AbortSignal) =>
+      this.post<EvidenceIntegrityResult>(
+        CONTROL_EVIDENCE_ROUTES.verifyIntegrity(controlId, evidenceId),
+        undefined,
+        { signal },
+      ),
+
+    supersedeEvidence: (
+      controlId: string,
+      evidenceId: string,
+      data: ControlEvidenceSupersedeInput,
+      signal?: AbortSignal,
+    ) =>
+      this.post<ControlEvidence>(
+        CONTROL_EVIDENCE_ROUTES.supersede(controlId, evidenceId),
+        serializeEvidenceSupersede(data),
+        { isFormData: true, signal },
+      ),
   };
 
   // ========================================================================
@@ -633,11 +794,13 @@ class ApiClient {
   // ========================================================================
 
   settings = {
-    getOrg: () =>
-      this.get<unknown>("/settings/organization"),
+    getOrg: (signal?: AbortSignal) =>
+      this.get<OrganizationProfileEnvelope>(ORGANIZATION_PROFILE_ROUTE, undefined, signal).then(normalizeOrganizationProfile),
 
-    updateOrg: (data: unknown) =>
-      this.put<unknown>("/settings/organization", data),
+    updateOrg: (data: OrganizationProfileUpdateInput, signal?: AbortSignal) =>
+      this.request<OrganizationProfileEnvelope>('PUT', ORGANIZATION_PROFILE_ROUTE, {
+        body: serializeOrganizationProfileUpdate(data), signal, replayRejectedCsrf: false, redirect: 'error',
+      }).then(normalizeOrganizationProfile),
 
     listUsers: (params?: PaginationParams & { is_active?: boolean; role_id?: string }) =>
       this.get<PaginatedResponse<unknown>>("/settings/users", params as Record<string, unknown>),
@@ -944,6 +1107,19 @@ class ApiClient {
   };
 
   // ========================================================================
+  // USER DIRECTORY
+  // ========================================================================
+
+  directory = {
+    listUsers: (params?: DirectoryUserListParams, signal?: AbortSignal) =>
+      this.get<PaginatedDataEnvelope<DirectoryUser>>(
+        DIRECTORY_ROUTES.users,
+        params as Record<string, unknown>,
+        signal
+      ),
+  };
+
+  // ========================================================================
   // ACCESS ADMINISTRATION
   // ========================================================================
 
@@ -1008,6 +1184,162 @@ class ApiClient {
         FEATURE_FLAG_ROUTES.history(key),
         params as Record<string, unknown>
       ),
+  };
+
+  // ========================================================================
+  // DATA LIFECYCLE GOVERNANCE
+  // ========================================================================
+
+  dataGovernance = {
+    getPolicy: () => this.get<DataGovernancePolicy>(DATA_GOVERNANCE_ROUTES.policy),
+    savePolicy: (data: DataGovernancePolicyInput) =>
+      this.put<DataGovernancePolicy>(DATA_GOVERNANCE_ROUTES.policy, data),
+    listSchedules: (params?: RetentionScheduleListParams) =>
+      this.get<PaginatedDataEnvelope<RetentionSchedule>>(
+        DATA_GOVERNANCE_ROUTES.schedules,
+        params as Record<string, unknown>
+      ),
+    createSchedule: (data: RetentionScheduleInput) =>
+      this.post<RetentionSchedule>(DATA_GOVERNANCE_ROUTES.schedules, data),
+    getSchedule: (scheduleId: string) =>
+      this.get<RetentionSchedule>(DATA_GOVERNANCE_ROUTES.schedule(scheduleId)),
+    updateSchedule: (scheduleId: string, data: RetentionSchedulePatch) =>
+      this.patch<RetentionSchedule>(DATA_GOVERNANCE_ROUTES.schedule(scheduleId), data),
+    retireSchedule: (scheduleId: string, data: RetireRetentionScheduleInput) =>
+      this.request<void>('DELETE', DATA_GOVERNANCE_ROUTES.schedule(scheduleId), { body: data }),
+    createAssignment: (data: RetentionAssignmentInput) =>
+      this.post<RecordRetentionAssignment>(DATA_GOVERNANCE_ROUTES.assignments, data),
+    getAssignment: (assignmentId: string) =>
+      this.get<RecordRetentionAssignment>(DATA_GOVERNANCE_ROUTES.assignment(assignmentId)),
+    reviewAssignment: (assignmentId: string, data: RetentionReviewInput) =>
+      this.post<RecordRetentionAssignment>(DATA_GOVERNANCE_ROUTES.reviewAssignment(assignmentId), data),
+    listExceptions: (assignmentId: string) =>
+      this.get<DataEnvelope<RetentionException[]>>(DATA_GOVERNANCE_ROUTES.assignmentExceptions(assignmentId)),
+    requestException: (assignmentId: string, data: RetentionExceptionInput) =>
+      this.post<RetentionException>(DATA_GOVERNANCE_ROUTES.assignmentExceptions(assignmentId), data),
+    decideException: (exceptionId: string, data: RetentionExceptionDecisionInput) =>
+      this.post<RetentionException>(DATA_GOVERNANCE_ROUTES.decideException(exceptionId), data),
+    getDisposition: (recordType: string, recordId: string) =>
+      this.get<RecordDispositionDecision>(DATA_GOVERNANCE_ROUTES.disposition(recordType, recordId)),
+    listHolds: (params?: { status?: LegalHoldStatus; page?: number; page_size?: number }) =>
+      this.get<PaginatedDataEnvelope<LegalHold>>(
+        DATA_GOVERNANCE_ROUTES.holds,
+        params as Record<string, unknown>
+      ),
+    createHold: (data: LegalHoldInput) =>
+      this.post<LegalHold>(DATA_GOVERNANCE_ROUTES.holds, data),
+    getHold: (holdId: string) =>
+      this.get<LegalHold>(DATA_GOVERNANCE_ROUTES.hold(holdId)),
+    updateHold: (holdId: string, data: LegalHoldPatch) =>
+      this.patch<LegalHold>(DATA_GOVERNANCE_ROUTES.hold(holdId), data),
+    releaseHold: (holdId: string, data: LegalHoldReleaseInput) =>
+      this.post<LegalHold>(DATA_GOVERNANCE_ROUTES.releaseHold(holdId), data),
+    listHoldRecords: (holdId: string, activeOnly = true) =>
+      this.get<DataEnvelope<LegalHoldRecord[]>>(
+        DATA_GOVERNANCE_ROUTES.holdRecords(holdId),
+        { active_only: activeOnly }
+      ),
+    addHoldRecord: (holdId: string, data: LegalHoldRecordInput) =>
+      this.post<LegalHoldRecord>(DATA_GOVERNANCE_ROUTES.holdRecords(holdId), data),
+    releaseHoldRecord: (holdId: string, holdRecordId: string, data: LegalHoldRecordReleaseInput) =>
+      this.post<void>(DATA_GOVERNANCE_ROUTES.releaseHoldRecord(holdId, holdRecordId), data),
+    listEvents: (params?: DataGovernanceEventListParams) =>
+      this.get<PaginatedDataEnvelope<DataGovernanceEvent>>(
+        DATA_GOVERNANCE_ROUTES.events,
+        params as Record<string, unknown>
+      ),
+    verifyEvents: () =>
+      this.get<GovernanceChainVerification>(DATA_GOVERNANCE_ROUTES.verifyEvents),
+  };
+
+  // ========================================================================
+  // ADMINISTRATOR DIAGNOSTICS
+  // ========================================================================
+
+  diagnostics = {
+    snapshot: (signal?: AbortSignal) =>
+      this.get<DataEnvelope<DiagnosticsSnapshot>>(DIAGNOSTICS_ROUTE, undefined, signal),
+    generateSupportBundle: (data: SupportBundleRequest, signal?: AbortSignal) =>
+      this.request<AttachmentResponse>('POST', SUPPORT_BUNDLE_ROUTE, {
+        body: { consent: data.consent, scope: data.scope },
+        signal,
+        attachment: { maximumBytes: SUPPORT_BUNDLE_MAX_BYTES },
+        replayRejectedCsrf: false,
+        redirect: 'error',
+      }),
+  };
+
+  // ========================================================================
+  // IDENTITY LIFECYCLE AND ACCOUNT SECURITY
+  // ========================================================================
+
+  identity = {
+    getPolicy: () => this.get<Identity.IdentityPolicy>(IDENTITY_ROUTES.policy),
+    updatePolicy: (data: Identity.IdentityPolicyPatch) =>
+      this.put<Identity.IdentityPolicy>(IDENTITY_ROUTES.policy, data),
+    listSessions: () =>
+      this.get<DataEnvelope<Identity.IdentitySession[]>>(IDENTITY_ROUTES.sessions),
+    revokeSession: (sessionId: string, data: Identity.IdentitySessionRevokeInput) =>
+      this.request<void>('DELETE', IDENTITY_ROUTES.revokeSession(sessionId), { body: data }),
+    globalSignOut: (data: Identity.IdentityGlobalSignOutInput) =>
+      this.post<Identity.IdentityGlobalSignOutResult>(IDENTITY_ROUTES.globalSignOut, data),
+    listFactors: () =>
+      this.get<DataEnvelope<Identity.IdentityMFAFactor[]>>(IDENTITY_ROUTES.factors),
+    beginTOTPEnrollment: (data: Identity.IdentityTOTPEnrollmentInput) =>
+      this.post<Identity.IdentityTOTPEnrollment>(IDENTITY_ROUTES.totpEnrollment, data),
+    verifyTOTPEnrollment: (data: Identity.IdentityTOTPVerifyInput) =>
+      this.post<Identity.IdentityTOTPVerifyResult>(IDENTITY_ROUTES.totpVerification, data),
+    disableFactor: (
+      factorId: string,
+      data: Identity.IdentityMFADisableInput,
+      stepUpToken: string,
+    ) =>
+      this.request<void>('DELETE', IDENTITY_ROUTES.disableFactor(factorId), {
+        body: data,
+        headers: { [STEP_UP_TOKEN_HEADER]: stepUpToken },
+      }),
+    regenerateRecoveryCodes: (
+      factorId: string,
+      data: Identity.IdentityRecoveryRegenerateInput,
+      stepUpToken: string,
+    ) =>
+      this.post<Identity.IdentityRecoveryCodesResult>(IDENTITY_ROUTES.recoveryCodes(factorId), data, {
+        headers: { [STEP_UP_TOKEN_HEADER]: stepUpToken },
+      }),
+    beginStepUp: (data: Identity.IdentityStepUpBeginInput) =>
+      this.post<Identity.IdentityMFAChallenge>(IDENTITY_ROUTES.beginStepUp, data),
+    verifyStepUp: (data: Identity.IdentityMFAProofInput) =>
+      this.post<Identity.IdentityStepUpGrant>(IDENTITY_ROUTES.verifyStepUp, data),
+    listPasskeys: () =>
+      this.get<DataEnvelope<Identity.IdentityPasskey[]>>(IDENTITY_ROUTES.passkeys),
+    beginPasskeyRegistration: (data: Identity.IdentityPasskeyRegistrationBeginInput) =>
+      this.post<Identity.IdentityPasskeyCeremony>(IDENTITY_ROUTES.beginPasskeyRegistration, data),
+    verifyPasskeyRegistration: (data: Identity.IdentityPasskeyRegistrationFinishInput) =>
+      this.post<Identity.IdentityPasskey>(IDENTITY_ROUTES.verifyPasskeyRegistration, data),
+    removePasskey: (
+      passkeyId: string,
+      data: Identity.IdentityPasskeyRemoveInput,
+      stepUpToken: string,
+    ) =>
+      this.request<void>('DELETE', IDENTITY_ROUTES.removePasskey(passkeyId), {
+        body: data,
+        headers: { [STEP_UP_TOKEN_HEADER]: stepUpToken },
+      }),
+    listHistory: (params?: { user_id?: string; page?: number; page_size?: number }) =>
+      this.get<Identity.IdentitySecurityEventList>(
+        IDENTITY_ROUTES.history,
+        params as Record<string, unknown>,
+      ),
+    issueInvitation: (userId: string, data: Identity.IdentityInvitationIssueInput) =>
+      this.post<Identity.IdentityInvitation>(IDENTITY_ROUTES.issueInvitation(userId), data),
+    adminResetMFA: (
+      userId: string,
+      data: Identity.IdentityAdminMFAResetInput,
+      stepUpToken: string,
+    ) =>
+      this.post<void>(IDENTITY_ROUTES.adminResetMFA(userId), data, {
+        headers: { [STEP_UP_TOKEN_HEADER]: stepUpToken },
+      }),
   };
 
   // ========================================================================

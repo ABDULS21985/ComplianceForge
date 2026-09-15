@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
-
 import { NotificationPreferencesForm } from '@/components/notifications/notification-preferences-form';
+import type { ReactNode } from 'react';
+import userEvent from '@testing-library/user-event';
 
 const notificationApi = vi.hoisted(() => ({
   getPreferences: vi.fn(),

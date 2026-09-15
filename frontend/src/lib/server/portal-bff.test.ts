@@ -1,11 +1,10 @@
-import { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   CSRF_TOKEN_COOKIE,
   CSRF_TOKEN_HEADER,
   VENDOR_PORTAL_TOKEN_COOKIE,
 } from '@/lib/auth-constants';
+import { NextRequest } from 'next/server';
 import { proxyPortalRequest } from '@/lib/server/portal-bff';
 
 const origin = 'https://app.example.test';

@@ -78,23 +78,41 @@ func writeAtomic(filename string, data []byte) error {
 		return fmt.Errorf("create temporary OpenAPI file: %w", err)
 	}
 	temporaryName := temporary.Name()
-	cleanup := func() { _ = os.Remove(temporaryName) }
-	defer cleanup()
 	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("write temporary OpenAPI file: %w", err)
+		return errors.Join(fmt.Errorf("write temporary OpenAPI file: %w", err), closeAndRemove(temporary, temporaryName))
+	}
+	if err := temporary.Chmod(0o644); err != nil {
+		return errors.Join(fmt.Errorf("set generated OpenAPI permissions: %w", err), closeAndRemove(temporary, temporaryName))
 	}
 	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return fmt.Errorf("sync temporary OpenAPI file: %w", err)
+		return errors.Join(fmt.Errorf("sync temporary OpenAPI file: %w", err), closeAndRemove(temporary, temporaryName))
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close temporary OpenAPI file: %w", err)
+		return errors.Join(fmt.Errorf("close temporary OpenAPI file: %w", err), removeTemporary(temporaryName))
 	}
 	if err := os.Rename(temporaryName, filename); err != nil {
-		return fmt.Errorf("replace generated OpenAPI file: %w", err)
+		return errors.Join(fmt.Errorf("replace generated OpenAPI file: %w", err), removeTemporary(temporaryName))
 	}
 	return nil
+}
+
+func closeAndRemove(file *os.File, filename string) error {
+	return errors.Join(wrapFileError("close temporary OpenAPI file", file.Close()), removeTemporary(filename))
+}
+
+func removeTemporary(filename string) error {
+	err := os.Remove(filename)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return fmt.Errorf("remove temporary OpenAPI file: %w", err)
+}
+
+func wrapFileError(message string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", message, err)
 }
 
 func fatal(err error) {

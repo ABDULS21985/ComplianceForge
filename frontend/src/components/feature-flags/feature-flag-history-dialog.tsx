@@ -1,9 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, History } from 'lucide-react';
 import {
   Dialog,
@@ -19,8 +16,11 @@ import {
   humanizeFeatureToken,
 } from '@/lib/feature-flags';
 import api from '@/lib/api';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import type { FeatureFlagEvaluation } from '@/types/feature-flag';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useQuery } from '@tanstack/react-query';
 
 const PAGE_SIZE = 20;
 

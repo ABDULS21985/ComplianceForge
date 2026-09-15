@@ -1,5 +1,3 @@
-import type { NextRequest } from 'next/server';
-
 import {
   ACCESS_TOKEN_COOKIE,
   BOARD_PORTAL_TOKEN_COOKIE,
@@ -12,6 +10,7 @@ import {
   REFRESH_TOKEN_COOKIE,
   VENDOR_PORTAL_TOKEN_COOKIE,
 } from '@/lib/auth-constants';
+import type { NextRequest } from 'next/server';
 
 type RequestContext = Pick<NextRequest, 'headers' | 'nextUrl'>;
 

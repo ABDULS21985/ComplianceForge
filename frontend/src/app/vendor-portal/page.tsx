@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
-
 import {
   buildPortalApiUrl,
   cleanPortalUrl,
   getPortalEntryToken,
   PORTAL_API_ROUTES,
 } from '@/lib/portal-routes';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchWithCsrf } from '@/lib/csrf-client';
+import { ResourceState } from '@/components/data/resource-state';
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,9 +66,16 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
         </span>
         <span>{pct}%</span>
       </div>
-      <div className="w-full h-2 bg-gray-200 rounded-full">
+      <div
+        aria-label="Questionnaire completion"
+        aria-valuemax={total}
+        aria-valuemin={0}
+        aria-valuenow={current}
+        className="h-2 w-full rounded-full bg-gray-200"
+        role="progressbar"
+      >
         <div
-          className="h-2 rounded-full bg-blue-600 transition-all"
+          className="h-2 rounded-full bg-blue-600 transition-all motion-reduce:transition-none"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -94,8 +101,10 @@ function QuestionInput({
           {['Yes', 'No'].map((opt) => (
             <button
               key={opt}
+              type="button"
+              aria-pressed={currentValue === opt}
               onClick={() => onChange(opt)}
-              className={`px-4 py-2 text-sm rounded border font-medium transition-colors ${
+              className={`min-h-11 rounded border px-4 py-2 text-sm font-medium transition-colors motion-reduce:transition-none ${
                 currentValue === opt
                   ? 'bg-blue-600 text-white border-blue-600'
                   : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'
@@ -105,8 +114,10 @@ function QuestionInput({
             </button>
           ))}
           <button
+            type="button"
+            aria-pressed={currentValue === 'N/A'}
             onClick={() => onChange('N/A')}
-            className={`px-4 py-2 text-sm rounded border font-medium transition-colors ${
+            className={`min-h-11 rounded border px-4 py-2 text-sm font-medium transition-colors motion-reduce:transition-none ${
               currentValue === 'N/A'
                 ? 'bg-gray-600 text-white border-gray-600'
                 : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
@@ -165,6 +176,7 @@ function QuestionInput({
     case 'text':
       return (
         <textarea
+          aria-label={question.text}
           value={typeof currentValue === 'string' ? currentValue : ''}
           onChange={(e) => onChange(e.target.value)}
           rows={4}
@@ -177,6 +189,7 @@ function QuestionInput({
       return (
         <div className="space-y-2">
           <textarea
+            aria-label={`${question.text} description`}
             value={typeof currentValue === 'string' ? currentValue : ''}
             onChange={(e) => onChange(e.target.value, answer?.files)}
             rows={2}
@@ -185,6 +198,7 @@ function QuestionInput({
           />
           <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
             <input
+              aria-label={`${question.text} supporting evidence`}
               type="file"
               multiple
               onChange={(e) => {
@@ -221,6 +235,7 @@ function VendorPortalInner() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   const initialized = useRef(false);
+  const inviteTokenRef = useRef<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -231,14 +246,15 @@ function VendorPortalInner() {
   const [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   // Token validation & questionnaire fetch
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-
-    const inviteToken = getPortalEntryToken(token, window.location.hash);
-    if (inviteToken) {
+    if (!initialized.current) {
+      initialized.current = true;
+      inviteTokenRef.current = getPortalEntryToken(token, window.location.hash);
+    }
+    if (inviteTokenRef.current) {
       window.history.replaceState(
         window.history.state,
         '',
@@ -247,12 +263,14 @@ function VendorPortalInner() {
     }
 
     async function fetchQuestionnaire() {
+      setLoading(true);
+      setError('');
       try {
-        const res = inviteToken
+        const res = inviteTokenRef.current
           ? await fetchWithCsrf(buildPortalApiUrl(PORTAL_API_ROUTES.vendorSession), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: inviteToken }),
+              body: JSON.stringify({ token: inviteTokenRef.current }),
             })
           : await fetch(buildPortalApiUrl(PORTAL_API_ROUTES.vendorQuestionnaire));
         if (!res.ok) {
@@ -263,19 +281,20 @@ function VendorPortalInner() {
           );
         }
         const data = await res.json();
+        inviteTokenRef.current = null;
         setQuestionnaire(data);
         if (data.saved_answers) {
           setAnswers(data.saved_answers);
         }
-      } catch (err: any) {
-        setError(err.message ?? 'Failed to load questionnaire');
+      } catch (cause: unknown) {
+        setError(cause instanceof Error ? cause.message : 'Failed to load questionnaire');
       } finally {
         setLoading(false);
       }
     }
 
     fetchQuestionnaire();
-  }, [token]);
+  }, [retryKey, token]);
 
   // Auto-save
   const autoSave = useCallback(async () => {
@@ -291,10 +310,11 @@ function VendorPortalInner() {
         }
       );
       if (!response.ok) throw new Error('Unable to save responses');
+      setError('');
       setLastSaved(new Date().toLocaleTimeString());
       return true;
     } catch {
-      // Silently fail auto-save
+      setError('Responses could not be saved. Check your connection and try again.');
       return false;
     } finally {
       setSaving(false);
@@ -330,8 +350,8 @@ function VendorPortalInner() {
       );
       if (!res.ok) throw new Error('Submission failed');
       setSubmitted(true);
-    } catch (err: any) {
-      setError(err.message ?? 'Submission failed');
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'Submission failed');
     } finally {
       setSubmitting(false);
     }
@@ -351,45 +371,60 @@ function VendorPortalInner() {
   // Loading
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="mt-4 text-sm text-gray-500">Loading questionnaire...</p>
-        </div>
-      </div>
+      <main id="main-content" className="min-h-screen bg-gray-50 p-6">
+        <h1 className="sr-only">Vendor assessment</h1>
+        <ResourceState kind="loading" loadingLayout="detail" title="Loading questionnaire" />
+      </main>
     );
   }
 
   // Error
   if (error && !questionnaire) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md text-center">
-          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-red-600 text-xl font-bold">!</span>
-          </div>
-          <h1 className="text-lg font-semibold text-gray-900">Access Error</h1>
-          <p className="text-sm text-gray-500 mt-2">{error}</p>
-        </div>
-      </div>
+      <main id="main-content" className="flex min-h-screen items-center bg-gray-50 p-6">
+        <ResourceState
+          headingLevel={1}
+          kind="error"
+          title="Vendor assessment unavailable"
+          description={error}
+          onRetry={() => setRetryKey((value) => value + 1)}
+        />
+      </main>
     );
   }
 
   // Submitted
   if (submitted) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md text-center">
+      <main id="main-content" className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+        <div
+          aria-labelledby="assessment-submitted-title"
+          className="max-w-md rounded-lg bg-white p-8 text-center shadow-lg"
+          role="status"
+        >
           <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <span className="text-green-600 text-2xl font-bold">{'\u2713'}</span>
           </div>
-          <h1 className="text-lg font-semibold text-gray-900">Assessment Submitted</h1>
+          <h1 id="assessment-submitted-title" className="text-lg font-semibold text-gray-900">Assessment Submitted</h1>
           <p className="text-sm text-gray-500 mt-2">
             Thank you for completing the assessment. Your responses have been submitted to{' '}
             {questionnaire?.organization_name ?? 'the requesting organization'}.
           </p>
         </div>
-      </div>
+      </main>
+    );
+  }
+
+  if (allQuestions.length === 0) {
+    return (
+      <main id="main-content" className="flex min-h-screen items-center bg-gray-50 p-6">
+        <ResourceState
+          headingLevel={1}
+          kind="empty"
+          title="No assessment questions are available"
+          description="The requesting organization has not published questions for this assessment. Contact them before submitting a response."
+        />
+      </main>
     );
   }
 
@@ -398,9 +433,9 @@ function VendorPortalInner() {
       {/* Header */}
       <header className="bg-white border-b shadow-sm">
         <div className="max-w-4xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-lg font-bold text-gray-900">{questionnaire?.name}</h1>
+              <h1 data-route-heading className="text-lg font-bold text-gray-900">{questionnaire?.name}</h1>
               <p className="text-sm text-gray-500">
                 For: {questionnaire?.organization_name} | Vendor: {questionnaire?.vendor_name}
               </p>
@@ -409,10 +444,12 @@ function VendorPortalInner() {
               <p className="text-xs text-gray-400">
                 Due: {questionnaire?.due_date ? new Date(questionnaire.due_date).toLocaleDateString() : '--'}
               </p>
-              {lastSaved && (
-                <p className="text-xs text-green-600">Last saved: {lastSaved}</p>
-              )}
-              {saving && <p className="text-xs text-blue-600">Saving...</p>}
+              <div aria-live="polite" role="status">
+                {lastSaved && (
+                  <p className="text-xs text-green-700">Saved at {lastSaved}</p>
+                )}
+                {saving && <p className="text-xs text-blue-700">Saving responses…</p>}
+              </div>
             </div>
           </div>
           <div className="mt-3">
@@ -423,7 +460,7 @@ function VendorPortalInner() {
 
       <div className="max-w-4xl mx-auto px-6 py-6 flex gap-6">
         {/* Section Nav */}
-        <nav className="w-64 flex-shrink-0 hidden lg:block">
+        <nav aria-label="Questionnaire sections" className="w-64 flex-shrink-0 hidden lg:block">
           <div className="sticky top-6 space-y-1">
             {questionnaire?.sections.map((sec, idx) => {
               const sectionAnswered = sec.questions.filter((q) => {
@@ -433,8 +470,10 @@ function VendorPortalInner() {
               return (
                 <button
                   key={sec.id}
+                  type="button"
+                  aria-current={activeSectionIdx === idx ? 'step' : undefined}
                   onClick={() => setActiveSectionIdx(idx)}
-                  className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                  className={`min-h-11 w-full rounded px-3 py-2 text-left text-sm transition-colors motion-reduce:transition-none ${
                     activeSectionIdx === idx
                       ? 'bg-blue-50 text-blue-700 font-medium'
                       : 'text-gray-600 hover:bg-gray-100'
@@ -451,7 +490,7 @@ function VendorPortalInner() {
         </nav>
 
         {/* Questions */}
-        <main className="flex-1 space-y-6">
+        <main id="main-content" className="flex-1 space-y-6">
           {activeSection && (
             <>
               <div>
@@ -464,42 +503,47 @@ function VendorPortalInner() {
               {activeSection.questions
                 .sort((a, b) => a.order - b.order)
                 .map((q, qi) => (
-                  <div key={q.id} className="bg-white border rounded-lg p-5 space-y-3">
-                    <div className="flex items-start gap-2">
-                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-mono mt-0.5">
+                  <fieldset key={q.id} className="space-y-3 rounded-lg border bg-white p-5">
+                    <legend className="flex items-start gap-2 text-left text-sm font-medium text-gray-900">
+                      <span aria-hidden="true" className="mt-0.5 rounded bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-500">
                         {qi + 1}
                       </span>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900">
+                      <span className="flex-1">
                           {q.text}
-                          {q.required && <span className="text-red-500 ml-1">*</span>}
-                        </p>
-                        {q.description && (
-                          <p className="text-xs text-gray-500 mt-1">{q.description}</p>
-                        )}
-                      </div>
-                    </div>
+                          {q.required && (
+                            <>
+                              <span aria-hidden="true" className="ml-1 text-red-600">*</span>
+                              <span className="sr-only"> (required)</span>
+                            </>
+                          )}
+                      </span>
+                    </legend>
+                    {q.description && (
+                      <p className="text-xs text-gray-500">{q.description}</p>
+                    )}
                     <QuestionInput
                       question={q}
                       answer={answers[q.id]}
                       onChange={(value, files) => handleAnswerChange(q.id, value, files)}
                     />
-                  </div>
+                  </fieldset>
                 ))}
 
               {/* Section Navigation */}
               <div className="flex items-center justify-between pt-4">
                 <button
+                  type="button"
                   onClick={() => setActiveSectionIdx(Math.max(0, activeSectionIdx - 1))}
                   disabled={activeSectionIdx === 0}
-                  className="px-4 py-2 text-sm font-medium rounded border hover:bg-gray-50 disabled:opacity-50"
+                  className="min-h-11 rounded border px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
                 >
                   Previous Section
                 </button>
                 {activeSectionIdx < (questionnaire?.sections.length ?? 1) - 1 ? (
                   <button
+                    type="button"
                     onClick={() => setActiveSectionIdx(activeSectionIdx + 1)}
-                    className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                    className="min-h-11 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                   >
                     Next Section
                   </button>
@@ -511,9 +555,10 @@ function VendorPortalInner() {
           {/* Mobile section selector */}
           <div className="lg:hidden">
             <select
+              aria-label="Assessment section"
               value={activeSectionIdx}
               onChange={(e) => setActiveSectionIdx(Number(e.target.value))}
-              className="w-full border rounded px-3 py-2 text-sm"
+              className="min-h-11 w-full rounded border px-3 py-2 text-sm"
             >
               {questionnaire?.sections.map((sec, idx) => (
                 <option key={sec.id} value={idx}>
@@ -526,23 +571,25 @@ function VendorPortalInner() {
           {/* Action Buttons */}
           <div className="flex items-center justify-between border-t pt-6">
             <button
+              type="button"
               onClick={handleSaveAndContinue}
               disabled={saving}
-              className="px-4 py-2 text-sm font-medium rounded border hover:bg-gray-50 disabled:opacity-50"
+              className="min-h-11 rounded border px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save & Continue Later'}
             </button>
             <button
+              type="button"
               onClick={handleSubmit}
               disabled={submitting}
-              className="px-6 py-2 text-sm font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+              className="min-h-11 rounded bg-green-700 px-6 py-2 text-sm font-medium text-white hover:bg-green-800 disabled:opacity-50"
             >
               {submitting ? 'Submitting...' : 'Submit Assessment'}
             </button>
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+            <div role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {error}
             </div>
           )}
@@ -560,9 +607,10 @@ export default function VendorPortalPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-        </div>
+        <main id="main-content" className="min-h-screen bg-gray-50 p-6">
+          <h1 className="sr-only">Vendor assessment</h1>
+          <ResourceState kind="loading" loadingLayout="detail" title="Loading questionnaire" />
+        </main>
       }
     >
       <VendorPortalInner />

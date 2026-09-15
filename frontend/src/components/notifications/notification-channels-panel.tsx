@@ -1,21 +1,8 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, Loader2, Mail, MessageSquare, Pencil, Plus, Send, Trash2, Webhook } from 'lucide-react';
-import { toast } from 'sonner';
-
-import api from '@/lib/api';
-import { describeChannelConfiguration, formatApiError } from '@/lib/enterprise-settings';
-import type {
-  NotificationChannel,
-  NotificationChannelInput,
-  NotificationChannelType,
-} from '@/types/enterprise-settings';
-import { ConfirmAction } from '@/components/settings/confirm-action';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { describeChannelConfiguration, formatApiError } from '@/lib/enterprise-settings';
 import {
   Dialog,
   DialogContent,
@@ -24,11 +11,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { type FormEvent, useState } from 'react';
+import type {
+  NotificationChannel,
+  NotificationChannelInput,
+  NotificationChannelType,
+} from '@/types/enterprise-settings';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ConfirmAction } from '@/components/settings/confirm-action';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { toast } from 'sonner';
 
 interface ChannelDraft {
   id?: string;

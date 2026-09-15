@@ -191,7 +191,7 @@ func (h *CalendarHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", map[string]interface{}{
 		"data": events,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -217,7 +217,7 @@ func (h *CalendarHandler) GetEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, event)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", event)
 }
 
 // CompleteEvent handles PUT /calendar/events/{id}/complete.
@@ -235,7 +235,7 @@ func (h *CalendarHandler) CompleteEvent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Event completed"})
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", map[string]string{"message": "Event completed"})
 }
 
 // RescheduleEvent handles PUT /calendar/events/{id}/reschedule.
@@ -264,7 +264,7 @@ func (h *CalendarHandler) RescheduleEvent(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Event rescheduled"})
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", map[string]string{"message": "Event rescheduled"})
 }
 
 // AssignEvent handles PUT /calendar/events/{id}/assign.
@@ -293,7 +293,7 @@ func (h *CalendarHandler) AssignEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Event assigned"})
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", map[string]string{"message": "Event assigned"})
 }
 
 // CreateEvent handles POST /calendar/events.
@@ -320,7 +320,7 @@ func (h *CalendarHandler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, event)
+	writeClassifiedJSON(w, r, http.StatusCreated, "audits", event)
 }
 
 // GetDeadlines handles GET /calendar/deadlines.
@@ -351,7 +351,7 @@ func (h *CalendarHandler) GetDeadlines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": deadlines})
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", map[string]interface{}{"data": deadlines})
 }
 
 // GetOverdue handles GET /calendar/overdue.
@@ -364,7 +364,7 @@ func (h *CalendarHandler) GetOverdue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", map[string]interface{}{"data": items})
 }
 
 // GetSummary handles GET /calendar/summary.
@@ -381,7 +381,7 @@ func (h *CalendarHandler) GetSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, summary)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", summary)
 }
 
 // GetSubscriptions handles GET /calendar/subscriptions.
@@ -395,7 +395,7 @@ func (h *CalendarHandler) GetSubscriptions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, subs)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", subs)
 }
 
 // UpdateSubscriptions handles PUT /calendar/subscriptions.
@@ -414,7 +414,7 @@ func (h *CalendarHandler) UpdateSubscriptions(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Subscriptions updated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", map[string]string{"message": "Subscriptions updated"})
 }
 
 // GetICalFeed handles GET /calendar/ical/{token} (public, no JWT).
@@ -445,7 +445,7 @@ func (h *CalendarHandler) GetSyncStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, status)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", status)
 }
 
 // TriggerSync handles POST /calendar/sync/trigger.
@@ -459,5 +459,5 @@ func (h *CalendarHandler) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, status)
+	writeClassifiedJSON(w, r, http.StatusAccepted, "audits", status)
 }

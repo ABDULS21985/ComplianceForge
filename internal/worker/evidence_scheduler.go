@@ -2,14 +2,26 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
+	"github.com/complianceforge/platform/internal/database"
+	"github.com/complianceforge/platform/internal/models"
+	"github.com/complianceforge/platform/internal/repository"
 	"github.com/complianceforge/platform/internal/service"
 )
+
+const (
+	defaultEvidenceExpiryBatch = 1000
+)
+
+type EvidenceLifecycleSchedulerRepository interface {
+	ExpireDueEvidence(context.Context, string, int) ([]models.ExpiredEvidenceNotice, error)
+}
 
 // EvidenceScheduler runs daily to manage evidence collection lifecycle:
 //   - Remind stakeholders when evidence collection is approaching due
@@ -17,15 +29,31 @@ import (
 //   - Detect evidence collection configs with overdue next_collection_at
 //   - Flag controls that have no current evidence
 type EvidenceScheduler struct {
-	pool *pgxpool.Pool
-	bus  *service.EventBus
+	pool      *pgxpool.Pool
+	bus       *service.EventBus
+	lifecycle EvidenceLifecycleSchedulerRepository
 }
 
-func NewEvidenceScheduler(pool *pgxpool.Pool, bus *service.EventBus) *EvidenceScheduler {
-	return &EvidenceScheduler{
-		pool: pool,
-		bus:  bus,
+func NewEvidenceScheduler(
+	pool *pgxpool.Pool,
+	bus *service.EventBus,
+	configured ...EvidenceLifecycleSchedulerRepository,
+) *EvidenceScheduler {
+	var lifecycle EvidenceLifecycleSchedulerRepository
+	lifecycle, _ = repository.NewEvidenceLifecycleRepository(pool)
+	if len(configured) > 0 {
+		lifecycle = configured[0]
 	}
+	return &EvidenceScheduler{
+		pool:      pool,
+		bus:       bus,
+		lifecycle: lifecycle,
+	}
+}
+
+type evidenceTenantCheck struct {
+	name string
+	run  func(context.Context, string) error
 }
 
 // Run executes all evidence lifecycle checks. Called once per day by the
@@ -33,46 +61,61 @@ func NewEvidenceScheduler(pool *pgxpool.Pool, bus *service.EventBus) *EvidenceSc
 func (es *EvidenceScheduler) Run(ctx context.Context) error {
 	log.Info().Msg("evidence_scheduler: starting daily checks")
 
-	checks := []struct {
-		name string
-		fn   func(context.Context) error
-	}{
-		{"collection reminders", es.CheckUpcomingCollections},
-		{"expire stale evidence", es.ExpireStaleEvidence},
-		{"overdue collections", es.CheckOverdueCollections},
-		{"controls missing evidence", es.CheckControlsMissingEvidence},
+	checks := []evidenceTenantCheck{
+		{"collection reminders", es.checkUpcomingCollectionsForTenant},
+		{"expire stale evidence", es.expireStaleEvidenceForTenant},
+		{"overdue collections", es.checkOverdueCollectionsForTenant},
+		{"controls missing evidence", es.checkControlsMissingEvidenceForTenant},
 	}
+	err := es.runTenantChecks(ctx, checks)
+	log.Info().Msg("evidence_scheduler: daily checks completed")
+	return err
+}
 
-	var firstErr error
-	for _, check := range checks {
-		if err := check.fn(ctx); err != nil {
-			log.Error().Err(err).Str("check", check.name).Msg("evidence_scheduler: check failed")
-			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", check.name, err)
+func (es *EvidenceScheduler) runTenantChecks(ctx context.Context, checks []evidenceTenantCheck) error {
+	if es == nil || es.pool == nil || es.bus == nil || es.lifecycle == nil {
+		return errors.New("evidence scheduler is not configured")
+	}
+	return runForScheduledTenants(ctx, es.pool, "evidence lifecycle", func(tenantCtx context.Context, tenantID string) error {
+		var tenantErrors []error
+		for _, check := range checks {
+			if err := check.run(tenantCtx, tenantID); err != nil {
+				log.Error().Err(err).Str("tenant_id", tenantID).Str("check", check.name).
+					Msg("evidence_scheduler: tenant check failed")
+				tenantErrors = append(tenantErrors, fmt.Errorf("%s: %w", check.name, err))
 			}
 		}
-	}
-
-	log.Info().Msg("evidence_scheduler: daily checks completed")
-	return firstErr
+		return errors.Join(tenantErrors...)
+	})
 }
 
 // CheckUpcomingCollections queries active evidence_collection_configs whose
 // next_collection_at falls within the upcoming notification windows (7d, 3d, 1d)
 // and emits reminder events.
 func (es *EvidenceScheduler) CheckUpcomingCollections(ctx context.Context) error {
-	rows, err := es.pool.Query(ctx, `
+	return es.runTenantChecks(ctx, []evidenceTenantCheck{
+		{"collection reminders", es.checkUpcomingCollectionsForTenant},
+	})
+}
+
+func (es *EvidenceScheduler) checkUpcomingCollectionsForTenant(ctx context.Context, tenantID string) error {
+	rows, err := database.QuerierFromContext(ctx, es.pool).Query(ctx, `
 		SELECT ecc.id, ecc.organization_id, ecc.control_implementation_id,
 		       ecc.name, ecc.next_collection_at, ecc.collection_method,
 		       ecc.consecutive_failures,
-		       ci.control_code
+		       fc.code
 		FROM evidence_collection_configs ecc
-		JOIN control_implementations ci ON ci.id = ecc.control_implementation_id
-		WHERE ecc.is_active = true
+		JOIN control_implementations ci
+		  ON ci.organization_id = ecc.organization_id
+		 AND ci.id = ecc.control_implementation_id
+		JOIN framework_controls fc ON fc.id = ci.framework_control_id
+		WHERE ecc.organization_id = $1::uuid
+		  AND ecc.is_active = true
 		  AND ecc.next_collection_at IS NOT NULL
 		  AND ecc.next_collection_at <= NOW() + INTERVAL '7 days'
 		  AND ecc.next_collection_at > NOW()
-	`)
+		ORDER BY ecc.next_collection_at, ecc.id
+	`, tenantID)
 	if err != nil {
 		return fmt.Errorf("query upcoming collections: %w", err)
 	}
@@ -148,103 +191,74 @@ func (es *EvidenceScheduler) CheckUpcomingCollections(ctx context.Context) error
 // longer current. This ensures that controls relying on time-bound evidence
 // (certificates, audit reports, etc.) are flagged for re-collection.
 func (es *EvidenceScheduler) ExpireStaleEvidence(ctx context.Context) error {
-	// Update is_current and review_status for evidence past its validity.
-	result, err := es.pool.Exec(ctx, `
-		UPDATE control_evidence
-		SET is_current = false,
-		    review_status = 'expired',
-		    updated_at = NOW()
-		WHERE deleted_at IS NULL
-		  AND is_current = true
-		  AND valid_until IS NOT NULL
-		  AND valid_until < CURRENT_DATE
-	`)
+	return es.runTenantChecks(ctx, []evidenceTenantCheck{
+		{"expire stale evidence", es.expireStaleEvidenceForTenant},
+	})
+}
+
+func (es *EvidenceScheduler) expireStaleEvidenceForTenant(ctx context.Context, tenantID string) error {
+	notices, err := es.lifecycle.ExpireDueEvidence(ctx, tenantID, defaultEvidenceExpiryBatch)
 	if err != nil {
-		return fmt.Errorf("expire stale evidence: %w", err)
+		return err
 	}
-
-	expired := result.RowsAffected()
-	if expired > 0 {
-		log.Info().Int64("expired_count", expired).Msg("evidence_scheduler: marked stale evidence as expired")
-	}
-
-	// Emit events for each newly expired evidence item so control owners are
-	// notified. We query evidence that was just expired (review_status=expired,
-	// updated today) to avoid re-notifying.
-	rows, err := es.pool.Query(ctx, `
-		SELECT ce.id, ce.organization_id, ce.control_implementation_id,
-		       ce.title, ce.valid_until, ce.collected_by,
-		       ci.control_code
-		FROM control_evidence ce
-		JOIN control_implementations ci ON ci.id = ce.control_implementation_id
-		WHERE ce.deleted_at IS NULL
-		  AND ce.review_status = 'expired'
-		  AND ce.is_current = false
-		  AND ce.updated_at::date = CURRENT_DATE
-		  AND ce.valid_until IS NOT NULL
-		  AND ce.valid_until < CURRENT_DATE
-	`)
-	if err != nil {
-		return fmt.Errorf("query newly expired evidence: %w", err)
-	}
-	defer rows.Close()
-
 	now := time.Now().UTC()
-
-	for rows.Next() {
-		var evidenceID, orgID, controlImplID, title string
-		var validUntil time.Time
-		var collectedBy *string
-		var controlCode *string
-
-		if err := rows.Scan(&evidenceID, &orgID, &controlImplID, &title,
-			&validUntil, &collectedBy, &controlCode); err != nil {
-			log.Error().Err(err).Msg("evidence_scheduler: scan expired evidence row")
+	for _, notice := range notices {
+		if notice.NotificationQueued {
 			continue
 		}
-
 		data := map[string]interface{}{
-			"evidence_title":       title,
-			"valid_until":          validUntil.Format("2006-01-02"),
-			"control_implementation": controlImplID,
+			"evidence_title":         notice.Title,
+			"expires_at":             notice.ExpiresAt.Format(time.RFC3339),
+			"control_implementation": notice.ControlImplementationID,
 		}
-		if collectedBy != nil {
-			data["owner_id"] = *collectedBy
+		if notice.CollectedBy != nil {
+			data["owner_id"] = *notice.CollectedBy
 		}
-		if controlCode != nil {
-			data["control_code"] = *controlCode
+		if notice.ControlCode != nil {
+			data["control_code"] = *notice.ControlCode
 		}
-
 		es.bus.Publish(service.Event{
 			Type:       "evidence.expired",
 			Severity:   "high",
-			OrgID:      orgID,
+			OrgID:      notice.OrganizationID,
 			EntityType: "control_evidence",
-			EntityID:   evidenceID,
-			EntityRef:  title,
+			EntityID:   notice.EvidenceID,
+			EntityRef:  notice.Title,
 			Data:       data,
 			Timestamp:  now,
 		})
 	}
-
-	return rows.Err()
+	log.Info().Int("expired_count", len(notices)).Str("tenant_id", tenantID).
+		Msg("evidence_scheduler: marked due evidence as expired")
+	return nil
 }
 
 // CheckOverdueCollections queries active evidence collection configs whose
 // next_collection_at has passed (i.e. the automated or manual collection did
 // not happen on schedule) and emits overdue notifications.
 func (es *EvidenceScheduler) CheckOverdueCollections(ctx context.Context) error {
-	rows, err := es.pool.Query(ctx, `
+	return es.runTenantChecks(ctx, []evidenceTenantCheck{
+		{"overdue collections", es.checkOverdueCollectionsForTenant},
+	})
+}
+
+func (es *EvidenceScheduler) checkOverdueCollectionsForTenant(ctx context.Context, tenantID string) error {
+	rows, err := database.QuerierFromContext(ctx, es.pool).Query(ctx, `
 		SELECT ecc.id, ecc.organization_id, ecc.control_implementation_id,
 		       ecc.name, ecc.next_collection_at, ecc.collection_method,
 		       ecc.consecutive_failures, ecc.failure_threshold,
-		       ci.control_code
+		       fc.code
 		FROM evidence_collection_configs ecc
-		JOIN control_implementations ci ON ci.id = ecc.control_implementation_id
-		WHERE ecc.is_active = true
+		JOIN control_implementations ci
+		  ON ci.organization_id = ecc.organization_id
+		 AND ci.id = ecc.control_implementation_id
+		JOIN framework_controls fc ON fc.id = ci.framework_control_id
+		WHERE ecc.organization_id = $1::uuid
+		  AND ecc.is_active = true
 		  AND ecc.next_collection_at IS NOT NULL
 		  AND ecc.next_collection_at < NOW()
-	`)
+		ORDER BY ecc.next_collection_at, ecc.id
+	`, tenantID)
 	if err != nil {
 		return fmt.Errorf("query overdue collections: %w", err)
 	}
@@ -285,12 +299,12 @@ func (es *EvidenceScheduler) CheckOverdueCollections(ctx context.Context) error 
 		}
 
 		data := map[string]interface{}{
-			"config_name":           name,
-			"collection_method":     collectionMethod,
-			"next_collection_at":    nextCollectionAt.Format(time.RFC3339),
-			"days_overdue":          fmt.Sprintf("%.0f", daysOverdue),
-			"consecutive_failures":  consecutiveFailures,
-			"failure_threshold":     failureThreshold,
+			"config_name":            name,
+			"collection_method":      collectionMethod,
+			"next_collection_at":     nextCollectionAt.Format(time.RFC3339),
+			"days_overdue":           fmt.Sprintf("%.0f", daysOverdue),
+			"consecutive_failures":   consecutiveFailures,
+			"failure_threshold":      failureThreshold,
 			"control_implementation": controlImplID,
 		}
 		if controlCode != nil {
@@ -322,18 +336,29 @@ func (es *EvidenceScheduler) CheckOverdueCollections(ctx context.Context) error 
 // current evidence at all (is_current=true) and emits a warning so that
 // control owners can upload or configure automated collection.
 func (es *EvidenceScheduler) CheckControlsMissingEvidence(ctx context.Context) error {
-	rows, err := es.pool.Query(ctx, `
-		SELECT ci.id, ci.organization_id, ci.control_code, ci.owner_id
+	return es.runTenantChecks(ctx, []evidenceTenantCheck{
+		{"controls missing evidence", es.checkControlsMissingEvidenceForTenant},
+	})
+}
+
+func (es *EvidenceScheduler) checkControlsMissingEvidenceForTenant(ctx context.Context, tenantID string) error {
+	rows, err := database.QuerierFromContext(ctx, es.pool).Query(ctx, `
+		SELECT ci.id, ci.organization_id, fc.code, ci.owner_user_id
 		FROM control_implementations ci
-		WHERE ci.deleted_at IS NULL
-		  AND ci.status IN ('implemented', 'partially_implemented')
+		JOIN framework_controls fc ON fc.id = ci.framework_control_id
+		WHERE ci.organization_id = $1::uuid
+		  AND ci.deleted_at IS NULL
+		  AND ci.status IN ('implemented', 'partial')
 		  AND NOT EXISTS (
 		      SELECT 1 FROM control_evidence ce
-		      WHERE ce.control_implementation_id = ci.id
+		      WHERE ce.organization_id = ci.organization_id
+		        AND ce.control_implementation_id = ci.id
 		        AND ce.is_current = true
+		        AND ce.lifecycle_status = 'active'
 		        AND ce.deleted_at IS NULL
 		  )
-	`)
+		ORDER BY fc.code, ci.id
+	`, tenantID)
 	if err != nil {
 		return fmt.Errorf("query controls missing evidence: %w", err)
 	}

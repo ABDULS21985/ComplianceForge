@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
-
 import api from '@/lib/api';
 import { CSRF_TOKEN_HEADER } from '@/lib/auth-constants';
-import { resetCsrfToken } from '@/lib/csrf-client';
+import type { DataEnvelope } from '@/types/enterprise-settings';
 import { normalizePermissionMap } from '@/lib/navigation';
 import type { PermissionMap } from '@/types/access';
-import type { DataEnvelope } from '@/types/enterprise-settings';
+import { resetCsrfToken } from '@/lib/csrf-client';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

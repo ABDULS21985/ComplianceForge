@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/complianceforge/platform/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
@@ -29,23 +30,23 @@ var (
 
 // Comment represents a discussion comment on any GRC entity.
 type Comment struct {
-	ID           string      `json:"id"`
-	OrgID        string      `json:"organization_id"`
-	EntityType   string      `json:"entity_type"`
-	EntityID     string      `json:"entity_id"`
-	ParentID     *string     `json:"parent_id"`
-	AuthorID     string      `json:"author_id"`
-	AuthorName   string      `json:"author_name"`
-	AuthorAvatar *string     `json:"author_avatar"`
-	ContentRaw   string      `json:"content_raw"`
-	ContentHTML  string      `json:"content_html"`
-	Attachments  []string    `json:"attachments"`
-	IsPinned     bool        `json:"is_pinned"`
-	IsDeleted    bool        `json:"is_deleted"`
+	ID           string         `json:"id"`
+	OrgID        string         `json:"organization_id"`
+	EntityType   string         `json:"entity_type"`
+	EntityID     string         `json:"entity_id"`
+	ParentID     *string        `json:"parent_id"`
+	AuthorID     string         `json:"author_id"`
+	AuthorName   string         `json:"author_name"`
+	AuthorAvatar *string        `json:"author_avatar"`
+	ContentRaw   string         `json:"content_raw"`
+	ContentHTML  string         `json:"content_html"`
+	Attachments  []string       `json:"attachments"`
+	IsPinned     bool           `json:"is_pinned"`
+	IsDeleted    bool           `json:"is_deleted"`
 	Reactions    map[string]int `json:"reactions"`
-	Children     []Comment   `json:"children,omitempty"`
-	CreatedAt    string      `json:"created_at"`
-	UpdatedAt    string      `json:"updated_at"`
+	Children     []Comment      `json:"children,omitempty"`
+	CreatedAt    string         `json:"created_at"`
+	UpdatedAt    string         `json:"updated_at"`
 }
 
 // ActivityEntry represents a single item in the activity feed.
@@ -214,10 +215,13 @@ func (s *CollaborationService) EditComment(ctx context.Context, orgID, userID, c
 
 // DeleteComment performs a soft delete on a comment.
 func (s *CollaborationService) DeleteComment(ctx context.Context, orgID, userID, commentID string) error {
-	tag, err := s.pool.Exec(ctx, `
+	tag, err := database.QuerierFromContext(ctx, s.pool).Exec(ctx, `
 		UPDATE comments SET is_deleted = true, updated_at = NOW()
 		WHERE id = $1 AND organization_id = $2 AND (author_id = $3 OR EXISTS (
-			SELECT 1 FROM user_roles WHERE user_id = $3 AND role = 'admin' AND organization_id = $2
+			SELECT 1 FROM effective_user_roles ur JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
+			JOIN role_permissions rp ON rp.role_id=role.id JOIN permissions permission ON permission.id=rp.permission_id
+			WHERE ur.user_id = $3 AND ur.organization_id = $2
+			AND permission.resource='controls' AND permission.action='delete'
 		))`, commentID, orgID, userID)
 	if err != nil {
 		return fmt.Errorf("collaboration: delete comment: %w", err)
@@ -562,8 +566,9 @@ func parseMentions(content string) ([]string, []string) {
 }
 
 func (s *CollaborationService) resolveRoleUsers(ctx context.Context, orgID, roleSlug string) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT user_id FROM user_roles WHERE organization_id = $1 AND role = $2`, orgID, roleSlug)
+	rows, err := database.QuerierFromContext(ctx, s.pool).Query(ctx, `
+		SELECT ur.user_id FROM effective_user_roles ur JOIN roles role ON role.id=ur.role_id AND role.deleted_at IS NULL
+		WHERE ur.organization_id = $1 AND role.slug = $2`, orgID, roleSlug)
 	if err != nil {
 		return nil, err
 	}

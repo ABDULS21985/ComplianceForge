@@ -7,6 +7,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/complianceforge/platform/internal/database"
+)
+
+const (
+	dailyAnalyticsSnapshot   = "daily_summary"
+	weeklyAnalyticsSnapshot  = "weekly_summary"
+	monthlyAnalyticsSnapshot = "monthly_summary"
 )
 
 // AnalyticsScheduler takes periodic metric snapshots for trend analysis.
@@ -22,7 +30,7 @@ func NewAnalyticsScheduler(pool *pgxpool.Pool) *AnalyticsScheduler {
 // Called once per day at 00:00 UTC by the background worker.
 func (as *AnalyticsScheduler) RunDaily(ctx context.Context) error {
 	log.Info().Msg("analytics_scheduler: taking daily snapshots")
-	return as.takeSnapshotsForAll(ctx, "daily")
+	return as.takeSnapshotsForAll(ctx, dailyAnalyticsSnapshot)
 }
 
 // RunWeekly takes weekly snapshots (Mondays) and calculates compliance trends.
@@ -31,7 +39,7 @@ func (as *AnalyticsScheduler) RunWeekly(ctx context.Context) error {
 		return nil
 	}
 	log.Info().Msg("analytics_scheduler: taking weekly snapshots")
-	if err := as.takeSnapshotsForAll(ctx, "weekly"); err != nil {
+	if err := as.takeSnapshotsForAll(ctx, weeklyAnalyticsSnapshot); err != nil {
 		return err
 	}
 	return as.calculateTrends(ctx)
@@ -43,52 +51,35 @@ func (as *AnalyticsScheduler) RunMonthly(ctx context.Context) error {
 		return nil
 	}
 	log.Info().Msg("analytics_scheduler: taking monthly snapshots")
-	return as.takeSnapshotsForAll(ctx, "monthly")
+	return as.takeSnapshotsForAll(ctx, monthlyAnalyticsSnapshot)
 }
 
 func (as *AnalyticsScheduler) takeSnapshotsForAll(ctx context.Context, snapshotType string) error {
-	rows, err := as.pool.Query(ctx, `
-		SELECT id FROM organizations WHERE status = 'active' AND deleted_at IS NULL
-	`)
-	if err != nil {
-		return fmt.Errorf("querying organizations: %w", err)
-	}
-	defer rows.Close()
-
-	var orgIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
-		orgIDs = append(orgIDs, id)
-	}
-
-	log.Info().Int("org_count", len(orgIDs)).Str("type", snapshotType).Msg("analytics_scheduler: processing orgs")
-
-	for _, orgID := range orgIDs {
-		if err := as.takeOrgSnapshot(ctx, orgID, snapshotType); err != nil {
-			log.Error().Err(err).Str("org_id", orgID).Msg("analytics_scheduler: snapshot failed")
-			continue
-		}
-	}
-	return nil
+	return runForScheduledTenants(ctx, as.pool, "analytics snapshots", func(tenantCtx context.Context, orgID string) error {
+		return as.takeOrgSnapshot(tenantCtx, orgID, snapshotType)
+	})
 }
 
 func (as *AnalyticsScheduler) takeOrgSnapshot(ctx context.Context, orgID, snapshotType string) error {
+	switch snapshotType {
+	case dailyAnalyticsSnapshot, weeklyAnalyticsSnapshot, monthlyAnalyticsSnapshot:
+	default:
+		return fmt.Errorf("unsupported scheduled analytics snapshot type %q", snapshotType)
+	}
+	querier := database.QuerierFromContext(ctx, as.pool)
 	// Collect metrics
 	metrics := make(map[string]interface{})
 
 	// Compliance
 	var compScore float64
-	if err := as.pool.QueryRow(ctx, `SELECT COALESCE(AVG(compliance_score), 0) FROM organization_frameworks WHERE organization_id = $1`, orgID).Scan(&compScore); err != nil {
+	if err := querier.QueryRow(ctx, `SELECT COALESCE(AVG(compliance_score), 0) FROM organization_frameworks WHERE organization_id = $1`, orgID).Scan(&compScore); err != nil {
 		return fmt.Errorf("collect compliance score: %w", err)
 	}
 	metrics["compliance_score"] = compScore
 
 	// Risks
 	var totalRisks, critical, high int
-	if err := as.pool.QueryRow(ctx, `
+	if err := querier.QueryRow(ctx, `
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE residual_risk_level='critical'), COUNT(*) FILTER (WHERE residual_risk_level='high')
 		FROM risks WHERE organization_id=$1 AND deleted_at IS NULL AND status!='closed'
 	`, orgID).Scan(&totalRisks, &critical, &high); err != nil {
@@ -99,20 +90,20 @@ func (as *AnalyticsScheduler) takeOrgSnapshot(ctx context.Context, orgID, snapsh
 
 	// Incidents
 	var openIncidents int
-	if err := as.pool.QueryRow(ctx, `SELECT COUNT(*) FROM incidents WHERE organization_id=$1 AND deleted_at IS NULL AND status NOT IN ('closed','resolved','cancelled')`, orgID).Scan(&openIncidents); err != nil {
+	if err := querier.QueryRow(ctx, `SELECT COUNT(*) FROM incidents WHERE organization_id=$1 AND deleted_at IS NULL AND status NOT IN ('closed','resolved','cancelled')`, orgID).Scan(&openIncidents); err != nil {
 		return fmt.Errorf("collect incident count: %w", err)
 	}
 	metrics["incidents_open"] = openIncidents
 
 	// Findings
 	var openFindings int
-	if err := as.pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_findings WHERE organization_id=$1 AND deleted_at IS NULL AND status NOT IN ('resolved','closed')`, orgID).Scan(&openFindings); err != nil {
+	if err := querier.QueryRow(ctx, `SELECT COUNT(*) FROM audit_findings WHERE organization_id=$1 AND deleted_at IS NULL AND status NOT IN ('resolved','closed')`, orgID).Scan(&openFindings); err != nil {
 		return fmt.Errorf("collect finding count: %w", err)
 	}
 	metrics["findings_open"] = openFindings
 
 	// Insert/upsert
-	_, err := as.pool.Exec(ctx, `
+	_, err := querier.Exec(ctx, `
 		INSERT INTO analytics_snapshots (organization_id, snapshot_type, snapshot_date, metrics)
 		VALUES ($1, $2, CURRENT_DATE, $3)
 		ON CONFLICT (organization_id, snapshot_type, snapshot_date)
@@ -124,8 +115,12 @@ func (as *AnalyticsScheduler) takeOrgSnapshot(ctx context.Context, orgID, snapsh
 
 func (as *AnalyticsScheduler) calculateTrends(ctx context.Context) error {
 	log.Info().Msg("analytics_scheduler: calculating compliance trends")
+	return runForScheduledTenants(ctx, as.pool, "analytics trends", as.calculateTrendsForTenant)
+}
 
-	_, err := as.pool.Exec(ctx, `
+func (as *AnalyticsScheduler) calculateTrendsForTenant(ctx context.Context, organizationID string) error {
+	querier := database.QuerierFromContext(ctx, as.pool)
+	_, err := querier.Exec(ctx, `
 		INSERT INTO analytics_compliance_trends (organization_id, framework_id, framework_code, measurement_date, compliance_score, controls_implemented, controls_total, maturity_avg, score_change_7d, score_change_30d, score_change_90d, trend_direction)
 		SELECT
 			ofw.organization_id, ofw.framework_id, cf.code, CURRENT_DATE,
@@ -143,6 +138,7 @@ func (as *AnalyticsScheduler) calculateTrends(ctx context.Context) error {
 			END
 		FROM organization_frameworks ofw
 		JOIN compliance_frameworks cf ON cf.id = ofw.framework_id
+		WHERE ofw.organization_id = $1::uuid
 		ON CONFLICT (organization_id, framework_id, measurement_date) DO UPDATE
 		SET compliance_score = EXCLUDED.compliance_score,
 		    controls_implemented = EXCLUDED.controls_implemented,
@@ -151,7 +147,7 @@ func (as *AnalyticsScheduler) calculateTrends(ctx context.Context) error {
 		    score_change_30d = EXCLUDED.score_change_30d,
 		    score_change_90d = EXCLUDED.score_change_90d,
 		    trend_direction = EXCLUDED.trend_direction
-	`)
+	`, organizationID)
 
 	if err != nil {
 		return fmt.Errorf("calculating trends: %w", err)

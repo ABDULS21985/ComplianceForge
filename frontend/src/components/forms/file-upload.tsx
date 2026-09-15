@@ -1,8 +1,8 @@
 'use client';
 
 import * as React from 'react';
+import { FileIcon, Loader2, Upload, X } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
-import { Upload, X, Loader2, FileIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface FileUploadProps {

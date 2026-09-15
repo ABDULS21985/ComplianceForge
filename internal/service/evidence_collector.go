@@ -2,13 +2,18 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+
+	"github.com/complianceforge/platform/internal/database"
 )
 
 // EvidenceCollector handles automated evidence collection and validation.
@@ -19,18 +24,18 @@ type EvidenceCollector struct {
 
 // CollectionConfig defines how evidence is collected for a control.
 type CollectionConfig struct {
-	ID                      string              `json:"id"`
-	OrgID                   string              `json:"organization_id"`
-	ControlImplementationID string              `json:"control_implementation_id"`
-	Name                    string              `json:"name"`
-	CollectionMethod        string              `json:"collection_method"`
-	ScheduleCron            string              `json:"schedule_cron"`
+	ID                      string                `json:"id"`
+	OrgID                   string                `json:"organization_id"`
+	ControlImplementationID string                `json:"control_implementation_id"`
+	Name                    string                `json:"name"`
+	CollectionMethod        string                `json:"collection_method"`
+	ScheduleCron            string                `json:"schedule_cron"`
 	AcceptanceCriteria      []AcceptanceCriterion `json:"acceptance_criteria"`
-	IsActive                bool                `json:"is_active"`
-	ConsecutiveFailures     int                 `json:"consecutive_failures"`
-	FailureThreshold        int                 `json:"failure_threshold"`
-	LastCollectionAt        *string             `json:"last_collection_at"`
-	LastCollectionStatus    string              `json:"last_collection_status"`
+	IsActive                bool                  `json:"is_active"`
+	ConsecutiveFailures     int                   `json:"consecutive_failures"`
+	FailureThreshold        int                   `json:"failure_threshold"`
+	LastCollectionAt        *string               `json:"last_collection_at"`
+	LastCollectionStatus    string                `json:"last_collection_status"`
 }
 
 // AcceptanceCriterion defines a single validation rule for collected evidence.
@@ -62,6 +67,8 @@ type ValidationResult struct {
 	Message       string      `json:"message"`
 }
 
+const evidenceCollectionRunLease = 30 * time.Minute
+
 // NewEvidenceCollector creates a new EvidenceCollector.
 func NewEvidenceCollector(pool *pgxpool.Pool, bus *EventBus) *EvidenceCollector {
 	return &EvidenceCollector{pool: pool, bus: bus}
@@ -70,19 +77,24 @@ func NewEvidenceCollector(pool *pgxpool.Pool, bus *EventBus) *EvidenceCollector 
 // RunCollection executes an evidence collection for a given config, validates
 // results, and creates an evidence record if all criteria pass.
 func (ec *EvidenceCollector) RunCollection(ctx context.Context, configID string) (*CollectionRun, error) {
+	if ec == nil || ec.pool == nil || ec.bus == nil {
+		return nil, fmt.Errorf("evidence collector is not configured")
+	}
 	startTime := time.Now()
+	querier := database.QuerierFromContext(ctx, ec.pool)
 
 	// Fetch the config.
 	var orgID, controlImplID, name, method string
 	var criteriaJSON []byte
 	var failureThreshold int
+	var configUpdatedAt time.Time
 
-	err := ec.pool.QueryRow(ctx, `
+	err := querier.QueryRow(ctx, `
 		SELECT organization_id, control_implementation_id, name, collection_method,
-		       acceptance_criteria, failure_threshold
+		       acceptance_criteria, failure_threshold, updated_at
 		FROM evidence_collection_configs
 		WHERE id = $1 AND is_active = true`, configID,
-	).Scan(&orgID, &controlImplID, &name, &method, &criteriaJSON, &failureThreshold)
+	).Scan(&orgID, &controlImplID, &name, &method, &criteriaJSON, &failureThreshold, &configUpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("collection config not found or inactive")
@@ -92,21 +104,47 @@ func (ec *EvidenceCollector) RunCollection(ctx context.Context, configID string)
 
 	var criteria []AcceptanceCriterion
 	if err := json.Unmarshal(criteriaJSON, &criteria); err != nil {
-		criteria = nil
+		return nil, fmt.Errorf("decode collection acceptance criteria: %w", err)
 	}
 
 	// Create the collection run record.
 	var runID string
 	startedAtStr := startTime.Format(time.RFC3339)
-	err = ec.pool.QueryRow(ctx, `
-		INSERT INTO evidence_collection_runs (
-			organization_id, config_id, control_implementation_id,
-			status, started_at
-		) VALUES ($1, $2, $3, 'running', $4)
-		RETURNING id`,
-		orgID, configID, controlImplID, startTime,
-	).Scan(&runID)
+	err = withEvidenceCollectorTransaction(ctx, querier, func(tx pgx.Tx) error {
+		var active bool
+		var currentImplementationID string
+		var currentUpdatedAt time.Time
+		if err := tx.QueryRow(ctx, `SELECT control_implementation_id,updated_at,is_active
+			FROM evidence_collection_configs
+			WHERE organization_id=$1::uuid AND id=$2::uuid FOR UPDATE`, orgID, configID).
+			Scan(&currentImplementationID, &currentUpdatedAt, &active); err != nil {
+			return err
+		}
+		if !active || currentImplementationID != controlImplID || !currentUpdatedAt.Equal(configUpdatedAt) {
+			return pgx.ErrNoRows
+		}
+		if _, err := tx.Exec(ctx, `UPDATE evidence_collection_runs
+			SET status='timeout',completed_at=$3,
+			    duration_ms=LEAST(2147483647,GREATEST(0,
+			        FLOOR(EXTRACT(EPOCH FROM ($3-COALESCE(started_at,created_at)))*1000)::bigint))::integer,
+			    error_message='Evidence collection run lease expired before completion'
+			WHERE organization_id=$1::uuid AND config_id=$2::uuid
+			  AND status IN ('scheduled','running')
+			  AND COALESCE(started_at,created_at)<$4`,
+			orgID, configID, startTime, startTime.Add(-evidenceCollectionRunLease)); err != nil {
+			return fmt.Errorf("expire stale collection run: %w", err)
+		}
+		return tx.QueryRow(ctx, `INSERT INTO evidence_collection_runs (
+			organization_id,config_id,control_implementation_id,status,started_at)
+			VALUES ($1::uuid,$2::uuid,$3::uuid,'running',$4)
+			ON CONFLICT (organization_id,config_id)
+				WHERE status IN ('scheduled','running') DO NOTHING
+			RETURNING id`, orgID, configID, controlImplID, startTime).Scan(&runID)
+	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("collection config changed, became inactive, or already has an active run")
+		}
 		return nil, fmt.Errorf("create collection run: %w", err)
 	}
 
@@ -139,67 +177,106 @@ func (ec *EvidenceCollector) RunCollection(ctx context.Context, configID string)
 	}
 
 	// Marshal results for storage.
-	validationJSON, _ := json.Marshal(validationResults)
-	collectedJSON, _ := json.Marshal(collectedData)
-
-	// Update the run record.
-	_, err = ec.pool.Exec(ctx, `
-		UPDATE evidence_collection_runs
-		SET status = $1, completed_at = $2, duration_ms = $3,
-		    collected_data = $4, validation_results = $5, all_criteria_passed = $6
-		WHERE id = $7`,
-		runStatus, completedAt, durationMs,
-		collectedJSON, validationJSON, allPassed, runID)
+	validationJSON, err := json.Marshal(validationResults)
 	if err != nil {
-		log.Error().Err(err).Str("run_id", runID).Msg("failed to update collection run")
+		return nil, ec.failCollectionRun(ctx, querier, orgID, runID, completedAt, durationMs,
+			fmt.Errorf("marshal validation results: %w", err))
+	}
+	collectedJSON, err := json.Marshal(collectedData)
+	if err != nil {
+		return nil, ec.failCollectionRun(ctx, querier, orgID, runID, completedAt, durationMs,
+			fmt.Errorf("marshal collected evidence: %w", err))
+	}
+	evidenceMetadata, err := automatedEvidenceProofMetadata(runID, collectedJSON, validationJSON)
+	if err != nil {
+		return nil, ec.failCollectionRun(ctx, querier, orgID, runID, completedAt, durationMs,
+			fmt.Errorf("marshal collected evidence proof metadata: %w", err))
 	}
 
-	// Update the config's last collection status.
-	if allPassed || len(criteria) == 0 {
-		_, _ = ec.pool.Exec(ctx, `
-			UPDATE evidence_collection_configs
-			SET last_collection_at = $1, last_collection_status = $2, consecutive_failures = 0
-			WHERE id = $3`,
-			completedAt, runStatus, configID)
-
-		// Create an evidence record for the control implementation.
-		_, _ = ec.pool.Exec(ctx, `
-			INSERT INTO control_evidence (
-				organization_id, control_implementation_id,
-				title, description, evidence_type, collection_method,
-				collected_at, is_current, review_status
-			) VALUES ($1, $2, $3, $4, 'report', 'automated', $5, true, 'pending')`,
-			orgID, controlImplID,
-			fmt.Sprintf("Automated evidence: %s", name),
-			fmt.Sprintf("Collected via %s method. All %d acceptance criteria passed.", method, len(criteria)),
-			completedAt)
-	} else {
-		// Increment failure counter.
-		var newFailures int
-		_ = ec.pool.QueryRow(ctx, `
-			UPDATE evidence_collection_configs
-			SET last_collection_at = $1, last_collection_status = $2,
-			    consecutive_failures = consecutive_failures + 1
-			WHERE id = $3
-			RETURNING consecutive_failures`,
-			completedAt, runStatus, configID).Scan(&newFailures)
-
-		// If failure threshold reached, emit alert.
-		if newFailures >= failureThreshold {
-			ec.bus.Publish(Event{
-				Type:       "evidence.collection_threshold_breached",
-				Severity:   "high",
-				OrgID:      orgID,
-				EntityType: "evidence_collection_config",
-				EntityID:   configID,
-				EntityRef:  name,
-				Data: map[string]interface{}{
-					"consecutive_failures": newFailures,
-					"threshold":            failureThreshold,
-				},
-				Timestamp: time.Now(),
-			})
+	var newFailures int
+	persistErr := withEvidenceCollectorTransaction(ctx, querier, func(tx pgx.Tx) error {
+		var currentImplementationID string
+		var currentUpdatedAt time.Time
+		var active bool
+		if err := tx.QueryRow(ctx, `SELECT control_implementation_id,updated_at,is_active
+			FROM evidence_collection_configs
+			WHERE organization_id=$1::uuid AND id=$2::uuid
+			FOR UPDATE`, orgID, configID).
+			Scan(&currentImplementationID, &currentUpdatedAt, &active); err != nil {
+			return fmt.Errorf("lock collection config: %w", err)
 		}
+		if !active || currentImplementationID != controlImplID || !currentUpdatedAt.Equal(configUpdatedAt) {
+			return errors.New("collection config changed while the run was executing")
+		}
+
+		var evidenceID *string
+		if allPassed || len(criteria) == 0 {
+			createdEvidenceID := ""
+			if err := tx.QueryRow(ctx, `INSERT INTO control_evidence (
+				organization_id,control_implementation_id,title,description,
+				evidence_type,collection_method,collected_at,metadata
+			) SELECT $1::uuid,implementation.id,$3,$4,'report','automated',$5,$6::jsonb
+			FROM control_implementations AS implementation
+			WHERE implementation.organization_id=$1::uuid
+			  AND implementation.id=$2::uuid AND implementation.deleted_at IS NULL
+			RETURNING id`, orgID, controlImplID,
+				fmt.Sprintf("Automated evidence: %s", name),
+				fmt.Sprintf("Collected via %s method. All %d acceptance criteria passed.", method, len(criteria)),
+				completedAt, evidenceMetadata).Scan(&createdEvidenceID); err != nil {
+				return fmt.Errorf("create collected evidence: %w", err)
+			}
+			evidenceID = &createdEvidenceID
+			tag, err := tx.Exec(ctx, `UPDATE evidence_collection_configs
+				SET last_collection_at=$3,last_collection_status=$4,consecutive_failures=0
+				WHERE organization_id=$1::uuid AND id=$2::uuid`,
+				orgID, configID, completedAt, runStatus)
+			if err := requireOneEvidenceRow(err, tag.RowsAffected()); err != nil {
+				return fmt.Errorf("update successful collection config: %w", err)
+			}
+		} else {
+			if err := tx.QueryRow(ctx, `UPDATE evidence_collection_configs
+				SET last_collection_at=$3,last_collection_status=$4,
+				    consecutive_failures=consecutive_failures+1
+				WHERE organization_id=$1::uuid AND id=$2::uuid
+				RETURNING consecutive_failures`, orgID, configID, completedAt, runStatus).
+				Scan(&newFailures); err != nil {
+				return fmt.Errorf("update failed collection config: %w", err)
+			}
+		}
+
+		tag, err := tx.Exec(ctx, `UPDATE evidence_collection_runs
+			SET status=$3,completed_at=$4,duration_ms=$5,collected_data=$6::jsonb,
+			    validation_results=$7::jsonb,all_criteria_passed=$8,error_message=NULL,
+			    evidence_id=$9::uuid
+			WHERE organization_id=$1::uuid AND id=$2::uuid AND status='running'`,
+			orgID, runID, runStatus, completedAt, durationMs,
+			collectedJSON, validationJSON, allPassed, evidenceID)
+		if err != nil {
+			return fmt.Errorf("finalize collection run: %w", err)
+		}
+		if tag.RowsAffected() != 1 {
+			return errors.New("finalize collection run: active run no longer exists")
+		}
+		return nil
+	})
+	if persistErr != nil {
+		return nil, ec.failCollectionRun(ctx, querier, orgID, runID, completedAt, durationMs, persistErr)
+	}
+
+	if runStatus == "validation_failed" && newFailures >= failureThreshold {
+		ec.bus.Publish(Event{
+			Type:       "evidence.collection_threshold_breached",
+			Severity:   "high",
+			OrgID:      orgID,
+			EntityType: "evidence_collection_config",
+			EntityID:   configID,
+			EntityRef:  name,
+			Data: map[string]interface{}{
+				"consecutive_failures": newFailures,
+				"threshold":            failureThreshold,
+			},
+			Timestamp: time.Now(),
+		})
 	}
 
 	run := &CollectionRun{
@@ -223,6 +300,93 @@ func (ec *EvidenceCollector) RunCollection(ctx context.Context, configID string)
 		Msg("evidence collection run completed")
 
 	return run, nil
+}
+
+func automatedEvidenceProofMetadata(runID string, collectedData, validationResults []byte) ([]byte, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" || !json.Valid(collectedData) || !json.Valid(validationResults) {
+		return nil, errors.New("automated evidence proof inputs are invalid")
+	}
+	collectedDigest := fmt.Sprintf("%x", sha256.Sum256(collectedData))
+	validationDigest := fmt.Sprintf("%x", sha256.Sum256(validationResults))
+	return json.Marshal(map[string]map[string]string{
+		"automated_proof": {
+			"proof_schema":              "automated-evidence/v1",
+			"collection_run_id":         runID,
+			"collected_data_sha256":     collectedDigest,
+			"validation_results_sha256": validationDigest,
+		},
+	})
+}
+
+func (ec *EvidenceCollector) failCollectionRun(
+	ctx context.Context,
+	querier database.Querier,
+	orgID string,
+	runID string,
+	completedAt time.Time,
+	durationMs int,
+	cause error,
+) error {
+	message := cause.Error()
+	if len(message) > 4000 {
+		message = message[:4000]
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	tag, updateErr := querier.Exec(cleanupCtx, `
+		UPDATE evidence_collection_runs
+		SET status='failed', completed_at=$2, duration_ms=$3, error_message=$4
+		WHERE id=$1::uuid AND organization_id=$5::uuid AND status='running'`,
+		runID, completedAt, durationMs, message, orgID)
+	if err := requireOneEvidenceRow(updateErr, tag.RowsAffected()); err != nil {
+		return errors.Join(cause, fmt.Errorf("record failed collection run: %w", err))
+	}
+	return cause
+}
+
+type evidenceTransactionBeginner interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
+func withEvidenceCollectorTransaction(
+	ctx context.Context,
+	querier database.Querier,
+	fn func(pgx.Tx) error,
+) (returnErr error) {
+	beginner, ok := querier.(evidenceTransactionBeginner)
+	if !ok {
+		return errors.New("evidence collector database executor cannot start a transaction")
+	}
+	tx, err := beginner.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin evidence collection transaction: %w", err)
+	}
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if rollbackErr := tx.Rollback(rollbackCtx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("rollback evidence collection transaction: %w", rollbackErr))
+		}
+	}()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit evidence collection transaction: %w", err)
+	}
+	return nil
+}
+
+func requireOneEvidenceRow(err error, rowsAffected int64) error {
+	if err != nil {
+		return err
+	}
+	if rowsAffected != 1 {
+		return fmt.Errorf("expected one affected row, got %d", rowsAffected)
+	}
+	return nil
 }
 
 // ValidateEvidence evaluates each acceptance criterion against collected data
@@ -333,7 +497,8 @@ func (ec *EvidenceCollector) ValidateEvidence(data interface{}, criteria []Accep
 
 // ListConfigs returns all evidence collection configs for an organization.
 func (ec *EvidenceCollector) ListConfigs(ctx context.Context, orgID string) ([]CollectionConfig, error) {
-	rows, err := ec.pool.Query(ctx, `
+	querier := database.QuerierFromContext(ctx, ec.pool)
+	rows, err := querier.Query(ctx, `
 		SELECT id, organization_id, control_implementation_id, name, collection_method,
 		       COALESCE(schedule_cron, ''), acceptance_criteria, is_active,
 		       consecutive_failures, failure_threshold,
@@ -383,7 +548,7 @@ func (ec *EvidenceCollector) CreateConfig(ctx context.Context, orgID string, con
 		failureThreshold = 3
 	}
 
-	err = ec.pool.QueryRow(ctx, `
+	err = database.QuerierFromContext(ctx, ec.pool).QueryRow(ctx, `
 		INSERT INTO evidence_collection_configs (
 			organization_id, control_implementation_id, name, collection_method,
 			schedule_cron, acceptance_criteria, failure_threshold, is_active
@@ -412,7 +577,7 @@ func (ec *EvidenceCollector) UpdateConfig(ctx context.Context, orgID, configID s
 		return fmt.Errorf("marshal criteria: %w", err)
 	}
 
-	tag, err := ec.pool.Exec(ctx, `
+	tag, err := database.QuerierFromContext(ctx, ec.pool).Exec(ctx, `
 		UPDATE evidence_collection_configs
 		SET name = $1, collection_method = $2, schedule_cron = $3,
 		    acceptance_criteria = $4, failure_threshold = $5, is_active = $6
@@ -441,15 +606,16 @@ func (ec *EvidenceCollector) GetRunHistory(ctx context.Context, orgID, configID 
 	}
 	offset := (page - 1) * pageSize
 
+	querier := database.QuerierFromContext(ctx, ec.pool)
 	var total int
-	err := ec.pool.QueryRow(ctx, `
+	err := querier.QueryRow(ctx, `
 		SELECT COUNT(*) FROM evidence_collection_runs
 		WHERE config_id = $1 AND organization_id = $2`, configID, orgID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count collection runs: %w", err)
 	}
 
-	rows, err := ec.pool.Query(ctx, `
+	rows, err := querier.Query(ctx, `
 		SELECT id, config_id, status, started_at, completed_at, duration_ms,
 		       collected_data, validation_results, all_criteria_passed, error_message
 		FROM evidence_collection_runs

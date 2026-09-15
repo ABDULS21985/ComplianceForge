@@ -155,7 +155,7 @@ func (h *MobileHandler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, dashboard)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", dashboard)
 }
 
 // ListApprovals handles GET /mobile/approvals.
@@ -175,7 +175,7 @@ func (h *MobileHandler) ListApprovals(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": approvals,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -210,7 +210,7 @@ func (h *MobileHandler) ApproveItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Item approved"})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]string{"message": "Item approved"})
 }
 
 // RejectItem handles POST /mobile/approvals/{id}/reject.
@@ -237,7 +237,7 @@ func (h *MobileHandler) RejectItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Item rejected"})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]string{"message": "Item rejected"})
 }
 
 // GetActiveIncidents handles GET /mobile/incidents/active.
@@ -250,7 +250,7 @@ func (h *MobileHandler) GetActiveIncidents(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": incidents})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": incidents})
 }
 
 // GetDeadlines handles GET /mobile/deadlines.
@@ -264,7 +264,7 @@ func (h *MobileHandler) GetDeadlines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": deadlines})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": deadlines})
 }
 
 // GetActivity handles GET /mobile/activity.
@@ -284,7 +284,7 @@ func (h *MobileHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": activity,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -316,7 +316,7 @@ func (h *MobileHandler) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{"message": "Device registered"})
+	writeClassifiedJSON(w, r, http.StatusCreated, "reports", map[string]string{"message": "Device registered"})
 }
 
 // UnregisterDevice handles DELETE /mobile/push/unregister.
@@ -343,7 +343,7 @@ func (h *MobileHandler) GetPushPreferences(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, prefs)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", prefs)
 }
 
 // UpdatePushPreferences handles PUT /mobile/push/preferences.
@@ -362,5 +362,5 @@ func (h *MobileHandler) UpdatePushPreferences(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Push preferences updated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]string{"message": "Push preferences updated"})
 }

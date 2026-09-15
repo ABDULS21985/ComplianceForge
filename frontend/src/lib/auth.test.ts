@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-
 import { decodeJwt, isTokenAuthenticated } from '@/lib/auth';
+import { describe, expect, it, vi } from 'vitest';
 
 function createToken(payload: Record<string, unknown>): string {
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');

@@ -17,6 +17,7 @@ export function useCapabilityPermissions() {
   });
   const permissions = normalizePermissionMap(query.data);
   return {
+    permissions,
     canConfigure: hasSettingsPermission(permissions, user, 'configure'),
     canRead: hasSettingsPermission(permissions, user, 'read'),
     isError: query.isError,

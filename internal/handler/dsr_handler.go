@@ -42,38 +42,38 @@ type DSRFilters struct {
 
 // DSRRequest represents a data subject request.
 type DSRRequest struct {
-	ID              string `json:"id"`
-	OrganizationID  string `json:"organization_id"`
-	RequestType     string `json:"request_type" validate:"required"` // access, erasure, rectification, portability, restriction, objection
-	Status          string `json:"status"`                           // pending, verified, in_progress, completed, rejected
-	DataSubjectName string `json:"data_subject_name" validate:"required"`
+	ID               string `json:"id"`
+	OrganizationID   string `json:"organization_id"`
+	RequestType      string `json:"request_type" validate:"required"` // access, erasure, rectification, portability, restriction, objection
+	Status           string `json:"status"`                           // pending, verified, in_progress, completed, rejected
+	DataSubjectName  string `json:"data_subject_name" validate:"required"`
 	DataSubjectEmail string `json:"data_subject_email" validate:"required"`
-	Description     string `json:"description"`
-	LegalBasis      string `json:"legal_basis,omitempty"`
-	AssigneeID      string `json:"assignee_id,omitempty"`
-	DueDate         string `json:"due_date,omitempty"`
-	CreatedBy       string `json:"created_by"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
-	CompletedAt     string `json:"completed_at,omitempty"`
+	Description      string `json:"description"`
+	LegalBasis       string `json:"legal_basis,omitempty"`
+	AssigneeID       string `json:"assignee_id,omitempty"`
+	DueDate          string `json:"due_date,omitempty"`
+	CreatedBy        string `json:"created_by"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+	CompletedAt      string `json:"completed_at,omitempty"`
 }
 
 // DSRRequestDetail extends DSRRequest with tasks and audit trail.
 type DSRRequestDetail struct {
 	DSRRequest
-	Tasks      []DSRTask      `json:"tasks"`
+	Tasks      []DSRTask       `json:"tasks"`
 	AuditTrail []DSRAuditEntry `json:"audit_trail"`
 }
 
 // DSRTask represents an individual task within a DSR request workflow.
 type DSRTask struct {
-	ID        string `json:"id"`
-	RequestID string `json:"request_id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"` // pending, in_progress, completed, skipped
-	AssigneeID string `json:"assignee_id,omitempty"`
-	Notes     string `json:"notes,omitempty"`
-	DueDate   string `json:"due_date,omitempty"`
+	ID          string `json:"id"`
+	RequestID   string `json:"request_id"`
+	Title       string `json:"title"`
+	Status      string `json:"status"` // pending, in_progress, completed, skipped
+	AssigneeID  string `json:"assignee_id,omitempty"`
+	Notes       string `json:"notes,omitempty"`
+	DueDate     string `json:"due_date,omitempty"`
 	CompletedAt string `json:"completed_at,omitempty"`
 }
 
@@ -173,7 +173,7 @@ func (h *DSRHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{
 		"data": requests,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -199,7 +199,7 @@ func (h *DSRHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", detail)
 }
 
 // CreateRequest handles POST /dsr.
@@ -223,7 +223,7 @@ func (h *DSRHandler) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, req)
+	writeClassifiedJSON(w, r, http.StatusCreated, "incidents", req)
 }
 
 // UpdateRequest handles PUT /dsr/{id}.
@@ -248,7 +248,7 @@ func (h *DSRHandler) UpdateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, req)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", req)
 }
 
 // VerifyIdentity handles POST /dsr/{id}/verify-identity.
@@ -277,7 +277,7 @@ func (h *DSRHandler) VerifyIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Identity verification recorded"})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]string{"message": "Identity verification recorded"})
 }
 
 // AssignRequest handles POST /dsr/{id}/assign.
@@ -307,7 +307,7 @@ func (h *DSRHandler) AssignRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Request assigned"})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]string{"message": "Request assigned"})
 }
 
 // ExtendDeadline handles POST /dsr/{id}/extend.
@@ -336,7 +336,7 @@ func (h *DSRHandler) ExtendDeadline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Deadline extended"})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]string{"message": "Deadline extended"})
 }
 
 // CompleteRequest handles POST /dsr/{id}/complete.
@@ -360,7 +360,7 @@ func (h *DSRHandler) CompleteRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Request completed"})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]string{"message": "Request completed"})
 }
 
 // RejectRequest handles POST /dsr/{id}/reject.
@@ -389,7 +389,7 @@ func (h *DSRHandler) RejectRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Request rejected"})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]string{"message": "Request rejected"})
 }
 
 // UpdateTask handles PUT /dsr/{id}/tasks/{taskId}.
@@ -418,7 +418,7 @@ func (h *DSRHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Task updated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]string{"message": "Task updated"})
 }
 
 // GetDashboard handles GET /dsr/dashboard.
@@ -431,7 +431,7 @@ func (h *DSRHandler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": dashboard})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{"data": dashboard})
 }
 
 // GetOverdue handles GET /dsr/overdue.
@@ -444,7 +444,7 @@ func (h *DSRHandler) GetOverdue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": requests})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{"data": requests})
 }
 
 // ListTemplates handles GET /dsr/templates.
@@ -457,5 +457,5 @@ func (h *DSRHandler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": templates})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{"data": templates})
 }

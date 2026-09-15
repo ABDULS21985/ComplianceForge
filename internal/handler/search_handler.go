@@ -40,26 +40,26 @@ type SearchService interface {
 
 // SearchParams holds parameters for global search.
 type SearchParams struct {
-	Query      string   `json:"query"`
-	Types      []string `json:"types,omitempty"` // risk, control, policy, audit, vendor, etc.
-	Status     string   `json:"status,omitempty"`
-	DateFrom   string   `json:"date_from,omitempty"`
-	DateTo     string   `json:"date_to,omitempty"`
-	Page       int      `json:"page"`
-	PageSize   int      `json:"page_size"`
-	Sort       string   `json:"sort,omitempty"` // relevance, date, name
-	Highlight  bool     `json:"highlight"`
+	Query     string   `json:"query"`
+	Types     []string `json:"types,omitempty"` // risk, control, policy, audit, vendor, etc.
+	Status    string   `json:"status,omitempty"`
+	DateFrom  string   `json:"date_from,omitempty"`
+	DateTo    string   `json:"date_to,omitempty"`
+	Page      int      `json:"page"`
+	PageSize  int      `json:"page_size"`
+	Sort      string   `json:"sort,omitempty"` // relevance, date, name
+	Highlight bool     `json:"highlight"`
 }
 
 // SearchResults holds global search results.
 type SearchResults struct {
-	Query      string             `json:"query"`
-	TotalHits  int                `json:"total_hits"`
-	Page       int                `json:"page"`
-	PageSize   int                `json:"page_size"`
-	Results    []SearchResultItem `json:"results"`
-	Facets     map[string][]Facet `json:"facets,omitempty"`
-	TimeTakenMs int               `json:"time_taken_ms"`
+	Query       string             `json:"query"`
+	TotalHits   int                `json:"total_hits"`
+	Page        int                `json:"page"`
+	PageSize    int                `json:"page_size"`
+	Results     []SearchResultItem `json:"results"`
+	Facets      map[string][]Facet `json:"facets,omitempty"`
+	TimeTakenMs int                `json:"time_taken_ms"`
 }
 
 // SearchResultItem represents a single search result.
@@ -148,10 +148,10 @@ type ArticleFeedback struct {
 
 // KnowledgeBookmark represents a user's bookmarked article.
 type KnowledgeBookmark struct {
-	ArticleID  string `json:"article_id"`
-	Title      string `json:"title"`
-	Slug       string `json:"slug"`
-	Category   string `json:"category,omitempty"`
+	ArticleID    string `json:"article_id"`
+	Title        string `json:"title"`
+	Slug         string `json:"slug"`
+	Category     string `json:"category,omitempty"`
 	BookmarkedAt string `json:"bookmarked_at"`
 }
 
@@ -194,7 +194,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, results)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", results)
 }
 
 // Autocomplete handles GET /search/autocomplete.
@@ -213,7 +213,7 @@ func (h *SearchHandler) Autocomplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": results})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": results})
 }
 
 // GetRelated handles GET /search/related/{entityType}/{entityId}.
@@ -232,7 +232,7 @@ func (h *SearchHandler) GetRelated(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": related})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{"data": related})
 }
 
 // Reindex handles POST /search/reindex.
@@ -252,7 +252,7 @@ func (h *SearchHandler) Reindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, status)
+	writeClassifiedJSON(w, r, http.StatusAccepted, "reports", status)
 }
 
 // SearchKnowledge handles GET /knowledge.
@@ -276,7 +276,7 @@ func (h *SearchHandler) SearchKnowledge(w http.ResponseWriter, r *http.Request) 
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{
 		"data": articles,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -301,7 +301,7 @@ func (h *SearchHandler) GetKnowledgeArticle(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, article)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", article)
 }
 
 // GetArticlesForControl handles GET /knowledge/for-control/{frameworkCode}/{controlCode}.
@@ -319,7 +319,7 @@ func (h *SearchHandler) GetArticlesForControl(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": articles})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"data": articles})
 }
 
 // GetRecommendedArticles handles GET /knowledge/recommended.
@@ -332,7 +332,7 @@ func (h *SearchHandler) GetRecommendedArticles(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": articles})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"data": articles})
 }
 
 // CreateArticle handles POST /knowledge/articles.
@@ -356,7 +356,7 @@ func (h *SearchHandler) CreateArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, article)
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", article)
 }
 
 // UpdateArticle handles PUT /knowledge/articles/{id}.
@@ -380,7 +380,7 @@ func (h *SearchHandler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, article)
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", article)
 }
 
 // SubmitArticleFeedback handles POST /knowledge/articles/{id}/feedback.
@@ -404,7 +404,7 @@ func (h *SearchHandler) SubmitArticleFeedback(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Feedback submitted"})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]string{"message": "Feedback submitted"})
 }
 
 // ListBookmarks handles GET /knowledge/bookmarks.
@@ -418,7 +418,7 @@ func (h *SearchHandler) ListBookmarks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": bookmarks})
+	writeClassifiedJSON(w, r, http.StatusOK, "policies", map[string]interface{}{"data": bookmarks})
 }
 
 // CreateBookmark handles POST /knowledge/bookmarks/{articleId}.
@@ -436,7 +436,7 @@ func (h *SearchHandler) CreateBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{"message": "Bookmark created"})
+	writeClassifiedJSON(w, r, http.StatusCreated, "policies", map[string]string{"message": "Bookmark created"})
 }
 
 // DeleteBookmark handles DELETE /knowledge/bookmarks/{articleId}.

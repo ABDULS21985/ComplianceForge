@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/complianceforge/platform/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
@@ -26,26 +27,26 @@ var (
 
 // SearchRequest holds full-text search parameters.
 type SearchRequest struct {
-	Query      string   `json:"query"`
-	Types      []string `json:"types"`       // entity types to include
-	Tags       []string `json:"tags"`
-	Status     *string  `json:"status"`
-	SortBy     string   `json:"sort_by"`     // relevance, date, title
-	Page       int      `json:"page"`
-	PageSize   int      `json:"page_size"`
+	Query    string   `json:"query"`
+	Types    []string `json:"types"` // entity types to include
+	Tags     []string `json:"tags"`
+	Status   *string  `json:"status"`
+	SortBy   string   `json:"sort_by"` // relevance, date, title
+	Page     int      `json:"page"`
+	PageSize int      `json:"page_size"`
 }
 
 // SearchResult is a single hit returned by search.
 type SearchResult struct {
-	EntityType  string  `json:"entity_type"`
-	EntityID    string  `json:"entity_id"`
-	EntityRef   string  `json:"entity_ref"`
-	Title       string  `json:"title"`
-	Snippet     string  `json:"snippet"`
-	Rank        float64 `json:"rank"`
-	Status      string  `json:"status"`
-	Tags        string  `json:"tags"`
-	UpdatedAt   string  `json:"updated_at"`
+	EntityType string  `json:"entity_type"`
+	EntityID   string  `json:"entity_id"`
+	EntityRef  string  `json:"entity_ref"`
+	Title      string  `json:"title"`
+	Snippet    string  `json:"snippet"`
+	Rank       float64 `json:"rank"`
+	Status     string  `json:"status"`
+	Tags       string  `json:"tags"`
+	UpdatedAt  string  `json:"updated_at"`
 }
 
 // SearchFacet is a count-per-type aggregation.
@@ -102,12 +103,12 @@ type KnowledgeArticle struct {
 
 // KnowledgeFilter is a filter set for browsing knowledge articles.
 type KnowledgeFilter struct {
-	Category       *string  `json:"category"`
-	Tags           []string `json:"tags"`
-	FrameworkCode  *string  `json:"framework_code"`
-	SearchQuery    *string  `json:"search_query"`
-	Page           int      `json:"page"`
-	PageSize       int      `json:"page_size"`
+	Category      *string  `json:"category"`
+	Tags          []string `json:"tags"`
+	FrameworkCode *string  `json:"framework_code"`
+	SearchQuery   *string  `json:"search_query"`
+	Page          int      `json:"page"`
+	PageSize      int      `json:"page_size"`
 }
 
 // Bookmark represents a user's saved article bookmark.
@@ -555,10 +556,10 @@ func (s *SearchService) GetArticlesForControl(ctx context.Context, controlCode, 
 
 // GetRecommendedArticles returns articles personalized by the user's role and frameworks.
 func (s *SearchService) GetRecommendedArticles(ctx context.Context, orgID, userID string) ([]KnowledgeArticle, error) {
-	rows, err := s.pool.Query(ctx, `
+	rows, err := database.QuerierFromContext(ctx, s.pool).Query(ctx, `
 		WITH user_frameworks AS (
 			SELECT DISTINCT f.code
-			FROM user_roles ur
+			FROM effective_user_roles ur
 			JOIN frameworks f ON f.organization_id = ur.organization_id
 			WHERE ur.user_id = $2 AND ur.organization_id = $1
 		)

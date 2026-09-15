@@ -3,6 +3,15 @@
 
 import { api, type PaginationParams } from "./api";
 import type {
+  Asset,
+  AssetCreateInput,
+  AssetLifecycleEvent,
+  AssetListParams,
+  AssetPage,
+  AssetPatch,
+  AssetStats,
+} from '@/types/asset';
+import type {
   Audit,
   AuditCreateInput,
   AuditFinding,
@@ -16,13 +25,16 @@ import type {
   AuditPage,
   AuditPatch,
 } from '@/types/audit';
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type UseQueryOptions,
-} from "@tanstack/react-query";
-import { formatAuditError } from './audit';
+import type {
+  ControlEvidenceEnvelope,
+  ControlEvidenceListParams,
+  ControlEvidenceReviewInput,
+  ControlEvidenceSupersedeInput,
+  ControlEvidenceUploadInput,
+  ControlImplementationPatch,
+  ControlRecord,
+  EvidenceLifecycleRecord,
+} from '@/types/control-evidence';
 import type {
   Incident,
   IncidentAssignmentInput,
@@ -37,17 +49,15 @@ import type {
   IncidentTransitionInput,
   IncidentUnassignmentInput,
 } from '@/types/incident';
-import { formatIncidentError } from './incident';
-import type {
-  Asset,
-  AssetCreateInput,
-  AssetLifecycleEvent,
-  AssetListParams,
-  AssetPage,
-  AssetPatch,
-  AssetStats,
-} from '@/types/asset';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseQueryOptions,
+} from "@tanstack/react-query";
 import { formatAssetError } from './asset';
+import { formatAuditError } from './audit';
+import { formatIncidentError } from './incident';
 import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
@@ -121,7 +131,9 @@ export const queryKeys = {
 
   // Controls
   control: (id: string) => ["controls", id] as const,
-  controlEvidence: (controlId: string, params?: PaginationParams) => ["controls", controlId, "evidence", params] as const,
+  controlEvidence: (controlId: string, params?: ControlEvidenceListParams) => ["controls", controlId, "evidence", params] as const,
+  controlEvidenceHistory: (controlId: string, evidenceId: string) =>
+    ['controls', controlId, 'evidence', evidenceId, 'history'] as const,
 
   // Settings
   org: ["settings", "organization"] as const,
@@ -1039,7 +1051,10 @@ export function useAssetEvents(
 // CONTROLS
 // ---------------------------------------------------------------------------
 
-export function useControlImplementation(id: string, options?: Partial<UseQueryOptions>) {
+export function useControlImplementation(
+  id: string,
+  options?: Omit<UseQueryOptions<ControlRecord>, 'queryFn' | 'queryKey'>,
+) {
   return useQuery({
     queryKey: queryKeys.control(id),
     queryFn: () => api.controls.get(id),
@@ -1051,7 +1066,8 @@ export function useControlImplementation(id: string, options?: Partial<UseQueryO
 export function useUpdateControl() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: unknown }) => api.controls.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: ControlImplementationPatch }) =>
+      api.controls.updateImplementation(id, data),
     onSuccess: (_data, variables) => {
       toast.success("Control updated.");
       qc.invalidateQueries({ queryKey: queryKeys.control(variables.id) });
@@ -1066,7 +1082,8 @@ export function useUpdateControl() {
 export function useUploadEvidence(controlId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (formData: FormData) => api.controls.uploadEvidence(controlId, formData),
+    mutationFn: ({ data, signal }: { data: ControlEvidenceUploadInput; signal?: AbortSignal }) =>
+      api.controls.uploadEvidence(controlId, data, signal),
     onSuccess: () => {
       toast.success("Evidence uploaded.");
       qc.invalidateQueries({ queryKey: queryKeys.controlEvidence(controlId) });
@@ -1078,7 +1095,11 @@ export function useUploadEvidence(controlId: string) {
   });
 }
 
-export function useControlEvidence(controlId: string, params?: PaginationParams, options?: Partial<UseQueryOptions>) {
+export function useControlEvidence(
+  controlId: string,
+  params?: ControlEvidenceListParams,
+  options?: Omit<UseQueryOptions<ControlEvidenceEnvelope>, 'queryFn' | 'queryKey'>,
+) {
   return useQuery({
     queryKey: queryKeys.controlEvidence(controlId, params),
     queryFn: () => api.controls.listEvidence(controlId, params),
@@ -1100,7 +1121,7 @@ export function useDownloadEvidence() {
 export function useReviewEvidence(controlId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ evidenceId, data }: { evidenceId: string; data: { status: string; comment?: string } }) =>
+    mutationFn: ({ evidenceId, data }: { evidenceId: string; data: ControlEvidenceReviewInput }) =>
       api.controls.reviewEvidence(controlId, evidenceId, data),
     onSuccess: () => {
       toast.success("Evidence review recorded.");
@@ -1112,16 +1133,54 @@ export function useReviewEvidence(controlId: string) {
   });
 }
 
-export function useRecordControlTest(controlId: string) {
+export function useEvidenceHistory(
+  controlId: string,
+  evidenceId: string,
+  options?: Omit<UseQueryOptions<EvidenceLifecycleRecord>, 'queryFn' | 'queryKey'>,
+) {
+  return useQuery({
+    queryKey: queryKeys.controlEvidenceHistory(controlId, evidenceId),
+    queryFn: ({ signal }) => api.controls.evidenceHistory(controlId, evidenceId, signal),
+    enabled: Boolean(controlId && evidenceId),
+    ...options,
+  });
+}
+
+export function useVerifyEvidenceIntegrity(controlId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: unknown) => api.controls.recordTest(controlId, data),
-    onSuccess: () => {
-      toast.success("Control test recorded.");
-      qc.invalidateQueries({ queryKey: queryKeys.control(controlId) });
+    mutationFn: ({ evidenceId, signal }: { evidenceId: string; signal?: AbortSignal }) =>
+      api.controls.verifyEvidenceIntegrity(controlId, evidenceId, signal),
+    onSuccess: (_result, variables) => {
+      toast.success('Evidence integrity verified.');
+      qc.invalidateQueries({
+        queryKey: queryKeys.controlEvidenceHistory(controlId, variables.evidenceId),
+      });
     },
-    onError: () => {
-      toast.error("Failed to record test.");
+  });
+}
+
+export function useSupersedeEvidence(controlId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      data,
+      evidenceId,
+      signal,
+    }: {
+      data: ControlEvidenceSupersedeInput;
+      evidenceId: string;
+      signal?: AbortSignal;
+    }) => api.controls.supersedeEvidence(controlId, evidenceId, data, signal),
+    onSuccess: (replacement, variables) => {
+      toast.success('Replacement evidence version uploaded.');
+      qc.invalidateQueries({ queryKey: queryKeys.controlEvidence(controlId) });
+      qc.invalidateQueries({
+        queryKey: queryKeys.controlEvidenceHistory(controlId, variables.evidenceId),
+      });
+      qc.invalidateQueries({
+        queryKey: queryKeys.controlEvidenceHistory(controlId, replacement.id),
+      });
     },
   });
 }
@@ -1129,29 +1188,6 @@ export function useRecordControlTest(controlId: string) {
 // ---------------------------------------------------------------------------
 // SETTINGS
 // ---------------------------------------------------------------------------
-
-export function useOrganization(options?: Partial<UseQueryOptions>) {
-  return useQuery({
-    queryKey: queryKeys.org,
-    queryFn: () => api.settings.getOrg(),
-    staleTime: 5 * 60 * 1000,
-    ...options,
-  });
-}
-
-export function useUpdateOrganization() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: unknown) => api.settings.updateOrg(data),
-    onSuccess: () => {
-      toast.success("Organization settings updated.");
-      qc.invalidateQueries({ queryKey: queryKeys.org });
-    },
-    onError: () => {
-      toast.error("Failed to update organization settings.");
-    },
-  });
-}
 
 export function useUsers(
   params?: PaginationParams & { is_active?: boolean; role_id?: string },

@@ -1,13 +1,31 @@
 package middleware
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/complianceforge/platform/internal/authz"
 )
+
+type authorizationDecisionContextKey struct{}
+
+// GetAuthorizationDecision returns the persisted decision and obligations for
+// the current protected request. Downstream serializers/exporters can enforce
+// field masking and watermarking only after authorization has succeeded.
+func GetAuthorizationDecision(ctx context.Context) (authz.Decision, bool) {
+	decision, ok := ctx.Value(authorizationDecisionContextKey{}).(authz.Decision)
+	return decision, ok
+}
+
+// ContextWithAuthorizationDecision attaches a decision produced by a trusted
+// policy decision point. It exists so non-HTTP adapters and focused tests can
+// reuse the same fail-closed serialization boundary; callers must never derive
+// the decision from request payloads or headers.
+func ContextWithAuthorizationDecision(ctx context.Context, decision authz.Decision) context.Context {
+	return context.WithValue(ctx, authorizationDecisionContextKey{}, decision)
+}
 
 // ResourceIDResolver extracts a resource identifier after the router has
 // populated path parameters. It may return an empty string for collection-level
@@ -28,7 +46,7 @@ func RequireAuthorization(
 			userID := GetUserIDFromContext(r.Context())
 			orgID := GetOrgIDFromContext(r.Context())
 			if userID == "" || orgID == "" {
-				writeAuthorizationProblem(w, http.StatusUnauthorized, "authentication_required", "Authentication is required")
+				writeAuthorizationProblem(w, r, http.StatusUnauthorized, "authentication_required", "Authentication is required")
 				return
 			}
 			if authorizer == nil {
@@ -37,7 +55,7 @@ func RequireAuthorization(
 					Str("resource", resource).
 					Str("action", action).
 					Msg("authorization policy decision point is unavailable")
-				writeAuthorizationProblem(w, http.StatusServiceUnavailable, "authorization_unavailable", "Authorization is temporarily unavailable")
+				writeAuthorizationProblem(w, r, http.StatusServiceUnavailable, "authorization_unavailable", "Authorization is temporarily unavailable")
 				return
 			}
 
@@ -52,7 +70,11 @@ func RequireAuthorization(
 				Resource:       resource,
 				ResourceID:     resourceID,
 				Action:         action,
-				IPAddress:      r.RemoteAddr,
+				IPAddress:      GetClientIPFromContext(r.Context()),
+				MFAVerified:    GetMFAVerifiedFromContext(r.Context()),
+				Attributes: map[string]any{
+					"request_id": GetRequestIDFromContext(r.Context()),
+				},
 			})
 			if err != nil {
 				log.Error().
@@ -63,7 +85,7 @@ func RequireAuthorization(
 					Str("resource", resource).
 					Str("action", action).
 					Msg("authorization decision failed closed")
-				writeAuthorizationProblem(w, http.StatusServiceUnavailable, "authorization_unavailable", "Authorization is temporarily unavailable")
+				writeAuthorizationProblem(w, r, http.StatusServiceUnavailable, "authorization_unavailable", "Authorization is temporarily unavailable")
 				return
 			}
 			if !decision.Allowed {
@@ -75,25 +97,18 @@ func RequireAuthorization(
 					Str("resource_id", resourceID).
 					Str("action", action).
 					Str("policy_id", decision.PolicyID).
+					Str("reason_code", decision.ReasonCode).
 					Msg("authorization denied")
-				writeAuthorizationProblem(w, http.StatusForbidden, "access_denied", "You do not have permission to perform this action")
+				writeAuthorizationProblem(w, r, http.StatusForbidden, "access_denied", "You do not have permission to perform this action")
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			ctx := ContextWithAuthorizationDecision(r.Context(), decision)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-func writeAuthorizationProblem(w http.ResponseWriter, status int, code, detail string) {
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"type":   "urn:complianceforge:problem:" + code,
-		"title":  http.StatusText(status),
-		"status": status,
-		"code":   code,
-		"detail": detail,
-	})
+func writeAuthorizationProblem(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	writeMiddlewareError(w, r, status, code, message, "")
 }

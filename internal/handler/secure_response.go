@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"io"
 	"mime"
 	"net/http"
 	"path"
@@ -25,6 +26,36 @@ var permittedAttachmentMediaTypes = map[string]string{
 	"image/webp":      "image/webp",
 	"text/calendar":   "text/calendar; charset=utf-8",
 	"text/csv":        "text/csv; charset=utf-8",
+}
+
+func writeAttachmentStream(w http.ResponseWriter, fileName, contentType string, size int64, data io.ReadCloser) {
+	defer data.Close()
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = ""
+	}
+	safeContentType, allowed := permittedAttachmentMediaTypes[strings.ToLower(mediaType)]
+	if !allowed {
+		safeContentType = "application/octet-stream"
+	}
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeAttachmentFilename(fileName)})
+	if disposition == "" {
+		disposition = `attachment; filename="download"`
+	}
+	w.Header().Set("Content-Type", safeContentType)
+	w.Header().Set("Content-Disposition", disposition)
+	if size >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.WriteHeader(http.StatusOK)
+	// #nosec G705 -- the stream uses the same encoded attachment name, strict
+	// media allowlist, nosniff, no-store, and document sandbox as writeAttachment.
+	if _, err := io.Copy(w, data); err != nil {
+		log.Warn().Err(err).Msg("handler: failed to stream attachment")
+	}
 }
 
 // writeAttachment applies a single, auditable download policy to generated

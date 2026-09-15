@@ -258,7 +258,7 @@ func (h *BoardHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": members,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -290,7 +290,7 @@ func (h *BoardHandler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, member)
+	writeClassifiedJSON(w, r, http.StatusCreated, "reports", member)
 }
 
 // UpdateMember handles PUT /board/members/{id}.
@@ -315,7 +315,7 @@ func (h *BoardHandler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, member)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", member)
 }
 
 // ListMeetings handles GET /board/meetings.
@@ -340,7 +340,7 @@ func (h *BoardHandler) ListMeetings(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": meetings,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -372,7 +372,7 @@ func (h *BoardHandler) CreateMeeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, meeting)
+	writeClassifiedJSON(w, r, http.StatusCreated, "reports", meeting)
 }
 
 // UpdateMeeting handles PUT /board/meetings/{id}.
@@ -397,7 +397,7 @@ func (h *BoardHandler) UpdateMeeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, meeting)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", meeting)
 }
 
 // GenerateMeetingPack handles POST /board/meetings/{id}/generate-pack.
@@ -416,7 +416,7 @@ func (h *BoardHandler) GenerateMeetingPack(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, pack)
+	writeClassifiedJSON(w, r, http.StatusAccepted, "reports", pack)
 }
 
 // DownloadMeetingPack handles GET /board/meetings/{id}/download-pack.
@@ -435,11 +435,11 @@ func (h *BoardHandler) DownloadMeetingPack(w http.ResponseWriter, r *http.Reques
 	}
 
 	if len(file.FileData) > 0 {
-		writeAttachment(w, file.FileName, file.ContentType, file.FileData)
+		writeClassifiedAttachment(w, r, "reports", file.FileName, file.ContentType, file.FileData)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]string{
 		"file_url":  file.FileURL,
 		"file_name": file.FileName,
 	})
@@ -466,7 +466,7 @@ func (h *BoardHandler) CreateDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, decision)
+	writeClassifiedJSON(w, r, http.StatusCreated, "reports", decision)
 }
 
 // ListDecisions handles GET /board/decisions.
@@ -491,7 +491,7 @@ func (h *BoardHandler) ListDecisions(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": decisions,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -528,7 +528,7 @@ func (h *BoardHandler) UpdateDecisionAction(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Decision action updated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]string{"message": "Decision action updated"})
 }
 
 // ListReports handles GET /board/reports.
@@ -547,7 +547,7 @@ func (h *BoardHandler) ListReports(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", map[string]interface{}{
 		"data": reports,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -580,7 +580,7 @@ func (h *BoardHandler) GenerateReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, report)
+	writeClassifiedJSON(w, r, http.StatusAccepted, "reports", report)
 }
 
 // GetBoardDashboard handles GET /board/dashboard.
@@ -593,7 +593,7 @@ func (h *BoardHandler) GetBoardDashboard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, dashboard)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", dashboard)
 }
 
 // GetNIS2Governance handles GET /board/nis2-governance.
@@ -606,7 +606,7 @@ func (h *BoardHandler) GetNIS2Governance(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, report)
+	writeClassifiedJSON(w, r, http.StatusOK, "reports", report)
 }
 
 // ---------- board portal handler (public, token-authenticated) ----------

@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/complianceforge/platform/internal/apiresponse"
 	authdomain "github.com/complianceforge/platform/internal/auth"
 	"github.com/complianceforge/platform/internal/middleware"
 	"github.com/complianceforge/platform/internal/models"
+	"github.com/complianceforge/platform/internal/service"
 	requestvalidator "github.com/complianceforge/platform/internal/validator"
 )
 
@@ -25,6 +27,14 @@ type AuthService interface {
 	Logout(ctx context.Context, orgID, userID, accessToken string) error
 }
 
+// IdentityAuthenticationCompleter is kept separate from the legacy AuthService
+// contract so existing embedders remain source compatible. Production
+// composition automatically discovers it on *service.AuthService.
+type IdentityAuthenticationCompleter interface {
+	CompleteLoginMFA(context.Context, models.IdentityMFAProofInput, models.IdentityRequestMetadata) (*authdomain.TokenPair, error)
+	CompletePasskeyAuthentication(context.Context, models.IdentityPasskeyAuthenticationFinishInput, models.IdentityRequestMetadata) (*authdomain.TokenPair, error)
+}
+
 // Backwards-compatible aliases retain the handler package's former DTO names.
 type TokenResponse = authdomain.TokenPair
 type LoginRequest = authdomain.LoginRequest
@@ -33,15 +43,18 @@ type RefreshRequest = authdomain.RefreshRequest
 
 // AuthHandler handles authentication endpoints.
 type AuthHandler struct {
-	service   AuthService
-	validator *requestvalidator.Validator
+	service           AuthService
+	identityCompleter IdentityAuthenticationCompleter
+	validator         *requestvalidator.Validator
 }
 
 // NewAuthHandler creates a new AuthHandler with the given service.
 func NewAuthHandler(service AuthService) *AuthHandler {
+	identityCompleter, _ := service.(IdentityAuthenticationCompleter)
 	return &AuthHandler{
-		service:   service,
-		validator: requestvalidator.New(),
+		service:           service,
+		identityCompleter: identityCompleter,
+		validator:         requestvalidator.New(),
 	}
 }
 
@@ -49,6 +62,14 @@ func NewAuthHandler(service AuthService) *AuthHandler {
 // router uses it to reject partially constructed dependency graphs at startup.
 func (h *AuthHandler) Ready() bool {
 	return h != nil && h.service != nil && h.validator != nil
+}
+
+// IdentityReady reports whether the authentication handler can complete the
+// MFA and passkey ceremonies mounted by the production router. Keeping this
+// separate from Ready preserves the small AuthService test contract while
+// allowing production composition to fail closed.
+func (h *AuthHandler) IdentityReady() bool {
+	return h.Ready() && h.identityCompleter != nil
 }
 
 // Login handles POST /auth/login.
@@ -62,9 +83,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid login request", err.Error())
 		return
 	}
+	req.Metadata = identityMetadata(r)
 
 	tokens, err := h.service.Login(r.Context(), req)
 	if err != nil {
+		if isIdentityAuthenticationError(err) {
+			writeIdentityError(w, r, err, "Authentication failed")
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "Authentication failed", "")
 		return
 	}
@@ -83,6 +109,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid registration request", err.Error())
 		return
 	}
+	req.Metadata = identityMetadata(r)
 
 	tokens, err := h.service.Register(r.Context(), req)
 	if err != nil {
@@ -91,6 +118,53 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, tokens)
+}
+
+// CompleteMFA handles POST /auth/mfa/verify and issues tokens only after the
+// one-time login challenge has been successfully consumed.
+func (h *AuthHandler) CompleteMFA(w http.ResponseWriter, r *http.Request) {
+	if h.identityCompleter == nil {
+		writeError(w, http.StatusServiceUnavailable, "Identity security service unavailable", "")
+		return
+	}
+	var input models.IdentityMFAProofInput
+	if err := decodeAuthRequest(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid MFA request", err.Error())
+		return
+	}
+	tokens, err := h.identityCompleter.CompleteLoginMFA(r.Context(), input, identityMetadata(r))
+	if err != nil {
+		writeIdentityError(w, r, err, "MFA verification failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, tokens)
+}
+
+// CompletePasskeyAuthentication handles
+// POST /auth/passkeys/authentication/verify and exchanges a verified WebAuthn
+// ceremony for the platform's normal revocable token pair.
+func (h *AuthHandler) CompletePasskeyAuthentication(w http.ResponseWriter, r *http.Request) {
+	if h.identityCompleter == nil {
+		writeError(w, http.StatusServiceUnavailable, "Identity security service unavailable", "")
+		return
+	}
+	var input models.IdentityPasskeyAuthenticationFinishInput
+	if err := decodeAuthRequest(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid passkey request", err.Error())
+		return
+	}
+	tokens, err := h.identityCompleter.CompletePasskeyAuthentication(r.Context(), input, identityMetadata(r))
+	if err != nil {
+		writeIdentityError(w, r, err, "Passkey authentication failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, tokens)
+}
+
+func isIdentityAuthenticationError(err error) bool {
+	return errors.Is(err, service.ErrIdentityInvalid) || errors.Is(err, service.ErrIdentityCredential) ||
+		errors.Is(err, service.ErrIdentityRateLimited) || errors.Is(err, service.ErrIdentityEnrollment) ||
+		errors.Is(err, service.ErrIdentityUnavailable)
 }
 
 // Refresh handles POST /auth/refresh.
@@ -183,51 +257,9 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 // writeError writes a models.ErrorResponse as JSON with the given status code.
 func writeError(w http.ResponseWriter, code int, message, details string) {
-	// Internal dependency and persistence errors are logged at their source but
-	// must never be reflected to callers. Validation details remain available
-	// for actionable 4xx responses.
-	if code >= http.StatusInternalServerError {
-		details = ""
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(models.ErrorResponse{
-		Code:      code,
-		ErrorCode: stableHTTPErrorCode(code),
-		Message:   message,
-		Details:   details,
-		RequestID: w.Header().Get("X-Request-ID"),
-	})
+	apiresponse.WriteError(w, code, "", message, details, w.Header().Get("X-Request-ID"))
 }
 
 func stableHTTPErrorCode(status int) string {
-	switch status {
-	case http.StatusBadRequest:
-		return "invalid_request"
-	case http.StatusUnauthorized:
-		return "authentication_required"
-	case http.StatusForbidden:
-		return "permission_denied"
-	case http.StatusPaymentRequired:
-		return "entitlement_required"
-	case http.StatusNotFound:
-		return "resource_not_found"
-	case http.StatusMethodNotAllowed:
-		return "method_not_allowed"
-	case http.StatusConflict:
-		return "state_conflict"
-	case http.StatusRequestEntityTooLarge:
-		return "request_too_large"
-	case http.StatusUnprocessableEntity:
-		return "validation_failed"
-	case http.StatusTooManyRequests:
-		return "rate_limit_exceeded"
-	case http.StatusServiceUnavailable:
-		return "service_unavailable"
-	default:
-		if status >= http.StatusInternalServerError {
-			return "internal_error"
-		}
-		return "request_failed"
-	}
+	return apiresponse.StableErrorCode(status)
 }

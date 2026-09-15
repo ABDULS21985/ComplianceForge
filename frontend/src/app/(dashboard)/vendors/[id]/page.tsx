@@ -1,29 +1,27 @@
 'use client';
 
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
 import {
-  ArrowLeft,
-  Building2,
   AlertCircle,
   AlertTriangle,
+  ArrowLeft,
+  Building2,
+  Calendar,
+  Edit,
+  ExternalLink,
+  FileText,
   Globe,
   Mail,
-  User,
-  Calendar,
   Shield,
-  FileText,
-  ExternalLink,
-  Edit,
+  User,
 } from 'lucide-react';
-
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { formatCurrency, formatDate, getRiskLevelColor, getStatusColor } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-
 import { cn } from '@/lib/utils';
-import { formatDate, formatCurrency, getRiskLevelColor, getStatusColor } from '@/lib/utils';
 import { COUNTRIES_EU_UK } from '@/lib/constants';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { useVendor } from '@/lib/api-hooks';
 import type { Vendor } from '@/types';
 

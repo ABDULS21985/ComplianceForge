@@ -30,6 +30,36 @@ type fakeAuthRepository struct {
 	createSessions int
 }
 
+type fakeAuthenticationIdentityLifecycle struct {
+	challenge           *models.IdentityMFAChallengeResponse
+	verificationResult  *models.IdentityAuthenticationResult
+	passkeyResult       *models.IdentityAuthenticationResult
+	verificationRequest models.IdentityEmailRequest
+	verificationCalls   int
+	beginMetadata       models.IdentityRequestMetadata
+	proofMetadata       models.IdentityRequestMetadata
+}
+
+func (f *fakeAuthenticationIdentityLifecycle) BeginLoginMFA(_ context.Context, _, _ string, metadata models.IdentityRequestMetadata) (*models.IdentityMFAChallengeResponse, error) {
+	f.beginMetadata = metadata
+	return f.challenge, nil
+}
+
+func (f *fakeAuthenticationIdentityLifecycle) VerifyLoginMFA(_ context.Context, _ models.IdentityMFAProofInput, metadata models.IdentityRequestMetadata) (*models.IdentityAuthenticationResult, error) {
+	f.proofMetadata = metadata
+	return f.verificationResult, nil
+}
+
+func (f *fakeAuthenticationIdentityLifecycle) FinishPasskeyAuthentication(context.Context, models.IdentityPasskeyAuthenticationFinishInput, models.IdentityRequestMetadata) (*models.IdentityAuthenticationResult, error) {
+	return f.passkeyResult, nil
+}
+
+func (f *fakeAuthenticationIdentityLifecycle) RequestEmailVerification(_ context.Context, request models.IdentityEmailRequest, _ models.IdentityRequestMetadata) error {
+	f.verificationRequest = request
+	f.verificationCalls++
+	return nil
+}
+
 func newFakeAuthRepository() *fakeAuthRepository {
 	return &fakeAuthRepository{
 		users:    make(map[string]*models.User),
@@ -237,6 +267,71 @@ func TestAuthServiceLoginReturnsUserAndPersistsSession(t *testing.T) {
 	}
 }
 
+func TestAuthServiceDefersSessionUntilMFAProofAndPreservesDeviceContext(t *testing.T) {
+	repository := newFakeAuthRepository()
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := &models.User{TenantModel: models.TenantModel{BaseModel: models.BaseModel{ID: authTestUserID}, OrganizationID: authTestOrgID},
+		Email: "mfa@example.com", PasswordHash: string(passwordHash), Status: models.UserStatusActive,
+		Role: models.UserRoleAdmin, Language: "en"}
+	repository.users[userKey(user.OrganizationID, user.Email)] = user
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	identity := &fakeAuthenticationIdentityLifecycle{
+		challenge: &models.IdentityMFAChallengeResponse{ChallengeToken: "opaque", Methods: []string{"totp"}, ExpiresAt: now.Add(5 * time.Minute)},
+		verificationResult: &models.IdentityAuthenticationResult{OrganizationID: authTestOrgID, UserID: authTestUserID,
+			AuthenticationMethod: models.IdentityMethodTOTP, AuthenticatedAt: now},
+	}
+	svc := service.NewAuthService(repository, testAuthJWTConfig(), zerolog.Nop(), identity)
+	metadata := models.IdentityRequestMetadata{IPAddress: "192.0.2.10", UserAgent: "test-agent", DeviceName: "Work laptop"}
+	challenge, err := svc.Login(context.Background(), authdomain.LoginRequest{Email: user.Email, Password: "correct-password",
+		OrganizationID: authTestOrgID, Metadata: metadata})
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if !challenge.MFARequired || challenge.MFAChallenge == nil || challenge.AccessToken != "" || repository.createSessions != 0 {
+		t.Fatalf("Login() challenge = %#v, sessions=%d", challenge, repository.createSessions)
+	}
+	tokens, err := svc.CompleteLoginMFA(context.Background(), models.IdentityMFAProofInput{
+		ChallengeToken: "opaque", Method: "totp", Code: "123456",
+	}, metadata)
+	if err != nil {
+		t.Fatalf("CompleteLoginMFA() error = %v", err)
+	}
+	if tokens.AccessToken == "" || repository.createSessions != 1 {
+		t.Fatalf("tokens=%#v sessions=%d", tokens, repository.createSessions)
+	}
+	var persisted *models.UserSession
+	for _, item := range repository.sessions {
+		persisted = item
+	}
+	if persisted == nil || persisted.AuthenticationMethod != models.IdentityMethodTOTP || persisted.MFAVerifiedAt == nil ||
+		!persisted.MFAVerifiedAt.Equal(now) || persisted.IPAddress != metadata.IPAddress || persisted.UserAgent != metadata.UserAgent ||
+		persisted.DeviceName != metadata.DeviceName {
+		t.Fatalf("persisted session = %#v", persisted)
+	}
+}
+
+func TestAuthServiceRegistrationRequiresEmailVerificationWhenIdentityIsComposed(t *testing.T) {
+	repository := newFakeAuthRepository()
+	identity := &fakeAuthenticationIdentityLifecycle{}
+	svc := service.NewAuthService(repository, testAuthJWTConfig(), zerolog.Nop(), identity)
+	result, err := svc.Register(context.Background(), authdomain.RegisterRequest{Email: " New@Example.com ", Password: "correct-password",
+		FirstName: "New", LastName: "User", OrganizationID: authTestOrgID})
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if !result.EmailVerificationRequired || result.AccessToken != "" || result.RefreshToken != "" ||
+		result.User == nil || result.User.Status != models.UserStatusPendingVerification || repository.createSessions != 0 {
+		t.Fatalf("Register() result=%#v sessions=%d", result, repository.createSessions)
+	}
+	if identity.verificationCalls != 1 || identity.verificationRequest.OrganizationID != authTestOrgID ||
+		identity.verificationRequest.Email != "new@example.com" {
+		t.Fatalf("verification request=%#v calls=%d", identity.verificationRequest, identity.verificationCalls)
+	}
+}
+
 func TestAuthServiceRejectsDuplicateRegistration(t *testing.T) {
 	repository := newFakeAuthRepository()
 	repository.users[userKey(authTestOrgID, "user@example.com")] = &models.User{
@@ -295,11 +390,15 @@ func TestAuthServiceRequiresHS256AndConfiguredIssuer(t *testing.T) {
 }
 
 func newAuthService(repository service.UserRepository) *service.AuthService {
-	return service.NewAuthService(repository, config.JWTConfig{
+	return service.NewAuthService(repository, testAuthJWTConfig(), zerolog.Nop())
+}
+
+func testAuthJWTConfig() config.JWTConfig {
+	return config.JWTConfig{
 		Secret:      authTestSecret,
 		Issuer:      "complianceforge-test",
 		ExpiryHours: 1,
-	}, zerolog.Nop())
+	}
 }
 
 func userKey(orgID, email string) string {

@@ -25,7 +25,7 @@ func TenantMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 				log.Warn().
 					Str("path", r.URL.Path).
 					Msg("missing or invalid organization_id in authentication context")
-				http.Error(w, `{"error":"invalid tenant context"}`, http.StatusUnauthorized)
+				writeMiddlewareError(w, r, http.StatusUnauthorized, "tenant_context_invalid", "Invalid tenant context", "Authenticate again or contact an administrator if the problem persists.")
 				return
 			}
 
@@ -46,7 +46,7 @@ func TenantMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 					Str("organization_id", orgID).
 					Msg("tenant-scoped request failed")
 				if !handlerStarted {
-					http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+					writeMiddlewareError(w, r, http.StatusInternalServerError, "tenant_context_unavailable", "Tenant context is temporarily unavailable", "")
 				}
 			}
 		})

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
+import { useRouter } from 'next/navigation';
 
 // ---------------------------------------------------------------------------
 // Types & Constants
@@ -36,11 +37,35 @@ const CONTROL_STATUSES = [
   { value: 'not_applicable', label: 'N/A' },
 ];
 
+interface OnboardingFramework {
+  id: string;
+  name: string;
+  recommended: boolean;
+}
+
+interface IndustryQuestion {
+  id: string;
+  text: string;
+}
+
+interface QuickControl {
+  framework: string;
+  id: string;
+  name: string;
+}
+
+interface OnboardingRecommendations {
+  frameworks?: OnboardingFramework[];
+  questions?: IndustryQuestion[];
+  quick_controls?: QuickControl[];
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export default function OnboardPage() {
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
 
   // Step data
@@ -63,6 +88,7 @@ export default function OnboardPage() {
   const [controlStatuses, setControlStatuses] = useState<Record<string, string>>({});
 
   const [launching, setLaunching] = useState(false);
+  const stepContentRef = useRef<HTMLDivElement>(null);
 
   // Queries
   const { data: recommendations } = useQuery({
@@ -78,7 +104,7 @@ export default function OnboardPage() {
 
   // Mutations
   const saveStep = useMutation({
-    mutationFn: ({ step, data }: { step: number; data: any }) => api.onboarding.saveStep(step, data),
+    mutationFn: ({ step, data }: { step: number; data: Record<string, unknown> }) => api.onboarding.saveStep(step, data),
   });
 
   const skipStep = useMutation({
@@ -88,13 +114,19 @@ export default function OnboardPage() {
   const completeOnboarding = useMutation({
     mutationFn: () => api.onboarding.complete(),
     onSuccess: () => {
-      if (typeof window !== 'undefined') {
-        window.location.href = '/dashboard';
-      }
+      router.push('/dashboard');
     },
+    onError: () => setLaunching(false),
   });
 
-  function getStepData(step: number): any {
+  useEffect(() => {
+    const heading = stepContentRef.current?.querySelector<HTMLElement>('h2');
+    if (!heading) return;
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+  }, [currentStep]);
+
+  function getStepData(step: number): Record<string, unknown> {
     switch (step) {
       case 0: return orgProfile;
       case 1: return { answers: industryAnswers };
@@ -107,17 +139,25 @@ export default function OnboardPage() {
   }
 
   // Navigation
-  const goNext = useCallback(() => {
+  const goNext = async () => {
     const stepData = getStepData(currentStep);
-    saveStep.mutate({ step: currentStep + 1, data: stepData });
-    setCurrentStep((s) => Math.min(s + 1, STEPS.length - 1));
-  }, [currentStep, orgProfile, industryAnswers, selectedFrameworks, teamInvites, riskAppetite, matrixSize, controlStatuses]);
+    try {
+      await saveStep.mutateAsync({ step: currentStep + 1, data: stepData });
+      setCurrentStep((s) => Math.min(s + 1, STEPS.length - 1));
+    } catch {
+      // Mutation state renders a safe, persistent alert without exposing internals.
+    }
+  };
 
   const goBack = () => setCurrentStep((s) => Math.max(s - 1, 0));
 
-  const handleSkip = () => {
-    skipStep.mutate(currentStep + 1);
-    setCurrentStep((s) => Math.min(s + 1, STEPS.length - 1));
+  const handleSkip = async () => {
+    try {
+      await skipStep.mutateAsync(currentStep + 1);
+      setCurrentStep((s) => Math.min(s + 1, STEPS.length - 1));
+    } catch {
+      // Mutation state renders a safe, persistent alert without exposing internals.
+    }
   };
 
   function handleLaunch() {
@@ -126,7 +166,8 @@ export default function OnboardPage() {
   }
 
   // Framework data
-  const availableFrameworks = recommendations?.frameworks ?? [
+  const recommendationData = recommendations as OnboardingRecommendations | undefined;
+  const availableFrameworks: OnboardingFramework[] = recommendationData?.frameworks ?? [
     { id: 'iso27001', name: 'ISO 27001', recommended: true },
     { id: 'uk_gdpr', name: 'UK GDPR', recommended: true },
     { id: 'nist_csf', name: 'NIST CSF 2.0', recommended: false },
@@ -135,7 +176,7 @@ export default function OnboardPage() {
     { id: 'soc2', name: 'SOC 2', recommended: false },
   ];
 
-  const industryQuestions = recommendations?.questions ?? [
+  const industryQuestions: IndustryQuestion[] = recommendationData?.questions ?? [
     { id: 'processes_personal_data', text: 'Does your organisation process personal data of EU/UK residents?' },
     { id: 'handles_payment', text: 'Does your organisation handle payment card data?' },
     { id: 'critical_infrastructure', text: 'Is your organisation part of critical national infrastructure?' },
@@ -144,7 +185,7 @@ export default function OnboardPage() {
   ];
 
   // Quick assessment controls (mock)
-  const quickControls = recommendations?.quick_controls ?? [
+  const quickControls: QuickControl[] = recommendationData?.quick_controls ?? [
     { id: 'ac-1', name: 'Access Control Policy', framework: 'ISO 27001' },
     { id: 'ac-2', name: 'User Access Management', framework: 'ISO 27001' },
     { id: 'cm-1', name: 'Change Management', framework: 'ISO 27001' },
@@ -162,24 +203,25 @@ export default function OnboardPage() {
   const liveScore = quickControls.length > 0 ? Math.round((implementedCount / quickControls.length) * 100) : 0;
 
   const planLimit = progress?.plan_framework_limit ?? 5;
+  const mutationFailed = saveStep.isError || skipStep.isError || completeOnboarding.isError;
 
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <main id="main-content" data-route-focus-root className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
-      <div className="bg-white border-b px-6 py-4">
+      <div className="bg-white border-b px-4 py-4 sm:px-6">
         <h1 className="text-xl font-bold text-gray-900">ComplianceForge Setup</h1>
       </div>
 
       {/* Progress bar */}
-      <div className="bg-white border-b px-6 py-4">
-        <div className="flex items-center gap-1 max-w-4xl mx-auto">
+      <nav aria-label="Onboarding progress" className="bg-white border-b px-4 py-4 sm:px-6">
+        <ol className="mx-auto grid max-w-4xl grid-cols-1 gap-2 sm:flex sm:items-center sm:gap-1">
           {STEPS.map((step, idx) => (
-            <div key={step} className="flex-1 flex items-center">
-              <div className="flex flex-col items-center flex-1">
+            <li key={step} aria-current={idx === currentStep ? 'step' : undefined} className="flex-1 flex items-center">
+              <div className="flex flex-1 items-center gap-2 sm:flex-col sm:gap-0">
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
                     idx < currentStep
@@ -191,20 +233,26 @@ export default function OnboardPage() {
                 >
                   {idx < currentStep ? '\u2713' : idx + 1}
                 </div>
-                <span className={`text-xs mt-1 text-center ${idx === currentStep ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>
+                <span className={`text-xs sm:mt-1 sm:text-center ${idx === currentStep ? 'text-blue-700 font-medium' : 'text-gray-600'}`}>
                   {step}
                 </span>
               </div>
               {idx < STEPS.length - 1 && (
-                <div className={`h-0.5 flex-1 mx-1 ${idx < currentStep ? 'bg-green-600' : 'bg-gray-200'}`} />
+                <div aria-hidden="true" className={`mx-1 hidden h-0.5 flex-1 sm:block ${idx < currentStep ? 'bg-green-600' : 'bg-gray-200'}`} />
               )}
-            </div>
+            </li>
           ))}
+        </ol>
+      </nav>
+
+      {mutationFailed && (
+        <div role="alert" className="mx-auto mt-4 w-full max-w-3xl rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+          This setup step could not be saved. Your entered values remain on this page; retry before continuing.
         </div>
-      </div>
+      )}
 
       {/* Step Content */}
-      <div className="flex-1 max-w-3xl mx-auto w-full px-6 py-8">
+      <div ref={stepContentRef} className="flex-1 max-w-3xl mx-auto w-full px-4 py-8 sm:px-6">
         {/* Step 1: Organisation Profile */}
         {currentStep === 0 && (
           <div className="space-y-6">
@@ -212,29 +260,32 @@ export default function OnboardPage() {
             <p className="text-gray-500">Tell us about your organisation to tailor your experience.</p>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Organisation Name</label>
+                <label htmlFor="onboard-organisation-name" className="block text-sm font-medium mb-1">Organisation Name</label>
                 <input
+                  id="onboard-organisation-name"
                   type="text"
                   value={orgProfile.name}
                   onChange={(e) => setOrgProfile({ ...orgProfile, name: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  className="min-h-11 w-full border rounded px-3 py-2 text-sm"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Legal Name</label>
+                <label htmlFor="onboard-legal-name" className="block text-sm font-medium mb-1">Legal Name</label>
                 <input
+                  id="onboard-legal-name"
                   type="text"
                   value={orgProfile.legal_name}
                   onChange={(e) => setOrgProfile({ ...orgProfile, legal_name: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  className="min-h-11 w-full border rounded px-3 py-2 text-sm"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Industry</label>
+                <label htmlFor="onboard-industry" className="block text-sm font-medium mb-1">Industry</label>
                 <select
+                  id="onboard-industry"
                   value={orgProfile.industry}
                   onChange={(e) => setOrgProfile({ ...orgProfile, industry: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  className="min-h-11 w-full border rounded px-3 py-2 text-sm"
                 >
                   <option value="">Select industry</option>
                   {INDUSTRIES.map((i) => (
@@ -243,21 +294,23 @@ export default function OnboardPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Country</label>
+                <label htmlFor="onboard-country" className="block text-sm font-medium mb-1">Country</label>
                 <input
+                  id="onboard-country"
                   type="text"
                   value={orgProfile.country}
                   onChange={(e) => setOrgProfile({ ...orgProfile, country: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  className="min-h-11 w-full border rounded px-3 py-2 text-sm"
                   placeholder="e.g. United Kingdom"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Employee Count</label>
+                <label htmlFor="onboard-employee-count" className="block text-sm font-medium mb-1">Employee Count</label>
                 <select
+                  id="onboard-employee-count"
                   value={orgProfile.employee_count}
                   onChange={(e) => setOrgProfile({ ...orgProfile, employee_count: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  className="min-h-11 w-full border rounded px-3 py-2 text-sm"
                 >
                   <option value="">Select range</option>
                   {EMPLOYEE_RANGES.map((r) => (
@@ -277,21 +330,25 @@ export default function OnboardPage() {
               Answer these questions so we can recommend the right frameworks and controls for your organisation.
             </p>
             <div className="space-y-4">
-              {industryQuestions.map((q: any) => (
+              {industryQuestions.map((q) => (
                 <div key={q.id} className="flex items-center justify-between border rounded-lg p-4 bg-white">
                   <p className="text-sm font-medium flex-1 pr-4">{q.text}</p>
                   <div className="flex gap-2 shrink-0">
                     <button
+                      type="button"
+                      aria-pressed={industryAnswers[q.id] === true}
                       onClick={() => setIndustryAnswers({ ...industryAnswers, [q.id]: true })}
-                      className={`px-4 py-1.5 text-sm font-medium rounded ${
+                      className={`min-h-11 px-4 py-1.5 text-sm font-medium rounded ${
                         industryAnswers[q.id] === true ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600'
                       }`}
                     >
                       Yes
                     </button>
                     <button
+                      type="button"
+                      aria-pressed={industryAnswers[q.id] === false}
                       onClick={() => setIndustryAnswers({ ...industryAnswers, [q.id]: false })}
-                      className={`px-4 py-1.5 text-sm font-medium rounded ${
+                      className={`min-h-11 px-4 py-1.5 text-sm font-medium rounded ${
                         industryAnswers[q.id] === false ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-600'
                       }`}
                     >
@@ -329,12 +386,14 @@ export default function OnboardPage() {
               </span>
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {availableFrameworks.map((fw: any) => {
+              {availableFrameworks.map((fw) => {
                 const isSelected = selectedFrameworks.includes(fw.id);
                 const isAtLimit = selectedFrameworks.length >= planLimit && !isSelected;
                 return (
                   <button
                     key={fw.id}
+                    type="button"
+                    aria-pressed={isSelected}
                     onClick={() => {
                       if (isSelected) {
                         setSelectedFrameworks(selectedFrameworks.filter((f) => f !== fw.id));
@@ -343,7 +402,7 @@ export default function OnboardPage() {
                       }
                     }}
                     disabled={isAtLimit}
-                    className={`text-left border-2 rounded-lg p-4 transition-colors ${
+                    className={`min-h-11 text-left border-2 rounded-lg p-4 transition-colors motion-reduce:transition-none ${
                       isSelected
                         ? 'border-blue-600 bg-blue-50'
                         : isAtLimit
@@ -381,32 +440,35 @@ export default function OnboardPage() {
             <h2 className="text-2xl font-bold">Invite Your Team</h2>
             <p className="text-gray-500">Add team members to collaborate on compliance. You can always do this later.</p>
             <div className="border rounded-lg p-4 bg-white space-y-3">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
-                  <label className="block text-xs font-medium mb-1">Email</label>
+                  <label htmlFor="onboard-invite-email" className="block text-xs font-medium mb-1">Email</label>
                   <input
+                    id="onboard-invite-email"
                     type="email"
                     value={inviteForm.email}
                     onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="min-h-11 w-full border rounded px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1">Name</label>
+                  <label htmlFor="onboard-invite-name" className="block text-xs font-medium mb-1">Name</label>
                   <input
+                    id="onboard-invite-name"
                     type="text"
                     value={inviteForm.name}
                     onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="min-h-11 w-full border rounded px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1">Role</label>
+                  <label htmlFor="onboard-invite-role" className="block text-xs font-medium mb-1">Role</label>
                   <div className="flex gap-2">
                     <select
+                      id="onboard-invite-role"
                       value={inviteForm.role}
                       onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })}
-                      className="flex-1 border rounded px-3 py-2 text-sm"
+                      className="min-h-11 flex-1 border rounded px-3 py-2 text-sm"
                     >
                       <option value="viewer">Viewer</option>
                       <option value="editor">Editor</option>
@@ -414,13 +476,14 @@ export default function OnboardPage() {
                       <option value="auditor">Auditor</option>
                     </select>
                     <button
+                      type="button"
                       onClick={() => {
                         if (inviteForm.email && inviteForm.name) {
                           setTeamInvites([...teamInvites, { ...inviteForm }]);
                           setInviteForm({ email: '', name: '', role: 'viewer' });
                         }
                       }}
-                      className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                      className="min-h-11 px-4 py-2 text-sm font-medium rounded bg-blue-700 text-white hover:bg-blue-800"
                     >
                       Add
                     </button>
@@ -448,8 +511,9 @@ export default function OnboardPage() {
                         <td className="px-4 py-2 capitalize">{inv.role}</td>
                         <td className="px-4 py-2 text-right">
                           <button
+                            type="button"
                             onClick={() => setTeamInvites(teamInvites.filter((_, i) => i !== idx))}
-                            className="text-red-500 hover:text-red-700 text-xs"
+                            className="min-h-11 rounded px-2 text-xs text-red-700 hover:text-red-800"
                           >
                             Remove
                           </button>
@@ -472,19 +536,21 @@ export default function OnboardPage() {
                 <p className="text-gray-500">Define how much risk your organisation is willing to accept per category.</p>
               </div>
               <button
+                type="button"
                 onClick={() => setRiskAppetite(Object.fromEntries(RISK_CATEGORIES.map((c) => [c, 2])))}
-                className="px-3 py-1.5 text-sm font-medium rounded border border-gray-300 hover:bg-gray-50"
+                className="min-h-11 px-3 py-1.5 text-sm font-medium rounded border border-gray-300 hover:bg-gray-50"
               >
                 Use Defaults
               </button>
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">Risk Matrix Size</label>
+              <label htmlFor="onboard-risk-matrix" className="block text-sm font-medium mb-1">Risk Matrix Size</label>
               <select
+                id="onboard-risk-matrix"
                 value={matrixSize}
                 onChange={(e) => setMatrixSize(parseInt(e.target.value))}
-                className="border rounded px-3 py-2 text-sm"
+                className="min-h-11 border rounded px-3 py-2 text-sm"
               >
                 <option value={3}>3x3</option>
                 <option value={4}>4x4</option>
@@ -494,14 +560,16 @@ export default function OnboardPage() {
 
             <div className="space-y-4">
               {RISK_CATEGORIES.map((cat) => (
-                <div key={cat} className="flex items-center gap-4">
+                <div key={cat} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
                   <span className="w-32 text-sm font-medium">{cat}</span>
-                  <div className="flex gap-1 flex-1">
+                  <div className="grid w-full flex-1 grid-cols-2 gap-1 sm:grid-cols-5">
                     {APPETITE_LEVELS.map((level, idx) => (
                       <button
                         key={level}
+                        type="button"
+                        aria-pressed={riskAppetite[cat] === idx}
                         onClick={() => setRiskAppetite({ ...riskAppetite, [cat]: idx })}
-                        className={`flex-1 py-2 text-xs font-medium rounded transition-colors ${
+                        className={`min-h-11 flex-1 py-2 text-xs font-medium rounded transition-colors motion-reduce:transition-none ${
                           riskAppetite[cat] === idx
                             ? idx <= 1
                               ? 'bg-green-600 text-white'
@@ -538,16 +606,17 @@ export default function OnboardPage() {
             </div>
 
             <div className="space-y-3">
-              {quickControls.map((ctrl: any) => (
-                <div key={ctrl.id} className="border rounded-lg p-4 bg-white flex items-center justify-between gap-4">
+              {quickControls.map((ctrl) => (
+                <div key={ctrl.id} className="flex flex-col gap-4 rounded-lg border bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium">{ctrl.name}</p>
                     <p className="text-xs text-gray-400">{ctrl.framework}</p>
                   </div>
                   <select
+                    aria-label={`${ctrl.name} implementation status`}
                     value={controlStatuses[ctrl.id] ?? ''}
                     onChange={(e) => setControlStatuses({ ...controlStatuses, [ctrl.id]: e.target.value })}
-                    className="border rounded px-3 py-1.5 text-sm shrink-0"
+                    className="min-h-11 border rounded px-3 py-1.5 text-sm shrink-0"
                   >
                     <option value="">Select status</option>
                     {CONTROL_STATUSES.map((s) => (
@@ -577,7 +646,7 @@ export default function OnboardPage() {
               <SummarySection title="Frameworks" items={
                 selectedFrameworks.length > 0
                   ? selectedFrameworks.map((id) => {
-                      const fw = availableFrameworks.find((f: any) => f.id === id);
+                      const fw = availableFrameworks.find((framework) => framework.id === id);
                       return fw?.name ?? id;
                     })
                   : ['No frameworks selected']
@@ -601,13 +670,14 @@ export default function OnboardPage() {
 
             <div className="pt-4">
               <button
+                type="button"
                 onClick={handleLaunch}
                 disabled={launching || completeOnboarding.isPending}
-                className="w-full py-4 text-lg font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-all"
+                className="min-h-11 w-full py-4 text-lg font-bold rounded-lg bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50 transition-all motion-reduce:transition-none"
               >
                 {launching || completeOnboarding.isPending ? (
                   <span className="flex items-center justify-center gap-3">
-                    <span className="inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span aria-hidden="true" className="inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin motion-reduce:animate-none" />
                     Launching ComplianceForge...
                   </span>
                 ) : (
@@ -620,12 +690,13 @@ export default function OnboardPage() {
       </div>
 
       {/* Bottom Navigation */}
-      <div className="bg-white border-t px-6 py-4">
+      <div className="bg-white border-t px-4 py-4 sm:px-6">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <button
+            type="button"
             onClick={goBack}
             disabled={currentStep === 0}
-            className="px-4 py-2 text-sm font-medium rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-30"
+            className="min-h-11 px-4 py-2 text-sm font-medium rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-30"
           >
             Back
           </button>
@@ -633,16 +704,18 @@ export default function OnboardPage() {
           <div className="flex gap-2">
             {currentStep > 0 && currentStep < STEPS.length - 1 && (
               <button
+                type="button"
                 onClick={handleSkip}
-                className="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
+                className="min-h-11 px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900"
               >
                 Skip
               </button>
             )}
             {currentStep < STEPS.length - 1 && (
               <button
+                type="button"
                 onClick={goNext}
-                className="px-6 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                className="min-h-11 px-6 py-2 text-sm font-medium rounded bg-blue-700 text-white hover:bg-blue-800"
               >
                 Next
               </button>
@@ -650,7 +723,7 @@ export default function OnboardPage() {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 

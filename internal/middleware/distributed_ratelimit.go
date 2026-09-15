@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -28,7 +27,7 @@ func DistributedRateLimitMiddleware(limiter RequestRateLimiter, requestsPerSecon
 				return
 			}
 			if limiter == nil || requestsPerSecond < 1 {
-				writeRequestLimitProblem(w, http.StatusServiceUnavailable, "Request rate limiting unavailable", 0)
+				writeRequestLimitProblem(w, r, http.StatusServiceUnavailable, "Request rate limiting is temporarily unavailable", 0)
 				return
 			}
 			clientIP := GetClientIPFromContext(r.Context())
@@ -39,11 +38,11 @@ func DistributedRateLimitMiddleware(limiter RequestRateLimiter, requestsPerSecon
 			allowed, retryAfter, err := limiter.Allow(r.Context(), hex.EncodeToString(digest[:]), requestsPerSecond)
 			if err != nil {
 				log.Error().Err(err).Str("request_id", GetRequestIDFromContext(r.Context())).Msg("distributed request rate limiter failed")
-				writeRequestLimitProblem(w, http.StatusServiceUnavailable, "Request rate limiting unavailable", 0)
+				writeRequestLimitProblem(w, r, http.StatusServiceUnavailable, "Request rate limiting is temporarily unavailable", 0)
 				return
 			}
 			if !allowed {
-				writeRequestLimitProblem(w, http.StatusTooManyRequests, "Request rate limit exceeded", retryAfter)
+				writeRequestLimitProblem(w, r, http.StatusTooManyRequests, "Request rate limit exceeded", retryAfter)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -51,8 +50,7 @@ func DistributedRateLimitMiddleware(limiter RequestRateLimiter, requestsPerSecon
 	}
 }
 
-func writeRequestLimitProblem(w http.ResponseWriter, status int, detail string, retryAfter time.Duration) {
-	w.Header().Set("Content-Type", "application/problem+json")
+func writeRequestLimitProblem(w http.ResponseWriter, r *http.Request, status int, message string, retryAfter time.Duration) {
 	if retryAfter > 0 {
 		seconds := int(retryAfter.Round(time.Second).Seconds())
 		if seconds < 1 {
@@ -60,9 +58,11 @@ func writeRequestLimitProblem(w http.ResponseWriter, status int, detail string, 
 		}
 		w.Header().Set("Retry-After", strconv.Itoa(seconds))
 	}
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"type": "urn:complianceforge:problem:request-rate-limit", "title": http.StatusText(status),
-		"status": status, "detail": detail,
-	})
+	code := "request_rate_limit_exceeded"
+	details := "Wait for Retry-After seconds before retrying."
+	if status == http.StatusServiceUnavailable {
+		code = "request_rate_limiting_unavailable"
+		details = ""
+	}
+	writeMiddlewareError(w, r, status, code, message, details)
 }

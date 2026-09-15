@@ -33,8 +33,8 @@ import type {
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { isUuid } from '@/lib/enterprise-settings';
+import type { DirectoryUser } from '@/types/directory';
+import { DirectoryUserPicker } from '@/components/access-admin/directory-user-picker';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
@@ -49,7 +49,7 @@ export function RoleAssignDialog({
   role: ManagedRole;
 }) {
   const queryClient = useQueryClient();
-  const [userId, setUserId] = React.useState('');
+  const [selectedUser, setSelectedUser] = React.useState<DirectoryUser | null>(null);
   const [reason, setReason] = React.useState('');
   const [validationError, setValidationError] = React.useState('');
   const mutation = useMutation({
@@ -63,8 +63,8 @@ export function RoleAssignDialog({
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!isUuid(userId.trim())) {
-      setValidationError('Enter a valid active user UUID.');
+    if (!selectedUser) {
+      setValidationError('Select an active user from the directory.');
       return;
     }
     if (reason.trim().length < 3 || reason.trim().length > 1000) {
@@ -72,7 +72,7 @@ export function RoleAssignDialog({
       return;
     }
     setValidationError('');
-    await mutation.mutateAsync({ user_id: userId.trim(), reason: reason.trim() }).catch(() => undefined);
+    await mutation.mutateAsync({ user_id: selectedUser.id, reason: reason.trim() }).catch(() => undefined);
   }
 
   const error = validationError || (mutation.error ? formatAccessError(mutation.error, 'The role could not be assigned.') : '');
@@ -87,10 +87,16 @@ export function RoleAssignDialog({
         </DialogHeader>
         <form className="space-y-4" onSubmit={(event) => void submit(event)} noValidate>
           {error && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
-          <div className="space-y-2">
-            <Label htmlFor="role-assignment-user">User UUID *</Label>
-            <Input id="role-assignment-user" autoFocus autoComplete="off" value={userId} onChange={(event) => setUserId(event.target.value)} />
-            <p className="text-xs text-muted-foreground">Use the user identifier from Organization Settings. The API verifies tenant membership and active status.</p>
+          <div role="group" aria-labelledby="role-assignment-user-label" className="space-y-2">
+            <Label id="role-assignment-user-label">User *</Label>
+            <DirectoryUserPicker
+              disabled={mutation.isPending}
+              value={selectedUser}
+              onChange={(user) => {
+                setSelectedUser(user);
+                if (user) setValidationError('');
+              }}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="role-assignment-reason">Business reason *</Label>

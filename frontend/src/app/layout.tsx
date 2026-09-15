@@ -1,15 +1,16 @@
 "use client";
 
-import { Inter } from "next/font/google";
-import { ThemeProvider } from "next-themes";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "sonner";
-import { useEffect, useState } from "react";
-
-import { purgeLegacyBrowserCredentials } from "@/lib/auth";
-import { ProductAccessFeedback } from "@/components/layout/product-access-feedback";
-
 import "./globals.css";
+
+import { OfflineBanner, RouteFocusManager } from "@/components/layout/app-status";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { Inter } from "next/font/google";
+import { ProductAccessFeedback } from "@/components/layout/product-access-feedback";
+import { purgeLegacyBrowserCredentials } from "@/lib/auth";
+import { QueryStatus } from "@/components/data/query-status";
+import { ThemeProvider } from "next-themes";
+import { Toaster } from "sonner";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -44,6 +45,9 @@ export default function RootLayout({
       <body className={`${inter.variable} font-sans`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <QueryClientProvider client={queryClient}>
+            <RouteFocusManager />
+            <OfflineBanner />
+            <QueryStatus />
             {children}
             <ProductAccessFeedback />
             <Toaster richColors position="top-right" />

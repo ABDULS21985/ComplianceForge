@@ -63,6 +63,7 @@ func TestComplianceRepositoriesRejectCrossTenantAccess(t *testing.T) {
 	}()
 
 	frameworkID, controlID := uuid.NewString(), uuid.NewString()
+	var evidenceID string
 	frameworkRepo := repository.NewFrameworkRepository(pool)
 	controlRepo := repository.NewControlRepository(pool)
 	withTenant := func(orgID string, fn func(context.Context) error) {
@@ -94,9 +95,24 @@ func TestComplianceRepositoriesRejectCrossTenantAccess(t *testing.T) {
 		if err != nil || implementation.MaturityLevel != maturity {
 			return fmt.Errorf("updating own implementation: maturity=%v err=%v", implementation, err)
 		}
-		evidence, err := controlRepo.AttachEvidence(tenantCtx, orgA, userA, controlID, models.AttachControlEvidenceInput{Title: "Tenant A policy", EvidenceType: "policy"})
+		objectKey, fileName, mimeType := "evidence/"+orgA+"/object", "policy.pdf", "application/pdf"
+		fileSize, fileHash := int64(128), "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		evidence, err := controlRepo.AttachEvidence(tenantCtx, orgA, userA, controlID, models.AttachControlEvidenceInput{
+			Title: "Tenant A policy", EvidenceType: "policy", ObjectKey: &objectKey,
+			FileName: &fileName, FileSizeBytes: &fileSize, MIMEType: &mimeType, FileHash: &fileHash,
+		})
 		if err != nil || evidence.OrganizationID != orgA {
 			return fmt.Errorf("attaching own evidence: evidence=%v err=%v", evidence, err)
+		}
+		evidenceID = evidence.ID
+		loaded, err := controlRepo.GetEvidence(tenantCtx, orgA, controlID, evidenceID)
+		if err != nil || loaded.ObjectKey == nil || *loaded.ObjectKey != objectKey || loaded.FileHash == nil || *loaded.FileHash != fileHash {
+			return fmt.Errorf("loading own evidence object metadata: evidence=%v err=%v", loaded, err)
+		}
+		reviewComment := "Checksum and collection scope verified"
+		reviewed, err := controlRepo.ReviewEvidence(tenantCtx, orgA, userA, controlID, evidenceID, models.ReviewControlEvidenceInput{Status: "accepted", Comment: &reviewComment})
+		if err != nil || reviewed.ReviewStatus != "accepted" || reviewed.ReviewedBy == nil || *reviewed.ReviewedBy != userA {
+			return fmt.Errorf("reviewing own evidence: evidence=%v err=%v", reviewed, err)
 		}
 		items, total, err := controlRepo.ListEvidence(tenantCtx, orgA, controlID, models.PaginationRequest{Page: 1, PageSize: 20})
 		if err != nil || total != 1 || len(items) != 1 {
@@ -118,6 +134,12 @@ func TestComplianceRepositoriesRejectCrossTenantAccess(t *testing.T) {
 		}
 		if _, err := controlRepo.AttachEvidence(tenantCtx, orgB, uuid.NewString(), controlID, models.AttachControlEvidenceInput{Title: "Intrusion", EvidenceType: "document"}); !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("cross-tenant evidence error=%v, want no rows", err)
+		}
+		if _, err := controlRepo.GetEvidence(tenantCtx, orgB, controlID, evidenceID); !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("cross-tenant evidence object read error=%v, want no rows", err)
+		}
+		if _, err := controlRepo.ReviewEvidence(tenantCtx, orgB, uuid.NewString(), controlID, evidenceID, models.ReviewControlEvidenceInput{Status: "accepted"}); !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("cross-tenant evidence review error=%v, want no rows", err)
 		}
 		return nil
 	})

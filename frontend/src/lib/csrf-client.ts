@@ -38,12 +38,14 @@ export async function getCsrfToken(): Promise<string> {
 export async function fetchWithCsrf(
   input: RequestInfo | URL,
   init: RequestInit = {},
+  options: { replayRejectedCsrf?: boolean } = {},
 ): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase();
   const headers = new Headers(init.headers);
 
   if (isStateChangingMethod(method)) {
     headers.set(CSRF_TOKEN_HEADER, await getCsrfToken());
+    init.signal?.throwIfAborted();
   }
 
   const response = await fetch(input, {
@@ -58,7 +60,10 @@ export async function fetchWithCsrf(
     response.headers.get(CSRF_ERROR_HEADER) === '1'
   ) {
     resetCsrfToken();
+    // Consent-bound operations must never silently submit a second POST.
+    if (options.replayRejectedCsrf === false) return response;
     headers.set(CSRF_TOKEN_HEADER, await getCsrfToken());
+    init.signal?.throwIfAborted();
     return fetch(input, {
       ...init,
       credentials: 'same-origin',

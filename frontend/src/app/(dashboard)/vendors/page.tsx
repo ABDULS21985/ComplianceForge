@@ -1,30 +1,21 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { z } from 'zod';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  Building2,
   AlertCircle,
   AlertTriangle,
-  Plus,
+  Building2,
   Check,
-  X,
-  ExternalLink,
   ChevronLeft,
   ChevronRight,
   DollarSign,
+  ExternalLink,
   FileWarning,
+  Plus,
+  X,
 } from 'lucide-react';
-
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { formatCurrency, formatDate, getRiskLevelColor } from '@/lib/utils';
+import { ResourceBoundary, StaleDataNotice } from '@/components/data/resource-state';
 import {
   Select,
   SelectContent,
@@ -40,17 +31,27 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
-import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib/utils';
-import { formatDate, formatCurrency, getRiskLevelColor } from '@/lib/utils';
-import { COUNTRIES_EU_UK } from '@/lib/constants';
 import {
+  useCreateVendor,
   useVendors,
   useVendorStats,
-  useCreateVendor,
 } from '@/lib/api-hooks';
+import { useForm, useWatch } from 'react-hook-form';
 import type { Vendor, VendorStats } from '@/types';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { COUNTRIES_EU_UK } from '@/lib/constants';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import Link from 'next/link';
 import type { PaginatedResponse } from '@/lib/api';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { useState } from 'react';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -125,41 +126,6 @@ function StatCard({
   );
 }
 
-function StatCardSkeleton() {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="animate-pulse space-y-3">
-          <div className="h-4 w-24 rounded bg-muted" />
-          <div className="h-8 w-16 rounded bg-muted" />
-          <div className="h-3 w-32 rounded bg-muted" />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TableSkeleton() {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-5 w-40 rounded bg-muted" />
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="flex gap-4">
-              <div className="h-4 w-1/5 rounded bg-muted" />
-              <div className="h-4 w-1/6 rounded bg-muted" />
-              <div className="h-4 w-1/6 rounded bg-muted" />
-              <div className="h-4 w-1/6 rounded bg-muted" />
-              <div className="h-4 w-1/6 rounded bg-muted" />
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Onboard Vendor Sheet
 // ---------------------------------------------------------------------------
@@ -186,7 +152,17 @@ function OnboardVendorSheet() {
     },
   });
 
-  const dataProcessing = form.watch('data_processing');
+  const [certifications, countryCode, dataCategories, dataProcessing, riskTier] =
+    useWatch({
+      control: form.control,
+      name: [
+        'certifications',
+        'country_code',
+        'data_categories',
+        'data_processing',
+        'risk_tier',
+      ],
+    });
 
   const onSubmit = (values: OnboardVendorValues) => {
     createVendor.mutate(values, {
@@ -259,7 +235,7 @@ function OnboardVendorSheet() {
           <div className="space-y-2">
             <Label>Country *</Label>
             <Select
-              value={form.watch('country_code')}
+              value={countryCode}
               onValueChange={(v) => form.setValue('country_code', v)}
             >
               <SelectTrigger>
@@ -300,7 +276,7 @@ function OnboardVendorSheet() {
           <div className="space-y-2">
             <Label>Risk Tier *</Label>
             <Select
-              value={form.watch('risk_tier')}
+              value={riskTier}
               onValueChange={(v) => form.setValue('risk_tier', v as OnboardVendorValues['risk_tier'])}
             >
               <SelectTrigger>
@@ -336,23 +312,11 @@ function OnboardVendorSheet() {
                 Does this vendor process personal data on your behalf?
               </p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={dataProcessing}
-              onClick={() => form.setValue('data_processing', !dataProcessing)}
-              className={cn(
-                'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
-                dataProcessing ? 'bg-primary' : 'bg-muted'
-              )}
-            >
-              <span
-                className={cn(
-                  'pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform',
-                  dataProcessing ? 'translate-x-5' : 'translate-x-0'
-                )}
-              />
-            </button>
+            <Switch
+              id="data_processing"
+              checked={dataProcessing}
+              onCheckedChange={(checked) => form.setValue('data_processing', checked)}
+            />
           </div>
 
           {/* GDPR DPA Warning */}
@@ -379,14 +343,15 @@ function OnboardVendorSheet() {
               <Label>Data Categories</Label>
               <div className="flex flex-wrap gap-2">
                 {DATA_CATEGORY_OPTIONS.map((cat) => {
-                  const selected = (form.watch('data_categories') ?? []).includes(cat);
+                  const selected = (dataCategories ?? []).includes(cat);
                   return (
                     <button
                       key={cat}
                       type="button"
+                      aria-pressed={selected}
                       onClick={() => toggleDataCategory(cat)}
                       className={cn(
-                        'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                        'min-h-11 rounded-full border px-3 py-2 text-xs font-medium transition-colors motion-reduce:transition-none',
                         selected
                           ? 'border-primary bg-primary text-primary-foreground'
                           : 'border-border bg-background text-foreground hover:bg-muted'
@@ -407,14 +372,15 @@ function OnboardVendorSheet() {
             <Label>Certifications</Label>
             <div className="flex flex-wrap gap-2">
               {CERTIFICATION_OPTIONS.map((cert) => {
-                const selected = form.watch('certifications').includes(cert);
+                const selected = certifications.includes(cert);
                 return (
                   <button
                     key={cert}
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => toggleCertification(cert)}
                     className={cn(
-                      'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                      'min-h-11 rounded-full border px-3 py-2 text-xs font-medium transition-colors motion-reduce:transition-none',
                       selected
                         ? 'border-primary bg-primary text-primary-foreground'
                         : 'border-border bg-background text-foreground hover:bg-muted'
@@ -461,9 +427,13 @@ export default function VendorsPage() {
 
   const vendorsData = vendors.data as PaginatedResponse<Vendor> | undefined;
   const statsData = stats.data as VendorStats | undefined;
+  const vendorItems = vendorsData?.items ?? [];
+  const vendorPage = vendorsData?.page ?? page;
+  const vendorTotal = vendorsData?.total ?? vendorItems.length;
+  const vendorTotalPages = vendorsData?.total_pages ?? 1;
 
   // Filter vendors missing DPA for alert banner
-  const nonCompliantVendors = (vendorsData?.items ?? []).filter(
+  const nonCompliantVendors = vendorItems.filter(
     (v) => v.data_processing && !v.dpa_in_place
   );
 
@@ -479,6 +449,18 @@ export default function VendorsPage() {
         </div>
         <OnboardVendorSheet />
       </div>
+
+      {(stats.error && stats.data) || (vendors.error && vendors.data) ? (
+        <StaleDataNotice
+          isRefreshing={stats.isFetching || vendors.isFetching}
+          lastUpdatedAt={Math.min(
+            ...[stats.dataUpdatedAt, vendors.dataUpdatedAt].filter((value) => value > 0),
+          )}
+          onRefresh={() => {
+            void Promise.all([stats.refetch(), vendors.refetch()]);
+          }}
+        />
+      ) : null}
 
       {/* GDPR DPA Alert Banner */}
       {nonCompliantVendors.length > 0 && (
@@ -509,16 +491,20 @@ export default function VendorsPage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {stats.isLoading ? (
-          Array.from({ length: 5 }).map((_, i) => <StatCardSkeleton key={i} />)
-        ) : stats.error ? (
-          <Card className="col-span-full">
-            <CardContent className="flex items-center gap-2 p-6 text-destructive">
-              <AlertCircle className="h-5 w-5" />
-              <span>Failed to load vendor statistics.</span>
-            </CardContent>
-          </Card>
-        ) : statsData ? (
+        <ResourceBoundary
+          className="col-span-full"
+          isEmpty={!stats.isLoading && !stats.error && !statsData}
+          isError={Boolean(stats.error) && !stats.data}
+          isLoading={stats.isLoading}
+          loadingLayout="cards"
+          loadingTitle="Loading vendor metrics"
+          emptyTitle="Vendor metrics are not available"
+          emptyDescription="Onboard a vendor to begin calculating third-party risk metrics."
+          errorTitle="Vendor statistics could not be loaded"
+          onRetry={() => void stats.refetch()}
+          retrying={stats.isFetching}
+        >
+          {statsData ? (
           <>
             <StatCard
               title="Total Vendors"
@@ -554,53 +540,49 @@ export default function VendorsPage() {
               icon={DollarSign}
             />
           </>
-        ) : null}
+          ) : null}
+        </ResourceBoundary>
       </div>
 
       {/* Data Table */}
-      {vendors.isLoading ? (
-        <TableSkeleton />
-      ) : vendors.error ? (
-        <Card>
-          <CardContent className="flex items-center gap-2 p-6 text-destructive">
-            <AlertCircle className="h-5 w-5" />
-            <span>Failed to load vendors. Please try again.</span>
-          </CardContent>
-        </Card>
-      ) : !vendorsData?.items?.length ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-            <Building2 className="h-12 w-12 text-muted-foreground/50" />
-            <h3 className="mt-4 text-lg font-semibold">No vendors yet</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Get started by onboarding your first vendor.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
+      <ResourceBoundary
+        isEmpty={vendorItems.length === 0}
+        isError={Boolean(vendors.error) && !vendors.data}
+        isLoading={vendors.isLoading}
+        loadingLayout="table"
+        loadingTitle="Loading vendor register"
+        emptyTitle="No vendors yet"
+        emptyDescription="Onboard your first vendor to assess third-party risk and DPA coverage."
+        emptyAction={<OnboardVendorSheet />}
+        errorTitle="Vendor register could not be loaded"
+        errorDescription="The service did not return the vendor list. Retry without leaving this page."
+        onRetry={() => void vendors.refetch()}
+        retrying={vendors.isFetching}
+      >
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">
-              Vendor Register ({vendorsData.total} total)
+              Vendor Register ({vendorTotal} total)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">Vendor register</caption>
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Name</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Country</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Risk Tier</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Data Processing</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">DPA Status</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Certifications</th>
-                    <th className="pb-3 pr-4 font-medium text-muted-foreground">Next Assessment</th>
-                    <th className="pb-3 font-medium text-muted-foreground">Actions</th>
+                    <th scope="col" className="pb-3 pr-4 font-medium text-muted-foreground">Name</th>
+                    <th scope="col" className="pb-3 pr-4 font-medium text-muted-foreground">Country</th>
+                    <th scope="col" className="pb-3 pr-4 font-medium text-muted-foreground">Risk Tier</th>
+                    <th scope="col" className="pb-3 pr-4 font-medium text-muted-foreground">Data Processing</th>
+                    <th scope="col" className="pb-3 pr-4 font-medium text-muted-foreground">DPA Status</th>
+                    <th scope="col" className="pb-3 pr-4 font-medium text-muted-foreground">Certifications</th>
+                    <th scope="col" className="pb-3 pr-4 font-medium text-muted-foreground">Next Assessment</th>
+                    <th scope="col" className="pb-3 font-medium text-muted-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {vendorsData.items.map((vendor) => {
+                  {vendorItems.map((vendor) => {
                     const missingDpa = vendor.data_processing && !vendor.dpa_in_place;
                     const countryName = COUNTRIES_EU_UK.find(
                       (c) => c.code === vendor.country_code
@@ -683,10 +665,10 @@ export default function VendorsPage() {
             </div>
 
             {/* Pagination */}
-            {vendorsData.total_pages > 1 && (
+            {vendorTotalPages > 1 && (
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Page {vendorsData.page} of {vendorsData.total_pages}
+                  Page {vendorPage} of {vendorTotalPages}
                 </p>
                 <div className="flex gap-2">
                   <Button
@@ -702,7 +684,7 @@ export default function VendorsPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => setPage((p) => p + 1)}
-                    disabled={page >= vendorsData.total_pages}
+                    disabled={page >= vendorTotalPages}
                   >
                     Next
                     <ChevronRight className="h-4 w-4" />
@@ -712,7 +694,7 @@ export default function VendorsPage() {
             )}
           </CardContent>
         </Card>
-      )}
+      </ResourceBoundary>
     </div>
   );
 }

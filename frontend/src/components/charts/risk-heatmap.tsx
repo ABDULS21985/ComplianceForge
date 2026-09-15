@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import type { RiskHeatmapEntry } from '@/types';
+import { useCallback, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
+import type { RiskHeatmapEntry } from '@/types';
 
 interface RiskHeatmapProps {
   risks: RiskHeatmapEntry[];

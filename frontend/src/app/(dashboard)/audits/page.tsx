@@ -8,7 +8,6 @@ import {
   ClipboardCheck,
   FilterX,
   Loader2,
-  LockKeyhole,
   Pencil,
   Plus,
   Search,
@@ -18,6 +17,7 @@ import type { Audit, AuditStatus, AuditType } from '@/types/audit';
 import { auditPersonName, humanizeAuditToken } from '@/lib/audit';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn, formatDate, getStatusColor } from '@/lib/utils';
+import { ResourceBoundary, ResourceState, StaleDataNotice } from '@/components/data/resource-state';
 import {
   Select,
   SelectContent,
@@ -33,7 +33,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Link from 'next/link';
-import { Skeleton } from '@/components/ui/skeleton';
 import { useAuditPermissions } from '@/hooks/use-audit-permissions';
 import { useQuickCreate } from '@/lib/use-quick-create';
 
@@ -79,25 +78,33 @@ export default function AuditsPage() {
   }, [data, page, totalPages]);
 
   if (access.isLoading || !access.user) {
-    return <AuditListSkeleton label="Checking audit permissions" />;
+    return (
+      <ResourceState
+        headingLevel={1}
+        kind="loading"
+        loadingLayout="detail"
+        title="Checking audit permissions"
+      />
+    );
   }
 
   if (access.isError) {
     return (
-      <StateCard
-        icon={<LockKeyhole aria-hidden="true" className="h-9 w-9" />}
+      <ResourceState
+        headingLevel={1}
+        kind="error"
         title="Audit access could not be verified"
         description="The permissions service is temporarily unavailable. No audit data was loaded."
-        action={<Button onClick={() => void access.retry()}>Try again</Button>}
-        alert
+        onRetry={() => void access.retry()}
       />
     );
   }
 
   if (!access.canRead) {
     return (
-      <StateCard
-        icon={<LockKeyhole aria-hidden="true" className="h-9 w-9" />}
+      <ResourceState
+        headingLevel={1}
+        kind="forbidden"
         title="Audit management unavailable"
         description="Your role does not grant read access to audits."
       />
@@ -143,6 +150,14 @@ export default function AuditsPage() {
           </Button>
         )}
       </div>
+
+      {auditsQuery.isError && data && (
+        <StaleDataNotice
+          isRefreshing={auditsQuery.isFetching}
+          lastUpdatedAt={auditsQuery.dataUpdatedAt}
+          onRefresh={() => void auditsQuery.refetch()}
+        />
+      )}
 
       <div
         role="group"
@@ -260,43 +275,33 @@ export default function AuditsPage() {
 
       <Card>
         <CardContent className="p-0">
-          {auditsQuery.isLoading ? (
-            <div role="status" aria-label="Loading audits" className="space-y-3 p-6">
-              {Array.from({ length: 5 }, (_, index) => (
-                <Skeleton key={index} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : auditsQuery.isError ? (
-            <div role="alert" className="flex flex-col items-center gap-3 p-10 text-center">
-              <AlertTriangle aria-hidden="true" className="h-9 w-9 text-destructive" />
-              <p className="font-semibold">Audits could not be loaded</p>
-              <p className="max-w-xl text-sm text-muted-foreground">
-                The service did not return the audit list. Retry without losing your filters.
-              </p>
-              <Button variant="outline" onClick={() => void auditsQuery.refetch()}>
-                Retry
-              </Button>
-            </div>
-          ) : audits.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 p-12 text-center">
-              <ClipboardCheck aria-hidden="true" className="h-10 w-10 text-muted-foreground" />
-              <p className="text-lg font-semibold">
-                {filtersActive ? 'No audits match these filters' : 'No audits have been planned'}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {filtersActive
-                  ? 'Adjust or clear the filters to broaden the results.'
-                  : 'Create an audit plan to begin an assurance engagement.'}
-              </p>
-              {filtersActive ? (
+          <ResourceBoundary
+            surface="plain"
+            isEmpty={audits.length === 0}
+            isError={auditsQuery.isError && !data}
+            isLoading={auditsQuery.isLoading}
+            loadingLayout="table"
+            loadingTitle="Loading audits"
+            emptyTitle={filtersActive ? 'No audits match these filters' : 'No audits have been planned'}
+            emptyDescription={
+              filtersActive
+                ? 'Adjust or clear the filters to broaden the results.'
+                : 'Create an audit plan to begin an assurance engagement.'
+            }
+            emptyAction={
+              filtersActive ? (
                 <Button variant="outline" onClick={resetFilters}>
                   Clear filters
                 </Button>
               ) : access.canCreate ? (
                 <Button onClick={() => setCreateOpen(true)}>Plan first audit</Button>
-              ) : null}
-            </div>
-          ) : (
+              ) : null
+            }
+            errorTitle="Audits could not be loaded"
+            errorDescription="The service did not return the audit list. Retry without losing your filters."
+            onRetry={() => void auditsQuery.refetch()}
+            retrying={auditsQuery.isFetching}
+          >
             <>
               <div className="hidden overflow-x-auto md:block">
                 <table className="w-full text-sm">
@@ -431,7 +436,7 @@ export default function AuditsPage() {
                 ))}
               </div>
             </>
-          )}
+          </ResourceBoundary>
 
           {data && data.total > 0 && (
             <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -584,48 +589,6 @@ function SummaryCard({
       </CardHeader>
       <CardContent>
         <div className={cn('text-2xl font-bold', highlight && 'text-destructive')}>{value}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function AuditListSkeleton({ label }: { label: string }) {
-  return (
-    <div role="status" aria-label={label} className="space-y-5">
-      <Skeleton className="h-20 w-full" />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }, (_, index) => (
-          <Skeleton key={index} className="h-28" />
-        ))}
-      </div>
-      <Skeleton className="h-80 w-full" />
-    </div>
-  );
-}
-
-function StateCard({
-  icon,
-  title,
-  description,
-  action,
-  alert = false,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  action?: React.ReactNode;
-  alert?: boolean;
-}) {
-  return (
-    <Card className="mx-auto max-w-xl">
-      <CardContent
-        role={alert ? 'alert' : undefined}
-        className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground"
-      >
-        {icon}
-        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-        <p className="text-sm">{description}</p>
-        {action}
       </CardContent>
     </Card>
   );

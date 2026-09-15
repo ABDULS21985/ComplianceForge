@@ -10,6 +10,7 @@ const REQUEST_HEADER_ALLOWLIST = [
   'if-none-match',
   'range',
   'x-request-id',
+  'x-step-up-token',
 ] as const;
 
 const RESPONSE_HEADER_ALLOWLIST = [
@@ -19,9 +20,37 @@ const RESPONSE_HEADER_ALLOWLIST = [
   'content-type',
   'etag',
   'last-modified',
+  'referrer-policy',
   'retry-after',
   'x-request-id',
+  'x-support-bundle-sha256',
 ] as const;
+
+export function safeUpstreamRedirectLocation(value: string | null): string | null {
+  if (!value || value.length > 8_192) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  const localDevelopmentHttp =
+    parsed.protocol === 'http:' &&
+    process.env.NODE_ENV !== 'production' &&
+    (parsed.hostname === 'localhost' ||
+      parsed.hostname.endsWith('.localhost') ||
+      /^127(?:\.\d{1,3}){3}$/.test(parsed.hostname) ||
+      parsed.hostname === '[::1]');
+  if (
+    (parsed.protocol !== 'https:' && !localDevelopmentHttp) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.hash
+  ) {
+    return null;
+  }
+  return parsed.toString();
+}
 
 export type ServerFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -114,6 +143,22 @@ export function proxyResponse(upstream: Response): NextResponse {
   for (const name of RESPONSE_HEADER_ALLOWLIST) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
+  }
+
+  if (upstream.status === 307) {
+    const location = safeUpstreamRedirectLocation(upstream.headers.get('location'));
+    if (!location) {
+      return NextResponse.json(
+        {
+          code: 502,
+          error_code: 'INVALID_UPSTREAM_REDIRECT',
+          message: 'The upstream service returned an unsafe redirect',
+        },
+        { status: 502, headers },
+      );
+    }
+    headers.set('Location', location);
+    headers.set('Referrer-Policy', 'no-referrer');
   }
 
   return new NextResponse(

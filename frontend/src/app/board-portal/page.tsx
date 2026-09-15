@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
-
 import {
   buildPortalApiUrl,
   cleanPortalUrl,
   getPortalEntryToken,
   PORTAL_API_ROUTES,
 } from '@/lib/portal-routes';
+import { useEffect, useRef, useState } from 'react';
 import { fetchWithCsrf } from '@/lib/csrf-client';
+import { ResourceState } from '@/components/data/resource-state';
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,7 +65,13 @@ function GaugeChart({ value, label }: { value: number; label: string }) {
 
   return (
     <div className="flex flex-col items-center">
-      <svg width="140" height="100" viewBox="0 0 140 100">
+      <svg
+        role="img"
+        aria-label={`${label}: ${pct}%`}
+        width="140"
+        height="100"
+        viewBox="0 0 140 100"
+      >
         <path
           d="M 20 85 A 50 50 0 1 1 120 85"
           fill="none"
@@ -100,6 +106,9 @@ function AlertCard({ alert }: { alert: { id: string; message: string; severity: 
   };
   return (
     <div className={`border-l-4 rounded-r p-4 ${sevColor[alert.severity] ?? sevColor.low}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-700">
+        {alert.severity} alert
+      </p>
       <p className="text-sm text-gray-800">{alert.message}</p>
       <p className="text-xs text-gray-500 mt-1">{new Date(alert.date).toLocaleDateString()}</p>
     </div>
@@ -128,17 +137,19 @@ function BoardPortalInner() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   const initialized = useRef(false);
+  const inviteTokenRef = useRef<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<BoardPortalData | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-
-    const inviteToken = getPortalEntryToken(token, window.location.hash);
-    if (inviteToken) {
+    if (!initialized.current) {
+      initialized.current = true;
+      inviteTokenRef.current = getPortalEntryToken(token, window.location.hash);
+    }
+    if (inviteTokenRef.current) {
       window.history.replaceState(
         window.history.state,
         '',
@@ -147,12 +158,14 @@ function BoardPortalInner() {
     }
 
     async function fetchPortalData() {
+      setLoading(true);
+      setError('');
       try {
-        const res = inviteToken
+        const res = inviteTokenRef.current
           ? await fetchWithCsrf(buildPortalApiUrl(PORTAL_API_ROUTES.boardSession), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: inviteToken }),
+              body: JSON.stringify({ token: inviteTokenRef.current }),
             })
           : await fetch(buildPortalApiUrl(PORTAL_API_ROUTES.boardData));
         if (!res.ok) {
@@ -163,39 +176,38 @@ function BoardPortalInner() {
           );
         }
         const json = await res.json();
+        inviteTokenRef.current = null;
         setData(json);
-      } catch (err: any) {
-        setError(err.message ?? 'Failed to load board portal');
+      } catch (cause: unknown) {
+        setError(cause instanceof Error ? cause.message : 'Failed to load board portal');
       } finally {
         setLoading(false);
       }
     }
 
     fetchPortalData();
-  }, [token]);
+  }, [retryKey, token]);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-slate-600 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="mt-4 text-sm text-gray-500">Loading board portal...</p>
-        </div>
-      </div>
+      <main id="main-content" className="min-h-screen bg-slate-50 p-6">
+        <h1 className="sr-only">Board portal</h1>
+        <ResourceState kind="loading" loadingLayout="detail" title="Loading board portal" />
+      </main>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md text-center">
-          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-red-600 text-xl font-bold">!</span>
-          </div>
-          <h1 className="text-lg font-semibold text-gray-900">Access Error</h1>
-          <p className="text-sm text-gray-500 mt-2">{error || 'Unable to load board portal data'}</p>
-        </div>
-      </div>
+      <main id="main-content" className="flex min-h-screen items-center bg-slate-50 p-6">
+        <ResourceState
+          headingLevel={1}
+          kind="error"
+          title="Board portal unavailable"
+          description={error || 'Unable to load board portal data.'}
+          onRetry={() => setRetryKey((value) => value + 1)}
+        />
+      </main>
     );
   }
 
@@ -206,7 +218,7 @@ function BoardPortalInner() {
         <div className="max-w-6xl mx-auto px-8 py-6">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold">{data.organization_name || 'Board Portal'}</h1>
+              <h1 data-route-heading className="text-xl font-bold">{data.organization_name || 'Board Portal'}</h1>
               <p className="text-sm text-slate-300 mt-1">Executive Board Portal</p>
             </div>
             <div className="text-right">
@@ -218,7 +230,7 @@ function BoardPortalInner() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-8 py-8 space-y-8">
+      <main id="main-content" className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-8">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
             ['Upcoming meetings', data.upcoming_meetings],
@@ -310,12 +322,13 @@ function BoardPortalInner() {
             <h2 className="text-base font-semibold text-gray-900 mb-4">Decision Follow-up Status</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
+                <caption className="sr-only">Board decision follow-up status</caption>
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="pb-3 font-semibold text-gray-700">Decision</th>
-                    <th className="pb-3 font-semibold text-gray-700">Owner</th>
-                    <th className="pb-3 font-semibold text-gray-700">Status</th>
-                    <th className="pb-3 font-semibold text-gray-700">Due</th>
+                    <th scope="col" className="pb-3 font-semibold text-gray-700">Decision</th>
+                    <th scope="col" className="pb-3 font-semibold text-gray-700">Owner</th>
+                    <th scope="col" className="pb-3 font-semibold text-gray-700">Status</th>
+                    <th scope="col" className="pb-3 font-semibold text-gray-700">Due</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -367,9 +380,10 @@ export default function BoardPortalPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-slate-50">
-          <div className="w-8 h-8 border-4 border-slate-600 border-t-transparent rounded-full animate-spin" />
-        </div>
+        <main id="main-content" className="min-h-screen bg-slate-50 p-6">
+          <h1 className="sr-only">Board portal</h1>
+          <ResourceState kind="loading" loadingLayout="detail" title="Loading board portal" />
+        </main>
       }
     >
       <BoardPortalInner />

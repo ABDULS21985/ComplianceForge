@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -67,35 +66,7 @@ func (rs *RegulatoryScheduler) CheckGDPRBreachDeadlines(ctx context.Context) err
 	if rs == nil || rs.pool == nil || rs.bus == nil {
 		return fmt.Errorf("GDPR breach scheduler is not configured")
 	}
-	rows, err := rs.pool.Query(ctx, `SELECT organization_id FROM incident_due_tenants($1)`, 1000)
-	if err != nil {
-		return fmt.Errorf("discover tenants with due GDPR breaches: %w", err)
-	}
-	var tenantIDs []string
-	for rows.Next() {
-		var tenantID string
-		if err := rows.Scan(&tenantID); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan tenant with due GDPR breach: %w", err)
-		}
-		tenantIDs = append(tenantIDs, tenantID)
-	}
-	rowErr := rows.Err()
-	rows.Close()
-	if rowErr != nil {
-		return fmt.Errorf("iterate tenants with due GDPR breaches: %w", rowErr)
-	}
-
-	var tenantErrors []error
-	for _, tenantID := range tenantIDs {
-		tenantID := tenantID
-		if err := database.WithTenantConnection(ctx, rs.pool, tenantID, func(tenantCtx context.Context) error {
-			return rs.checkGDPRBreachDeadlinesForTenant(tenantCtx, tenantID)
-		}); err != nil {
-			tenantErrors = append(tenantErrors, fmt.Errorf("tenant %s GDPR breach deadlines: %w", tenantID, err))
-		}
-	}
-	return errors.Join(tenantErrors...)
+	return runForScheduledTenants(ctx, rs.pool, "GDPR breach deadlines", rs.checkGDPRBreachDeadlinesForTenant)
 }
 
 func (rs *RegulatoryScheduler) checkGDPRBreachDeadlinesForTenant(ctx context.Context, tenantID string) error {
@@ -145,7 +116,12 @@ func (rs *RegulatoryScheduler) checkGDPRBreachDeadlinesForTenant(ctx context.Con
 		// Find the appropriate threshold to emit.
 		for _, t := range thresholds {
 			if hoursRemaining <= t.hours {
+				thresholdTime := notificationDeadline
+				if t.hours > 0 {
+					thresholdTime = notificationDeadline.Add(-time.Duration(t.hours * float64(time.Hour)))
+				}
 				rs.bus.Publish(service.Event{
+					ID:         scheduledEventID(tenantID, "gdpr.breach_"+t.eventSuffix, incidentID, t.eventSuffix, notificationDeadline),
 					Type:       "gdpr.breach_" + t.eventSuffix,
 					Severity:   t.severity,
 					OrgID:      tenantID,
@@ -157,10 +133,10 @@ func (rs *RegulatoryScheduler) checkGDPRBreachDeadlinesForTenant(ctx context.Con
 						"incident_ref":    incidentRef,
 						"detected_at":     detectedAt.Format(time.RFC3339),
 						"deadline":        notificationDeadline.Format(time.RFC3339),
-						"hours_remaining": fmt.Sprintf("%.1f", hoursRemaining),
+						"hours_remaining": fmt.Sprintf("%.1f", t.hours),
 						"is_exceeded":     hoursRemaining <= 0,
 					},
-					Timestamp: now,
+					Timestamp: thresholdTime,
 				})
 				break // Only emit the most urgent threshold.
 			}
@@ -173,16 +149,27 @@ func (rs *RegulatoryScheduler) checkGDPRBreachDeadlinesForTenant(ctx context.Con
 // CheckNIS2Deadlines queries NIS2 incident reports with pending phases and checks
 // whether their respective deadlines are approaching.
 func (rs *RegulatoryScheduler) CheckNIS2Deadlines(ctx context.Context) error {
-	rows, err := rs.pool.Query(ctx, `
-		SELECT nr.id, nr.organization_id, nr.incident_id, nr.phase,
-		       nr.deadline, i.title
+	return runForScheduledTenants(ctx, rs.pool, "NIS2 deadlines", rs.checkNIS2DeadlinesForTenant)
+}
+
+func (rs *RegulatoryScheduler) checkNIS2DeadlinesForTenant(ctx context.Context, organizationID string) error {
+	querier := database.QuerierFromContext(ctx, rs.pool)
+	rows, err := querier.Query(ctx, `
+		SELECT nr.id, nr.organization_id, nr.incident_id, nr.report_ref,
+		       phase.name, phase.deadline, i.title
 		FROM nis2_incident_reports nr
-		JOIN incidents i ON i.id = nr.incident_id
-		WHERE nr.status = 'pending'
-		  AND nr.submitted_at IS NULL
-		  AND nr.deadline IS NOT NULL
-		ORDER BY nr.deadline ASC
-	`)
+		JOIN incidents i ON i.organization_id = nr.organization_id AND i.id = nr.incident_id
+		CROSS JOIN LATERAL (VALUES
+			('early_warning', nr.early_warning_deadline, nr.early_warning_submitted_at, nr.early_warning_status::text),
+			('notification', nr.notification_deadline, nr.notification_submitted_at, nr.notification_status::text),
+			('final_report', nr.final_report_deadline, nr.final_report_submitted_at, nr.final_report_status::text)
+		) AS phase(name, deadline, submitted_at, status)
+		WHERE nr.organization_id = $1::uuid
+		  AND phase.status IN ('pending', 'overdue')
+		  AND phase.submitted_at IS NULL
+		  AND phase.deadline <= statement_timestamp() + INTERVAL '24 hours'
+		ORDER BY phase.deadline ASC, nr.id, phase.name
+	`, organizationID)
 	if err != nil {
 		return fmt.Errorf("query NIS2 reports: %w", err)
 	}
@@ -191,49 +178,61 @@ func (rs *RegulatoryScheduler) CheckNIS2Deadlines(ctx context.Context) error {
 	now := time.Now().UTC()
 
 	for rows.Next() {
-		var reportID, orgID, incidentID, phase, title string
+		var reportID, orgID, incidentID, reportRef, phase, title string
 		var deadline time.Time
 
-		if err := rows.Scan(&reportID, &orgID, &incidentID, &phase, &deadline, &title); err != nil {
-			log.Error().Err(err).Msg("scan NIS2 report row")
-			continue
+		if err := rows.Scan(&reportID, &orgID, &incidentID, &reportRef, &phase, &deadline, &title); err != nil {
+			return fmt.Errorf("scan NIS2 report row: %w", err)
 		}
 
 		hoursRemaining := deadline.Sub(now).Hours()
 
-		var severity, eventType string
+		var severity, eventType, threshold string
+		var thresholdHours float64
 		switch {
 		case hoursRemaining <= 0:
 			severity = "critical"
 			eventType = "nis2.deadline_exceeded"
+			threshold = "exceeded"
 		case hoursRemaining <= 2:
 			severity = "critical"
 			eventType = "nis2.deadline_imminent"
+			threshold = "2h"
+			thresholdHours = 2
 		case hoursRemaining <= 12:
 			severity = "high"
 			eventType = "nis2.deadline_approaching"
+			threshold = "12h"
+			thresholdHours = 12
 		case hoursRemaining <= 24:
 			severity = "medium"
 			eventType = "nis2.deadline_warning"
+			threshold = "24h"
+			thresholdHours = 24
 		default:
 			continue // Not close enough to emit a notification.
 		}
 
+		thresholdTime := deadline
+		if thresholdHours > 0 {
+			thresholdTime = deadline.Add(-time.Duration(thresholdHours * float64(time.Hour)))
+		}
 		rs.bus.Publish(service.Event{
+			ID:         scheduledEventID(orgID, eventType, reportID, threshold+":"+phase, deadline),
 			Type:       eventType,
 			Severity:   severity,
 			OrgID:      orgID,
 			EntityType: "nis2_report",
 			EntityID:   reportID,
-			EntityRef:  fmt.Sprintf("NIS2-%s: %s", phase, title),
+			EntityRef:  fmt.Sprintf("%s/%s", reportRef, phase),
 			Data: map[string]interface{}{
 				"incident_id":     incidentID,
 				"incident_title":  title,
 				"phase":           phase,
 				"deadline":        deadline.Format(time.RFC3339),
-				"hours_remaining": fmt.Sprintf("%.1f", hoursRemaining),
+				"hours_remaining": fmt.Sprintf("%.1f", thresholdHours),
 			},
-			Timestamp: now,
+			Timestamp: thresholdTime,
 		})
 	}
 
@@ -242,14 +241,20 @@ func (rs *RegulatoryScheduler) CheckNIS2Deadlines(ctx context.Context) error {
 
 // CheckPolicyReviews queries policies where next_review_date is approaching or overdue.
 func (rs *RegulatoryScheduler) CheckPolicyReviews(ctx context.Context) error {
-	rows, err := rs.pool.Query(ctx, `
-		SELECT p.id, p.organization_id, p.title, p.next_review_date, p.owner_id
+	return runForScheduledTenants(ctx, rs.pool, "policy review deadlines", rs.checkPolicyReviewsForTenant)
+}
+
+func (rs *RegulatoryScheduler) checkPolicyReviewsForTenant(ctx context.Context, organizationID string) error {
+	querier := database.QuerierFromContext(ctx, rs.pool)
+	rows, err := querier.Query(ctx, `
+		SELECT p.id, p.organization_id, p.title, p.next_review_date, p.owner_user_id
 		FROM policies p
-		WHERE p.deleted_at IS NULL
-		  AND p.status IN ('Approved', 'Published')
+		WHERE p.organization_id = $1::uuid
+		  AND p.deleted_at IS NULL
+		  AND p.status IN ('approved', 'published')
 		  AND p.next_review_date IS NOT NULL
 		  AND p.next_review_date <= NOW() + INTERVAL '30 days'
-	`)
+	`, organizationID)
 	if err != nil {
 		return fmt.Errorf("query policy reviews: %w", err)
 	}
@@ -263,13 +268,13 @@ func (rs *RegulatoryScheduler) CheckPolicyReviews(ctx context.Context) error {
 		var ownerID *string
 
 		if err := rows.Scan(&policyID, &orgID, &title, &nextReview, &ownerID); err != nil {
-			log.Error().Err(err).Msg("scan policy review row")
-			continue
+			return fmt.Errorf("scan policy review row: %w", err)
 		}
 
 		daysUntilReview := nextReview.Sub(now).Hours() / 24
 
 		var severity, eventType string
+		var thresholdDays int
 		switch {
 		case daysUntilReview < 0:
 			severity = "high"
@@ -277,12 +282,15 @@ func (rs *RegulatoryScheduler) CheckPolicyReviews(ctx context.Context) error {
 		case daysUntilReview <= 7:
 			severity = "high"
 			eventType = "policy.review_due_soon"
+			thresholdDays = 7
 		case daysUntilReview <= 14:
 			severity = "medium"
 			eventType = "policy.review_approaching"
+			thresholdDays = 14
 		case daysUntilReview <= 30:
 			severity = "low"
 			eventType = "policy.review_reminder"
+			thresholdDays = 30
 		default:
 			continue
 		}
@@ -290,13 +298,15 @@ func (rs *RegulatoryScheduler) CheckPolicyReviews(ctx context.Context) error {
 		data := map[string]interface{}{
 			"policy_title":      title,
 			"next_review_date":  nextReview.Format("2006-01-02"),
-			"days_until_review": fmt.Sprintf("%.0f", daysUntilReview),
+			"days_until_review": fmt.Sprintf("%d", thresholdDays),
 		}
 		if ownerID != nil {
 			data["owner_id"] = *ownerID
 		}
 
+		thresholdTime := nextReview.AddDate(0, 0, -thresholdDays)
 		rs.bus.Publish(service.Event{
+			ID:         scheduledEventID(orgID, eventType, policyID, fmt.Sprintf("%dd", thresholdDays), nextReview),
 			Type:       eventType,
 			Severity:   severity,
 			OrgID:      orgID,
@@ -304,7 +314,7 @@ func (rs *RegulatoryScheduler) CheckPolicyReviews(ctx context.Context) error {
 			EntityID:   policyID,
 			EntityRef:  title,
 			Data:       data,
-			Timestamp:  now,
+			Timestamp:  thresholdTime,
 		})
 	}
 
@@ -313,16 +323,22 @@ func (rs *RegulatoryScheduler) CheckPolicyReviews(ctx context.Context) error {
 
 // CheckFindingRemediations queries audit findings past their due date.
 func (rs *RegulatoryScheduler) CheckFindingRemediations(ctx context.Context) error {
-	rows, err := rs.pool.Query(ctx, `
+	return runForScheduledTenants(ctx, rs.pool, "finding remediation deadlines", rs.checkFindingRemediationsForTenant)
+}
+
+func (rs *RegulatoryScheduler) checkFindingRemediationsForTenant(ctx context.Context, organizationID string) error {
+	querier := database.QuerierFromContext(ctx, rs.pool)
+	rows, err := querier.Query(ctx, `
 		SELECT af.id, af.organization_id, af.title, af.due_date, af.severity,
-		       af.assignee_id, a.title AS audit_title
+		       af.responsible_user_id, a.title AS audit_title
 		FROM audit_findings af
-		JOIN audits a ON a.id = af.audit_id
-		WHERE af.deleted_at IS NULL
-		  AND af.status NOT IN ('Closed', 'Remediated', 'Accepted')
+		JOIN audits a ON a.organization_id = af.organization_id AND a.id = af.audit_id
+		WHERE af.organization_id = $1::uuid
+		  AND af.deleted_at IS NULL
+		  AND af.status NOT IN ('resolved', 'closed', 'accepted')
 		  AND af.due_date IS NOT NULL
 		  AND af.due_date <= NOW() + INTERVAL '14 days'
-	`)
+	`, organizationID)
 	if err != nil {
 		return fmt.Errorf("query audit findings: %w", err)
 	}
@@ -336,13 +352,13 @@ func (rs *RegulatoryScheduler) CheckFindingRemediations(ctx context.Context) err
 		var assigneeID *string
 
 		if err := rows.Scan(&findingID, &orgID, &title, &dueDate, &findingSeverity, &assigneeID, &auditTitle); err != nil {
-			log.Error().Err(err).Msg("scan finding remediation row")
-			continue
+			return fmt.Errorf("scan finding remediation row: %w", err)
 		}
 
 		daysUntilDue := dueDate.Sub(now).Hours() / 24
 
 		var severity, eventType string
+		var thresholdDays int
 		switch {
 		case daysUntilDue < 0:
 			severity = "high"
@@ -350,12 +366,15 @@ func (rs *RegulatoryScheduler) CheckFindingRemediations(ctx context.Context) err
 		case daysUntilDue <= 3:
 			severity = "high"
 			eventType = "finding.remediation_due_soon"
+			thresholdDays = 3
 		case daysUntilDue <= 7:
 			severity = "medium"
 			eventType = "finding.remediation_approaching"
+			thresholdDays = 7
 		case daysUntilDue <= 14:
 			severity = "low"
 			eventType = "finding.remediation_reminder"
+			thresholdDays = 14
 		default:
 			continue
 		}
@@ -365,14 +384,16 @@ func (rs *RegulatoryScheduler) CheckFindingRemediations(ctx context.Context) err
 			"audit_title":      auditTitle,
 			"due_date":         dueDate.Format("2006-01-02"),
 			"finding_severity": findingSeverity,
-			"days_until_due":   fmt.Sprintf("%.0f", daysUntilDue),
+			"days_until_due":   fmt.Sprintf("%d", thresholdDays),
 		}
 		if assigneeID != nil {
 			data["assignee_id"] = *assigneeID
 			data["owner_id"] = *assigneeID
 		}
 
+		thresholdTime := dueDate.AddDate(0, 0, -thresholdDays)
 		rs.bus.Publish(service.Event{
+			ID:         scheduledEventID(orgID, eventType, findingID, fmt.Sprintf("%dd", thresholdDays), dueDate),
 			Type:       eventType,
 			Severity:   severity,
 			OrgID:      orgID,
@@ -380,7 +401,7 @@ func (rs *RegulatoryScheduler) CheckFindingRemediations(ctx context.Context) err
 			EntityID:   findingID,
 			EntityRef:  title,
 			Data:       data,
-			Timestamp:  now,
+			Timestamp:  thresholdTime,
 		})
 	}
 
@@ -392,35 +413,7 @@ func (rs *RegulatoryScheduler) CheckVendorAssessments(ctx context.Context) error
 	if rs == nil || rs.pool == nil || rs.bus == nil {
 		return fmt.Errorf("vendor assessment scheduler is not configured")
 	}
-	rows, err := rs.pool.Query(ctx, `SELECT organization_id FROM vendor_due_tenants($1)`, 1000)
-	if err != nil {
-		return fmt.Errorf("discover tenants with due vendor assessments: %w", err)
-	}
-	var tenantIDs []string
-	for rows.Next() {
-		var tenantID string
-		if err := rows.Scan(&tenantID); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan tenant with due vendor assessment: %w", err)
-		}
-		tenantIDs = append(tenantIDs, tenantID)
-	}
-	rowErr := rows.Err()
-	rows.Close()
-	if rowErr != nil {
-		return fmt.Errorf("iterate tenants with due vendor assessments: %w", rowErr)
-	}
-
-	var tenantErrors []error
-	for _, tenantID := range tenantIDs {
-		tenantID := tenantID
-		if err := database.WithTenantConnection(ctx, rs.pool, tenantID, func(tenantCtx context.Context) error {
-			return rs.checkVendorAssessmentsForTenant(tenantCtx, tenantID)
-		}); err != nil {
-			tenantErrors = append(tenantErrors, fmt.Errorf("tenant %s vendor assessments: %w", tenantID, err))
-		}
-	}
-	return errors.Join(tenantErrors...)
+	return runForScheduledTenants(ctx, rs.pool, "vendor assessment deadlines", rs.checkVendorAssessmentsForTenant)
 }
 
 func (rs *RegulatoryScheduler) checkVendorAssessmentsForTenant(ctx context.Context, tenantID string) error {
@@ -453,6 +446,7 @@ func (rs *RegulatoryScheduler) checkVendorAssessmentsForTenant(ctx context.Conte
 		daysUntilAssessment := nextAssessment.Sub(now).Hours() / 24
 
 		var severity, eventType string
+		var thresholdDays int
 		switch {
 		case daysUntilAssessment < 0:
 			severity = "high"
@@ -460,12 +454,15 @@ func (rs *RegulatoryScheduler) checkVendorAssessmentsForTenant(ctx context.Conte
 		case daysUntilAssessment <= 7:
 			severity = "high"
 			eventType = "vendor.assessment_due_soon"
+			thresholdDays = 7
 		case daysUntilAssessment <= 14:
 			severity = "medium"
 			eventType = "vendor.assessment_approaching"
+			thresholdDays = 14
 		case daysUntilAssessment <= 30:
 			severity = "low"
 			eventType = "vendor.assessment_reminder"
+			thresholdDays = 30
 		default:
 			continue
 		}
@@ -473,14 +470,16 @@ func (rs *RegulatoryScheduler) checkVendorAssessmentsForTenant(ctx context.Conte
 		data := map[string]interface{}{
 			"vendor_name":           name,
 			"next_assessment_date":  nextAssessment.Format("2006-01-02"),
-			"days_until_assessment": fmt.Sprintf("%.0f", daysUntilAssessment),
+			"days_until_assessment": fmt.Sprintf("%d", thresholdDays),
 		}
 		if ownerID != nil {
 			data["owner_id"] = *ownerID
 		}
 		data["risk_tier"] = riskTier
 
+		thresholdTime := nextAssessment.AddDate(0, 0, -thresholdDays)
 		rs.bus.Publish(service.Event{
+			ID:         scheduledEventID(tenantID, eventType, vendorID, fmt.Sprintf("%dd", thresholdDays), nextAssessment),
 			Type:       eventType,
 			Severity:   severity,
 			OrgID:      tenantID,
@@ -488,7 +487,7 @@ func (rs *RegulatoryScheduler) checkVendorAssessmentsForTenant(ctx context.Conte
 			EntityID:   vendorID,
 			EntityRef:  vendorRef,
 			Data:       data,
-			Timestamp:  now,
+			Timestamp:  thresholdTime,
 		})
 	}
 
@@ -497,14 +496,21 @@ func (rs *RegulatoryScheduler) checkVendorAssessmentsForTenant(ctx context.Conte
 
 // CheckRiskReviews queries risks where next_review_date is approaching.
 func (rs *RegulatoryScheduler) CheckRiskReviews(ctx context.Context) error {
-	rows, err := rs.pool.Query(ctx, `
-		SELECT r.id, r.organization_id, r.title, r.next_review_date, r.owner_id, r.risk_level
+	return runForScheduledTenants(ctx, rs.pool, "risk review deadlines", rs.checkRiskReviewsForTenant)
+}
+
+func (rs *RegulatoryScheduler) checkRiskReviewsForTenant(ctx context.Context, organizationID string) error {
+	querier := database.QuerierFromContext(ctx, rs.pool)
+	rows, err := querier.Query(ctx, `
+		SELECT r.id, r.organization_id, r.title, r.next_review_date,
+		       r.owner_user_id, r.residual_risk_level
 		FROM risks r
-		WHERE r.deleted_at IS NULL
-		  AND r.status NOT IN ('Closed', 'Archived')
+		WHERE r.organization_id = $1::uuid
+		  AND r.deleted_at IS NULL
+		  AND r.status <> 'closed'
 		  AND r.next_review_date IS NOT NULL
 		  AND r.next_review_date <= NOW() + INTERVAL '30 days'
-	`)
+	`, organizationID)
 	if err != nil {
 		return fmt.Errorf("query risk reviews: %w", err)
 	}
@@ -519,13 +525,13 @@ func (rs *RegulatoryScheduler) CheckRiskReviews(ctx context.Context) error {
 		var riskLevel *string
 
 		if err := rows.Scan(&riskID, &orgID, &title, &nextReview, &ownerID, &riskLevel); err != nil {
-			log.Error().Err(err).Msg("scan risk review row")
-			continue
+			return fmt.Errorf("scan risk review row: %w", err)
 		}
 
 		daysUntilReview := nextReview.Sub(now).Hours() / 24
 
 		var severity, eventType string
+		var thresholdDays int
 		switch {
 		case daysUntilReview < 0:
 			severity = "high"
@@ -533,12 +539,15 @@ func (rs *RegulatoryScheduler) CheckRiskReviews(ctx context.Context) error {
 		case daysUntilReview <= 7:
 			severity = "high"
 			eventType = "risk.review_due_soon"
+			thresholdDays = 7
 		case daysUntilReview <= 14:
 			severity = "medium"
 			eventType = "risk.review_approaching"
+			thresholdDays = 14
 		case daysUntilReview <= 30:
 			severity = "low"
 			eventType = "risk.review_reminder"
+			thresholdDays = 30
 		default:
 			continue
 		}
@@ -546,7 +555,7 @@ func (rs *RegulatoryScheduler) CheckRiskReviews(ctx context.Context) error {
 		data := map[string]interface{}{
 			"risk_title":        title,
 			"next_review_date":  nextReview.Format("2006-01-02"),
-			"days_until_review": fmt.Sprintf("%.0f", daysUntilReview),
+			"days_until_review": fmt.Sprintf("%d", thresholdDays),
 		}
 		if ownerID != nil {
 			data["owner_id"] = *ownerID
@@ -555,7 +564,9 @@ func (rs *RegulatoryScheduler) CheckRiskReviews(ctx context.Context) error {
 			data["risk_level"] = *riskLevel
 		}
 
+		thresholdTime := nextReview.AddDate(0, 0, -thresholdDays)
 		rs.bus.Publish(service.Event{
+			ID:         scheduledEventID(orgID, eventType, riskID, fmt.Sprintf("%dd", thresholdDays), nextReview),
 			Type:       eventType,
 			Severity:   severity,
 			OrgID:      orgID,
@@ -563,7 +574,7 @@ func (rs *RegulatoryScheduler) CheckRiskReviews(ctx context.Context) error {
 			EntityID:   riskID,
 			EntityRef:  title,
 			Data:       data,
-			Timestamp:  now,
+			Timestamp:  thresholdTime,
 		})
 	}
 
@@ -573,15 +584,28 @@ func (rs *RegulatoryScheduler) CheckRiskReviews(ctx context.Context) error {
 // CheckDSRDeadlines queries data subject requests (DSRs) where the response
 // deadline is approaching.
 func (rs *RegulatoryScheduler) CheckDSRDeadlines(ctx context.Context) error {
-	rows, err := rs.pool.Query(ctx, `
-		SELECT d.id, d.organization_id, d.request_type, d.subject_name,
-		       d.response_deadline, d.assignee_id
+	return runForScheduledTenants(ctx, rs.pool, "DSR response deadlines", rs.checkDSRDeadlinesForTenant)
+}
+
+func (rs *RegulatoryScheduler) checkDSRDeadlinesForTenant(ctx context.Context, organizationID string) error {
+	querier := database.QuerierFromContext(ctx, rs.pool)
+	rows, err := querier.Query(ctx, `
+		SELECT d.id, d.organization_id, d.request_ref, d.request_type,
+		       CASE WHEN d.status = 'extended'
+		            THEN COALESCE(d.extended_deadline, d.response_deadline)
+		            ELSE d.response_deadline
+		       END AS effective_deadline,
+		       d.assigned_to
 		FROM dsr_requests d
-		WHERE d.deleted_at IS NULL
-		  AND d.status NOT IN ('Completed', 'Closed', 'Rejected')
+		WHERE d.organization_id = $1::uuid
+		  AND d.deleted_at IS NULL
+		  AND d.status NOT IN ('completed', 'rejected', 'withdrawn')
 		  AND d.response_deadline IS NOT NULL
-		  AND d.response_deadline <= NOW() + INTERVAL '14 days'
-	`)
+		  AND (CASE WHEN d.status = 'extended'
+		            THEN COALESCE(d.extended_deadline, d.response_deadline)
+		            ELSE d.response_deadline
+		       END) <= CURRENT_DATE + 14
+	`, organizationID)
 	if err != nil {
 		return fmt.Errorf("query DSR deadlines: %w", err)
 	}
@@ -590,18 +614,18 @@ func (rs *RegulatoryScheduler) CheckDSRDeadlines(ctx context.Context) error {
 	now := time.Now().UTC()
 
 	for rows.Next() {
-		var dsrID, orgID, requestType, subjectName string
+		var dsrID, orgID, requestRef, requestType string
 		var responseDeadline time.Time
 		var assigneeID *string
 
-		if err := rows.Scan(&dsrID, &orgID, &requestType, &subjectName, &responseDeadline, &assigneeID); err != nil {
-			log.Error().Err(err).Msg("scan DSR deadline row")
-			continue
+		if err := rows.Scan(&dsrID, &orgID, &requestRef, &requestType, &responseDeadline, &assigneeID); err != nil {
+			return fmt.Errorf("scan DSR deadline row: %w", err)
 		}
 
 		daysRemaining := responseDeadline.Sub(now).Hours() / 24
 
 		var severity, eventType string
+		var thresholdDays int
 		switch {
 		case daysRemaining < 0:
 			severity = "critical"
@@ -609,36 +633,41 @@ func (rs *RegulatoryScheduler) CheckDSRDeadlines(ctx context.Context) error {
 		case daysRemaining <= 3:
 			severity = "critical"
 			eventType = "dsr.deadline_imminent"
+			thresholdDays = 3
 		case daysRemaining <= 7:
 			severity = "high"
 			eventType = "dsr.deadline_approaching"
+			thresholdDays = 7
 		case daysRemaining <= 14:
 			severity = "medium"
 			eventType = "dsr.deadline_warning"
+			thresholdDays = 14
 		default:
 			continue
 		}
 
 		data := map[string]interface{}{
 			"request_type":      requestType,
-			"subject_name":      subjectName,
+			"request_ref":       requestRef,
 			"response_deadline": responseDeadline.Format("2006-01-02"),
-			"days_remaining":    fmt.Sprintf("%.0f", daysRemaining),
+			"days_remaining":    fmt.Sprintf("%d", thresholdDays),
 		}
 		if assigneeID != nil {
 			data["assignee_id"] = *assigneeID
 			data["owner_id"] = *assigneeID
 		}
 
+		thresholdTime := responseDeadline.AddDate(0, 0, -thresholdDays)
 		rs.bus.Publish(service.Event{
+			ID:         scheduledEventID(orgID, eventType, dsrID, fmt.Sprintf("%dd", thresholdDays), responseDeadline),
 			Type:       eventType,
 			Severity:   severity,
 			OrgID:      orgID,
 			EntityType: "dsr_request",
 			EntityID:   dsrID,
-			EntityRef:  fmt.Sprintf("DSR-%s: %s", requestType, subjectName),
+			EntityRef:  requestRef,
 			Data:       data,
-			Timestamp:  now,
+			Timestamp:  thresholdTime,
 		})
 	}
 

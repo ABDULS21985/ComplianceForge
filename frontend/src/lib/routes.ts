@@ -9,8 +9,11 @@ export const ROUTES = {
   home: '/',
   dashboard: '/dashboard',
   auth: {
+    acceptInvitation: '/accept-invitation',
     login: '/login',
     forgotPassword: '/forgot-password',
+    resetPassword: '/reset-password',
+    verifyEmail: '/verify-email',
   },
   portals: {
     vendor: '/vendor-portal',
@@ -22,6 +25,8 @@ export const ROUTES = {
   audits: '/audits',
   frameworks: '/frameworks',
   settings: '/settings',
+  security: '/settings/security',
+  identityAdministration: '/settings/identity',
 } as const;
 
 export const AUTH_REDIRECT_QUERY_PARAM = 'redirect';
@@ -53,11 +58,20 @@ export const QUICK_CREATE_ROUTES = {
 export const PUBLIC_ROUTES = [
   ROUTES.auth.login,
   ROUTES.auth.forgotPassword,
+  ROUTES.auth.acceptInvitation,
+  ROUTES.auth.resetPassword,
+  ROUTES.auth.verifyEmail,
   ROUTES.portals.vendor,
   ROUTES.portals.board,
 ] as const;
 
-const AUTH_ROUTES = [ROUTES.auth.login, ROUTES.auth.forgotPassword] as const;
+const AUTH_ROUTES = [
+  ROUTES.auth.login,
+  ROUTES.auth.forgotPassword,
+  ROUTES.auth.acceptInvitation,
+  ROUTES.auth.resetPassword,
+  ROUTES.auth.verifyEmail,
+] as const;
 
 function normalizePathname(pathname: string): string {
   if (pathname.length <= 1) return pathname || ROUTES.home;

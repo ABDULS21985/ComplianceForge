@@ -81,9 +81,7 @@ func RateLimitMiddleware(rps int) func(http.Handler) http.Handler {
 					Msg("rate limit exceeded")
 
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", 1))
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				fmt.Fprint(w, `{"error":"rate limit exceeded"}`)
+				writeMiddlewareError(w, r, http.StatusTooManyRequests, "rate_limit_exceeded", "Rate limit exceeded", "Wait for Retry-After seconds before retrying.")
 				return
 			}
 

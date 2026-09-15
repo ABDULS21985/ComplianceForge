@@ -245,7 +245,7 @@ func (h *ROPAHandler) ListClassifications(w http.ResponseWriter, r *http.Request
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{
 		"data": classifications,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -277,7 +277,7 @@ func (h *ROPAHandler) CreateClassification(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, classification)
+	writeClassifiedJSON(w, r, http.StatusCreated, "incidents", classification)
 }
 
 // ListCategories handles GET /data/categories.
@@ -296,7 +296,7 @@ func (h *ROPAHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{
 		"data": categories,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -328,7 +328,7 @@ func (h *ROPAHandler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, category)
+	writeClassifiedJSON(w, r, http.StatusCreated, "incidents", category)
 }
 
 // ListProcessingActivities handles GET /data/processing-activities.
@@ -355,7 +355,7 @@ func (h *ROPAHandler) ListProcessingActivities(w http.ResponseWriter, r *http.Re
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{
 		"data": activities,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -387,7 +387,7 @@ func (h *ROPAHandler) CreateProcessingActivity(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, activity)
+	writeClassifiedJSON(w, r, http.StatusCreated, "incidents", activity)
 }
 
 // GetProcessingActivity handles GET /data/processing-activities/{id}.
@@ -405,7 +405,7 @@ func (h *ROPAHandler) GetProcessingActivity(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", detail)
 }
 
 // UpdateProcessingActivity handles PUT /data/processing-activities/{id}.
@@ -430,7 +430,7 @@ func (h *ROPAHandler) UpdateProcessingActivity(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, activity)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", activity)
 }
 
 // CreateDataFlows handles POST /data/processing-activities/{id}/flows.
@@ -458,7 +458,7 @@ func (h *ROPAHandler) CreateDataFlows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{"message": "Data flows created"})
+	writeClassifiedJSON(w, r, http.StatusCreated, "incidents", map[string]string{"message": "Data flows created"})
 }
 
 // GetFlowDiagram handles GET /data/processing-activities/{id}/flow-diagram.
@@ -476,7 +476,7 @@ func (h *ROPAHandler) GetFlowDiagram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, diagram)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", diagram)
 }
 
 // ExportROPA handles POST /data/ropa/export.
@@ -501,7 +501,7 @@ func (h *ROPAHandler) ExportROPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, export)
+	writeClassifiedJSON(w, r, http.StatusAccepted, "incidents", export)
 }
 
 // ListExports handles GET /data/ropa/exports.
@@ -520,7 +520,7 @@ func (h *ROPAHandler) ListExports(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{
 		"data": exports,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -547,11 +547,11 @@ func (h *ROPAHandler) DownloadExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(file.FileData) > 0 {
-		writeAttachment(w, file.FileName, file.ContentType, file.FileData)
+		writeClassifiedAttachment(w, r, "incidents", file.FileName, file.ContentType, file.FileData)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]string{
 		"file_url":  file.FileURL,
 		"file_name": file.FileName,
 	})
@@ -567,7 +567,7 @@ func (h *ROPAHandler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, dashboard)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", dashboard)
 }
 
 // GetHighRisk handles GET /data/high-risk.
@@ -580,7 +580,7 @@ func (h *ROPAHandler) GetHighRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": activities})
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", map[string]interface{}{"data": activities})
 }
 
 // GetSubjectMap handles GET /data/subject-map/{category}.
@@ -598,5 +598,5 @@ func (h *ROPAHandler) GetSubjectMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, subjectMap)
+	writeClassifiedJSON(w, r, http.StatusOK, "incidents", subjectMap)
 }

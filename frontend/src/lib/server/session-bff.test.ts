@@ -1,12 +1,10 @@
-import { NextRequest } from 'next/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   ACCESS_TOKEN_COOKIE,
   CSRF_TOKEN_COOKIE,
   CSRF_TOKEN_HEADER,
   REFRESH_TOKEN_COOKIE,
 } from '@/lib/auth-constants';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   handleCredentialExchange,
   handleLogout,
@@ -14,6 +12,7 @@ import {
   proxyAuthenticatedRequest,
   refreshSession,
 } from '@/lib/server/session-bff';
+import { NextRequest } from 'next/server';
 
 const origin = 'https://app.example.test';
 

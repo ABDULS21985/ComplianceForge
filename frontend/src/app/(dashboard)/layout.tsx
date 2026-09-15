@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
 import api, { type ApiError } from '@/lib/api';
+import { DATA_GOVERNANCE_CAPABILITY, dataGovernanceKeys } from '@/lib/data-governance';
+import { useEffect, useSyncExternalStore } from 'react';
 import { normalizePermissionMap } from '@/lib/navigation';
+import { ResourceState } from '@/components/data/resource-state';
 import { ROUTES } from '@/lib/routes';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Topbar } from '@/components/layout/topbar';
@@ -12,7 +14,7 @@ import { useRouter } from 'next/navigation';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { user, isAuthenticated: storeIsAuth, clearAuth, logout, setAuth } = useAuthStore();
+  const { user, isAuthenticated: storeIsAuth, isLoggingOut, clearAuth, logout, setAuth } = useAuthStore();
   const mounted = useSyncExternalStore(
     () => () => undefined,
     () => true,
@@ -22,7 +24,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const sessionQuery = useQuery({
     queryKey: ['auth', 'session'],
     queryFn: () => api.auth.me(),
-    enabled: mounted && !storeIsAuth,
+    enabled: mounted && !storeIsAuth && !isLoggingOut,
     retry: false,
     staleTime: 5 * 60_000,
   });
@@ -39,7 +41,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [clearAuth, router, sessionQuery.error]);
 
-  const sessionReady = storeIsAuth || sessionQuery.isSuccess;
+  const sessionReady = !isLoggingOut && (storeIsAuth || sessionQuery.isSuccess);
   const sessionUser = user ?? sessionQuery.data ?? null;
 
   const permissionsQuery = useQuery({
@@ -52,37 +54,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const permissions = permissionsQuery.isPending
     ? {}
     : normalizePermissionMap(permissionsQuery.data);
+  const dataLifecycleQuery = useQuery({
+    queryKey: dataGovernanceKeys.capability,
+    queryFn: () => api.featureFlags.evaluate(DATA_GOVERNANCE_CAPABILITY),
+    enabled: mounted && sessionReady,
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const enabledCapabilities = dataLifecycleQuery.data?.enabled
+    ? [DATA_GOVERNANCE_CAPABILITY]
+    : [];
 
   if (!mounted || !sessionReady) {
-    if (mounted && sessionQuery.isError) {
+    if (mounted && sessionQuery.isError && !isLoggingOut) {
       return (
-        <div className="flex min-h-screen items-center justify-center p-6">
-          <div className="max-w-md space-y-3 text-center">
-            <h1 className="text-lg font-semibold">Unable to verify your session</h1>
-            <p className="text-sm text-muted-foreground">
-              The authentication service is temporarily unavailable. Your session has not been
-              discarded.
-            </p>
-            <button
-              type="button"
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              onClick={() => void sessionQuery.refetch()}
-            >
-              Try again
-            </button>
-          </div>
-        </div>
+        <main id="main-content" className="flex min-h-screen items-center justify-center p-6">
+          <ResourceState
+            headingLevel={1}
+            kind="error"
+            title="Unable to verify your session"
+            description="The authentication service is temporarily unavailable. Your session has not been discarded."
+            onRetry={() => void sessionQuery.refetch()}
+          />
+        </main>
       );
     }
 
     return (
-      <div
-        role="status"
-        aria-label="Loading application"
-        className="flex min-h-screen items-center justify-center"
-      >
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
+      <main id="main-content" className="flex min-h-screen items-center justify-center">
+        <h1 className="sr-only">{isLoggingOut ? 'Signing out' : 'Loading application'}</h1>
+        <ResourceState kind="loading" loadingLayout="inline" title={isLoggingOut ? 'Signing out' : 'Loading application'} />
+      </main>
     );
   }
 
@@ -94,9 +96,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       >
         Skip to main content
       </a>
-      <Sidebar permissions={permissions} user={sessionUser} />
+      <Sidebar enabledCapabilities={enabledCapabilities} permissions={permissions} user={sessionUser} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar permissions={permissions} user={sessionUser} onLogout={logout} />
+        <Topbar enabledCapabilities={enabledCapabilities} permissions={permissions} user={sessionUser} onLogout={logout} />
         <main
           id="main-content"
           tabIndex={-1}

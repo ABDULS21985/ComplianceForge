@@ -307,21 +307,23 @@ export function SidebarContent({
 }
 
 interface SidebarProps {
+  enabledCapabilities?: readonly string[];
   permissions?: PermissionMap;
   user: User | null;
 }
 
-export function Sidebar({ permissions, user }: SidebarProps) {
+export function Sidebar({ enabledCapabilities, permissions, user }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { collapsed, toggleCollapsed } = useNavigationStore();
   const context = useMemo<NavigationContext>(
     () => ({
+      enabledCapabilities,
       isSuperAdmin: user?.is_super_admin,
       permissions,
       roleSlugs: getRoleSlugs(user?.roles),
     }),
-    [permissions, user?.is_super_admin, user?.roles]
+    [enabledCapabilities, permissions, user?.is_super_admin, user?.roles]
   );
 
   return (

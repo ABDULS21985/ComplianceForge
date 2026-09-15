@@ -58,7 +58,7 @@ func (h *RiskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to create risk")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", item)
 }
 
 func (h *RiskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +67,7 @@ func (h *RiskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to get risk")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", item)
 }
 
 func (h *RiskHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +81,7 @@ func (h *RiskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to update risk")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", item)
 }
 
 func (h *RiskHandler) Assign(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +98,7 @@ func (h *RiskHandler) Assign(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to assign risk")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", item)
 }
 
 func (h *RiskHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +131,7 @@ func (h *RiskHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to list risks")
 		return
 	}
-	writeRiskPaginated(w, items, total, filter.PaginationRequest)
+	writeRiskPaginated(w, r, items, total, filter.PaginationRequest)
 }
 
 func (h *RiskHandler) GetMatrix(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +140,7 @@ func (h *RiskHandler) GetMatrix(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to get risk matrix")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": item})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]any{"data": item})
 }
 
 func (h *RiskHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +149,7 @@ func (h *RiskHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to list risk categories")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]any{"data": items})
 }
 
 func (h *RiskHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +158,7 @@ func (h *RiskHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to get risk heatmap")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]any{"data": items})
 }
 
 func (h *RiskHandler) CreateAssessment(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +172,7 @@ func (h *RiskHandler) CreateAssessment(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to create risk assessment")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", item)
 }
 
 func (h *RiskHandler) ListAssessments(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +182,7 @@ func (h *RiskHandler) ListAssessments(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to list risk assessments")
 		return
 	}
-	writeRiskPaginated(w, items, total, p)
+	writeRiskPaginated(w, r, items, total, p)
 }
 
 func (h *RiskHandler) CreateTreatment(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +196,7 @@ func (h *RiskHandler) CreateTreatment(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to create risk treatment")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", item)
 }
 
 func (h *RiskHandler) ListTreatments(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +206,7 @@ func (h *RiskHandler) ListTreatments(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to list risk treatments")
 		return
 	}
-	writeRiskPaginated(w, items, total, p)
+	writeRiskPaginated(w, r, items, total, p)
 }
 
 func (h *RiskHandler) GetTreatment(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +215,7 @@ func (h *RiskHandler) GetTreatment(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to get risk treatment")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", item)
 }
 
 func (h *RiskHandler) UpdateTreatment(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +229,7 @@ func (h *RiskHandler) UpdateTreatment(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to update risk treatment")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", item)
 }
 
 func (h *RiskHandler) ListAppetite(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +238,7 @@ func (h *RiskHandler) ListAppetite(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to list risk appetite")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]any{"data": items})
 }
 
 func (h *RiskHandler) UpsertAppetite(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +252,7 @@ func (h *RiskHandler) UpsertAppetite(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to update risk appetite")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", item)
 }
 
 func (h *RiskHandler) ApproveAppetite(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +266,7 @@ func (h *RiskHandler) ApproveAppetite(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to approve risk appetite")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", item)
 }
 
 func (h *RiskHandler) CreateIndicator(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +280,7 @@ func (h *RiskHandler) CreateIndicator(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to create risk indicator")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", item)
 }
 
 func (h *RiskHandler) ListIndicators(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +289,7 @@ func (h *RiskHandler) ListIndicators(w http.ResponseWriter, r *http.Request) {
 		writeRiskError(w, err, "Failed to list risk indicators")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]any{"data": items})
 }
 
 func (h *RiskHandler) RecordIndicatorValue(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +303,7 @@ func (h *RiskHandler) RecordIndicatorValue(w http.ResponseWriter, r *http.Reques
 		writeRiskError(w, err, "Failed to record risk indicator value")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", item)
 }
 
 func (h *RiskHandler) ListIndicatorValues(w http.ResponseWriter, r *http.Request) {
@@ -313,7 +313,7 @@ func (h *RiskHandler) ListIndicatorValues(w http.ResponseWriter, r *http.Request
 		writeRiskError(w, err, "Failed to list risk indicator values")
 		return
 	}
-	writeRiskPaginated(w, items, total, p)
+	writeRiskPaginated(w, r, items, total, p)
 }
 
 func riskOrgID(r *http.Request) string  { return middleware.GetOrgIDFromContext(r.Context()) }
@@ -335,14 +335,14 @@ func decodeRiskJSON(w http.ResponseWriter, r *http.Request, destination any) err
 	return nil
 }
 
-func writeRiskPaginated(w http.ResponseWriter, data any, total int, p models.PaginationRequest) {
+func writeRiskPaginated(w http.ResponseWriter, r *http.Request, data any, total int, p models.PaginationRequest) {
 	if p.Page < 1 {
 		p.Page = 1
 	}
 	if p.PageSize < 1 || p.PageSize > 100 {
 		p.PageSize = 20
 	}
-	writePaginated(w, data, total, p)
+	writeClassifiedPaginated(w, r, "risks", data, total, p)
 }
 
 func writeRiskError(w http.ResponseWriter, err error, fallback string) {

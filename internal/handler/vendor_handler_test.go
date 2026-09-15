@@ -58,6 +58,7 @@ func vendorHandlerRequest(method, target, body string) *http.Request {
 	r := httptest.NewRequest(method, target, strings.NewReader(body))
 	ctx := context.WithValue(r.Context(), middleware.ContextKeyOrgID, vendorHandlerOrg)
 	ctx = context.WithValue(ctx, middleware.ContextKeyUserID, vendorHandlerUser)
+	ctx = handlerAllowedContext(ctx)
 	route := chi.NewRouteContext()
 	route.URLParams.Add("id", vendorHandlerID)
 	ctx = context.WithValue(ctx, chi.RouteCtxKey, route)

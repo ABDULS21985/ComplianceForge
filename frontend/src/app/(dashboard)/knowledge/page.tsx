@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { ResourceState, StaleDataNotice } from '@/components/data/resource-state';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '@/lib/api';
+import { isForbiddenResourceError } from '@/lib/resource-errors';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,6 +24,11 @@ interface Article {
   updated_at: string;
   author?: string;
   tags?: string[];
+}
+
+interface ArticleListResponse {
+  data?: Article[];
+  items?: Article[];
 }
 
 type Category = 'all' | 'implementation_guides' | 'regulatory_guides' | 'best_practices' | 'glossary';
@@ -51,22 +58,59 @@ const FRAMEWORK_COLORS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Simple Markdown Renderer
+// Safe, deliberately small Markdown renderer. Server-provided content remains
+// text and is never injected as HTML.
 // ---------------------------------------------------------------------------
 
-function renderMarkdown(md: string): string {
-  const html = md
-    .replace(/^### (.+)$/gm, '<h3 class="text-lg font-semibold text-gray-900 mt-6 mb-2" id="$1">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 class="text-xl font-bold text-gray-900 mt-8 mb-3" id="$1">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold text-gray-900 mt-8 mb-4" id="$1">$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="bg-gray-100 text-sm px-1.5 py-0.5 rounded text-indigo-700">$1</code>')
-    .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc text-gray-700">$1</li>')
-    .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 list-decimal text-gray-700">$2</li>')
-    .replace(/\n\n/g, '</p><p class="text-gray-700 leading-relaxed mb-3">')
-    .replace(/\n/g, '<br />');
-  return `<p class="text-gray-700 leading-relaxed mb-3">${html}</p>`;
+function headingId(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+}
+
+function normalizeArticles(value: unknown): Article[] {
+  if (Array.isArray(value)) return value as Article[];
+  if (!value || typeof value !== 'object') return [];
+  const response = value as ArticleListResponse;
+  return response.items ?? response.data ?? [];
+}
+
+function MarkdownContent({ markdown }: { markdown: string }) {
+  return (
+    <div className="space-y-3 text-gray-700">
+      {markdown.split(/\n{2,}/).map((block, index) => {
+        const value = block.trim();
+        const heading = /^(#{1,3})\s+(.+)$/.exec(value);
+        if (heading) {
+          const level = heading[1].length;
+          const text = heading[2];
+          const className = 'mt-6 font-semibold text-gray-900';
+          if (level === 1) return <h2 id={headingId(text)} key={index} className={`${className} text-xl`}>{text}</h2>;
+          if (level === 2) return <h3 id={headingId(text)} key={index} className={`${className} text-lg`}>{text}</h3>;
+          return <h4 id={headingId(text)} key={index} className={className}>{text}</h4>;
+        }
+
+        const lines = value.split('\n');
+        if (lines.every((line) => /^-\s+/.test(line))) {
+          return (
+            <ul key={index} className="list-disc space-y-1 pl-6">
+              {lines.map((line, lineIndex) => <li key={lineIndex}>{line.replace(/^-\s+/, '')}</li>)}
+            </ul>
+          );
+        }
+        if (lines.every((line) => /^\d+\.\s+/.test(line))) {
+          return (
+            <ol key={index} className="list-decimal space-y-1 pl-6">
+              {lines.map((line, lineIndex) => <li key={lineIndex}>{line.replace(/^\d+\.\s+/, '')}</li>)}
+            </ol>
+          );
+        }
+        return <p key={index} className="whitespace-pre-line leading-relaxed">{value}</p>;
+      })}
+    </div>
+  );
 }
 
 function extractHeadings(md: string): { id: string; text: string; level: number }[] {
@@ -74,7 +118,7 @@ function extractHeadings(md: string): { id: string; text: string; level: number 
   const regex = /^(#{1,3}) (.+)$/gm;
   let match;
   while ((match = regex.exec(md)) !== null) {
-    headings.push({ id: match[2], text: match[2], level: match[1].length });
+    headings.push({ id: headingId(match[2]), text: match[2], level: match[1].length });
   }
   return headings;
 }
@@ -88,22 +132,29 @@ export default function KnowledgeBasePage() {
   const [recommended, setRecommended] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
   const [category, setCategory] = useState<Category>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
   const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 'helpful' | 'not_helpful'>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
+  const articleHeadingRef = useRef<HTMLHeadingElement>(null);
+  const articleTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const fetchArticles = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setForbidden(false);
     try {
       const params: Record<string, unknown> = {};
       if (category !== 'all') params.category = category;
       if (searchQuery.trim()) params.search = searchQuery.trim();
-      const data = await api.knowledge.list(params);
-      const items = Array.isArray(data) ? data : (data as any).items ?? [];
-      setArticles(items);
-    } catch {
+      setArticles(normalizeArticles(await api.knowledge.list(params)));
+    } catch (cause: unknown) {
+      if (isForbiddenResourceError(cause)) {
+        setArticles([]);
+        setForbidden(true);
+      }
       setError('Failed to load knowledge base articles.');
     } finally {
       setLoading(false);
@@ -111,18 +162,19 @@ export default function KnowledgeBasePage() {
   }, [category, searchQuery]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void fetchArticles(), 0);
+    const timer = window.setTimeout(() => void fetchArticles(), 300);
     return () => window.clearTimeout(timer);
   }, [fetchArticles]);
 
   // Load recommended
   useEffect(() => {
     api.knowledge.recommended()
-      .then((data: any) => setRecommended(Array.isArray(data) ? data : data.items ?? []))
+      .then((data: unknown) => setRecommended(normalizeArticles(data)))
       .catch(() => {});
   }, []);
 
-  const openArticle = async (article: Article) => {
+  const openArticle = async (article: Article, trigger?: HTMLButtonElement) => {
+    if (trigger) articleTriggerRef.current = trigger;
     try {
       const full = (await api.knowledge.get(article.id)) as Article;
       setSelectedArticle(full);
@@ -132,6 +184,7 @@ export default function KnowledgeBasePage() {
   };
 
   const toggleBookmark = async (article: Article) => {
+    setActionError(null);
     try {
       if (article.bookmarked) {
         await api.knowledge.unbookmark(article.id);
@@ -144,26 +197,41 @@ export default function KnowledgeBasePage() {
       if (selectedArticle?.id === article.id) {
         setSelectedArticle((prev) => prev ? { ...prev, bookmarked: !prev.bookmarked } : prev);
       }
-    } catch {}
+    } catch {
+      setActionError('The bookmark could not be updated. Try again.');
+    }
   };
 
   const sendFeedback = async (articleId: string, type: 'helpful' | 'not_helpful') => {
     if (feedbackGiven[articleId]) return;
+    setActionError(null);
     try {
       await api.knowledge.feedback(articleId, { type });
       setFeedbackGiven((prev) => ({ ...prev, [articleId]: type }));
-    } catch {}
+    } catch {
+      setActionError('Your feedback could not be saved. Try again.');
+    }
   };
 
   const headings = selectedArticle?.content ? extractHeadings(selectedArticle.content) : [];
+
+  useEffect(() => {
+    if (selectedArticle) articleHeadingRef.current?.focus({ preventScroll: true });
+  }, [selectedArticle]);
+
+  const closeArticle = () => {
+    setSelectedArticle(null);
+    window.requestAnimationFrame(() => articleTriggerRef.current?.focus());
+  };
 
   // ----- Article Detail View -----
   if (selectedArticle) {
     return (
       <div className="p-6">
         <button
-          onClick={() => setSelectedArticle(null)}
-          className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900 mb-4"
+          type="button"
+          onClick={closeArticle}
+          className="mb-4 flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm text-gray-700 hover:text-gray-900"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           Back to Knowledge Base
@@ -173,7 +241,7 @@ export default function KnowledgeBasePage() {
           {/* TOC sidebar */}
           {headings.length > 0 && (
             <nav className="hidden xl:block w-56 flex-shrink-0 sticky top-6 self-start">
-              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">On this page</h4>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">On this page</p>
               <div className="space-y-1 border-l-2 border-gray-200">
                 {headings.map((h, i) => (
                   <a
@@ -206,8 +274,14 @@ export default function KnowledgeBasePage() {
                 ))}
               </div>
 
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">{selectedArticle.title}</h1>
+              <h1 ref={articleHeadingRef} tabIndex={-1} className="text-2xl font-bold text-gray-900 mb-2">{selectedArticle.title}</h1>
               <p className="text-gray-500 text-sm mb-6">{selectedArticle.summary}</p>
+
+              {actionError && (
+                <div role="alert" className="mb-6 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+                  {actionError}
+                </div>
+              )}
 
               {selectedArticle.author && (
                 <p className="text-xs text-gray-400 mb-6">
@@ -217,10 +291,7 @@ export default function KnowledgeBasePage() {
 
               {/* Rendered content */}
               {selectedArticle.content ? (
-                <div
-                  className="prose prose-sm max-w-none"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(selectedArticle.content) }}
-                />
+                <MarkdownContent markdown={selectedArticle.content} />
               ) : (
                 <p className="text-gray-500 italic">Full article content is not available.</p>
               )}
@@ -232,9 +303,10 @@ export default function KnowledgeBasePage() {
                   <div className="flex items-center gap-3">
                     <span className="text-sm text-gray-600">Was this helpful?</span>
                     <button
+                      type="button"
                       onClick={() => sendFeedback(selectedArticle.id, 'helpful')}
                       disabled={!!feedbackGiven[selectedArticle.id]}
-                      className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                      className={`min-h-11 px-3 py-1.5 text-sm rounded-lg border transition-colors motion-reduce:transition-none ${
                         feedbackGiven[selectedArticle.id] === 'helpful'
                           ? 'bg-green-100 border-green-300 text-green-700'
                           : 'border-gray-300 text-gray-600 hover:bg-green-50 hover:border-green-300'
@@ -243,9 +315,10 @@ export default function KnowledgeBasePage() {
                       Yes
                     </button>
                     <button
+                      type="button"
                       onClick={() => sendFeedback(selectedArticle.id, 'not_helpful')}
                       disabled={!!feedbackGiven[selectedArticle.id]}
-                      className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                      className={`min-h-11 px-3 py-1.5 text-sm rounded-lg border transition-colors motion-reduce:transition-none ${
                         feedbackGiven[selectedArticle.id] === 'not_helpful'
                           ? 'bg-red-100 border-red-300 text-red-700'
                           : 'border-gray-300 text-gray-600 hover:bg-red-50 hover:border-red-300'
@@ -257,8 +330,9 @@ export default function KnowledgeBasePage() {
 
                   {/* Bookmark */}
                   <button
+                    type="button"
                     onClick={() => toggleBookmark(selectedArticle)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                    className={`flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors motion-reduce:transition-none ${
                       selectedArticle.bookmarked
                         ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                         : 'border-gray-300 text-gray-600 hover:bg-indigo-50'
@@ -276,15 +350,16 @@ export default function KnowledgeBasePage() {
             {/* Recommended */}
             {recommended.length > 0 && (
               <div className="mt-6">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Recommended Articles</h3>
+                <h2 className="text-sm font-semibold text-gray-700 mb-3">Recommended Articles</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {recommended.slice(0, 4).map((rec) => (
                     <button
                       key={rec.id}
-                      onClick={() => openArticle(rec)}
-                      className="text-left bg-white border border-gray-200 rounded-lg p-3 hover:shadow-sm hover:border-indigo-200 transition-all"
+                      type="button"
+                      onClick={(event) => void openArticle(rec, event.currentTarget)}
+                      className="min-h-11 rounded-lg border border-gray-200 bg-white p-3 text-left transition-all motion-reduce:transition-none hover:border-indigo-200 hover:shadow-sm"
                     >
-                      <h4 className="text-sm font-medium text-gray-900 line-clamp-1">{rec.title}</h4>
+                      <h3 className="text-sm font-medium text-gray-900 line-clamp-1">{rec.title}</h3>
                       <p className="text-xs text-gray-500 mt-1 line-clamp-2">{rec.summary}</p>
                       <div className="flex items-center gap-2 mt-2">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full capitalize ${DIFFICULTY_STYLES[rec.difficulty] ?? ''}`}>
@@ -318,15 +393,17 @@ export default function KnowledgeBasePage() {
         {CATEGORIES.map((cat) => (
           <button
             key={cat.value}
+            type="button"
+            aria-pressed={category === cat.value}
             onClick={() => { setCategory(cat.value); setSelectedArticle(null); }}
-            className={`p-3 rounded-xl border text-left transition-all ${
+            className={`min-h-11 p-3 rounded-xl border text-left transition-all motion-reduce:transition-none ${
               category === cat.value
                 ? 'bg-indigo-50 border-indigo-300 shadow-sm'
                 : 'bg-white border-gray-200 hover:border-indigo-200 hover:shadow-sm'
             }`}
           >
-            <span className="text-xl">{cat.icon}</span>
-            <h3 className={`text-sm font-medium mt-1 ${category === cat.value ? 'text-indigo-700' : 'text-gray-900'}`}>{cat.label}</h3>
+            <span aria-hidden="true" className="text-xl">{cat.icon}</span>
+            <span className={`mt-1 block text-sm font-medium ${category === cat.value ? 'text-indigo-700' : 'text-gray-900'}`}>{cat.label}</span>
             <p className="text-[10px] text-gray-500 mt-0.5">{cat.description}</p>
           </button>
         ))}
@@ -338,42 +415,47 @@ export default function KnowledgeBasePage() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <input
+          aria-label="Search knowledge base articles"
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search articles..."
-          className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+          className="min-h-11 w-full rounded-xl border border-gray-300 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
         />
       </div>
 
       {/* Loading */}
-      {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="bg-white border border-gray-200 rounded-xl p-4 animate-pulse">
-              <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-              <div className="h-3 bg-gray-100 rounded w-full mb-1" />
-              <div className="h-3 bg-gray-100 rounded w-2/3" />
-            </div>
-          ))}
-        </div>
-      ) : error ? (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl">
-          <p className="font-semibold">Error</p>
-          <p className="text-sm mt-1">{error}</p>
-          <button onClick={fetchArticles} className="mt-2 text-sm font-medium underline">Retry</button>
-        </div>
+      {error && articles.length > 0 && (
+        <StaleDataNotice
+          title="Showing articles from the previous successful request"
+          onRefresh={() => void fetchArticles()}
+        />
+      )}
+      {forbidden ? (
+        <ResourceState kind="forbidden" title="Knowledge base access unavailable" />
+      ) : loading && articles.length === 0 ? (
+        <ResourceState kind="loading" loadingLayout="cards" title="Loading knowledge base" />
+      ) : error && articles.length === 0 ? (
+        <ResourceState
+          kind="error"
+          title="Knowledge base could not be loaded"
+          description={error}
+          onRetry={() => void fetchArticles()}
+        />
       ) : articles.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
-          <p className="text-gray-500">No articles found. Try a different category or search term.</p>
-        </div>
+        <ResourceState
+          kind="empty"
+          title="No articles found"
+          description="Try a different category or search term."
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {articles.map((article) => (
             <button
               key={article.id}
-              onClick={() => openArticle(article)}
-              className="text-left bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md hover:border-indigo-200 transition-all group"
+              type="button"
+              onClick={(event) => void openArticle(article, event.currentTarget)}
+              className="group min-h-11 rounded-xl border border-gray-200 bg-white p-4 text-left transition-all motion-reduce:transition-none hover:border-indigo-200 hover:shadow-md"
             >
               <div className="flex items-center justify-between mb-2">
                 <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${DIFFICULTY_STYLES[article.difficulty] ?? 'bg-gray-100 text-gray-600'}`}>
@@ -388,7 +470,7 @@ export default function KnowledgeBasePage() {
                   )}
                 </div>
               </div>
-              <h3 className="text-sm font-semibold text-gray-900 group-hover:text-indigo-600 line-clamp-2">{article.title}</h3>
+              <h2 className="text-sm font-semibold text-gray-900 group-hover:text-indigo-600 line-clamp-2">{article.title}</h2>
               <p className="text-xs text-gray-500 mt-1.5 line-clamp-3">{article.summary}</p>
               {article.frameworks.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-3">

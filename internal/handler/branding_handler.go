@@ -211,7 +211,7 @@ func (h *BrandingHandler) UpdateBranding(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, config)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", config)
 }
 
 // UploadLogo handles POST /branding/logo.
@@ -281,7 +281,7 @@ func (h *BrandingHandler) UploadLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", result)
 }
 
 // DeleteLogo handles DELETE /branding/logo/{type}.
@@ -324,7 +324,7 @@ func (h *BrandingHandler) VerifyDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", result)
 }
 
 // GetDomainStatus handles GET /branding/domain/status.
@@ -337,7 +337,7 @@ func (h *BrandingHandler) GetDomainStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, status)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", status)
 }
 
 // PreviewBranding handles POST /branding/preview.
@@ -356,7 +356,7 @@ func (h *BrandingHandler) PreviewBranding(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, preview)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", preview)
 }
 
 // ListPartners handles GET /admin/partners.
@@ -374,7 +374,7 @@ func (h *BrandingHandler) ListPartners(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{
 		"data": partners,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -405,7 +405,7 @@ func (h *BrandingHandler) CreatePartner(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, partner)
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", partner)
 }
 
 // UpdatePartner handles PUT /admin/partners/{id}.
@@ -430,7 +430,7 @@ func (h *BrandingHandler) UpdatePartner(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, partner)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", partner)
 }
 
 // GetPartnerTenants handles GET /admin/partners/{id}/tenants.
@@ -454,7 +454,7 @@ func (h *BrandingHandler) GetPartnerTenants(w http.ResponseWriter, r *http.Reque
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{
 		"data": tenants,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,

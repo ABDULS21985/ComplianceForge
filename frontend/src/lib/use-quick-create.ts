@@ -1,12 +1,11 @@
 'use client';
 
-import { useCallback, useState, useSyncExternalStore } from 'react';
-
 import {
   isQuickCreateRequest,
   QUICK_CREATE_QUERY_PARAM,
   type QuickCreateResource,
 } from '@/lib/routes';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 
 /** Opens an existing create dialog when its canonical quick-create URL loads. */
 export function useQuickCreate(resource: QuickCreateResource) {

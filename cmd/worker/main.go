@@ -26,6 +26,7 @@ import (
 	emailpkg "github.com/complianceforge/platform/internal/pkg/email"
 	queuepkg "github.com/complianceforge/platform/internal/pkg/queue"
 	"github.com/complianceforge/platform/internal/pkg/secretbox"
+	"github.com/complianceforge/platform/internal/repository"
 	"github.com/complianceforge/platform/internal/service"
 	workerpkg "github.com/complianceforge/platform/internal/worker"
 )
@@ -120,6 +121,17 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("create database pool: %w", err)
 	}
 	defer pool.Close()
+	if cfg.App.Env == "production" {
+		checkCtx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+		err := database.ValidateRuntimeDatabaseLoginIdentity(checkCtx, pool, pool.Config().ConnConfig.User)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("verify worker database login identity: %w", err)
+		}
+	}
+	if err := verifyWorkerDatabasePosture(parentCtx, pool, cfg.App.Env == "production"); err != nil {
+		return err
+	}
 
 	queueName := strings.TrimSpace(os.Getenv("WORKER_QUEUE_NAME"))
 	if queueName == "" {
@@ -206,13 +218,20 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 	eventBus := service.NewEventBus()
 	defer eventBus.Close()
 	eventStream := eventBus.Subscribe("*")
+	evidenceLifecycle, err := repository.NewEvidenceLifecycleRepository(
+		pool,
+		repository.WithEvidenceLifecycleOutbox(outbox, queueName),
+	)
+	if err != nil {
+		return fmt.Errorf("create evidence lifecycle repository: %w", err)
+	}
 	components := workerComponents{
 		notifications:        service.NewNotificationEngineWithProtector(pool, eventBus, emailSender, notificationProtector),
 		notificationDelivery: notificationDelivery,
 		analytics:            workerpkg.NewAnalyticsScheduler(pool),
 		calendar:             workerpkg.NewCalendarWorker(pool),
 		dsr:                  workerpkg.NewDSRScheduler(pool),
-		evidence:             workerpkg.NewEvidenceScheduler(pool, eventBus),
+		evidence:             workerpkg.NewEvidenceScheduler(pool, eventBus, evidenceLifecycle),
 		exceptions:           workerpkg.NewExceptionScheduler(pool, eventBus),
 		regulatory:           workerpkg.NewRegulatoryScheduler(pool, eventBus),
 		reports:              workerpkg.NewReportScheduler(pool),
@@ -331,6 +350,18 @@ func run(parentCtx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("worker drain exceeded %s", shutdownPeriod)
 	}
 	return runErr
+}
+
+func verifyWorkerDatabasePosture(ctx context.Context, pool database.Querier, production bool) error {
+	if pool == nil {
+		return fmt.Errorf("verify worker database posture: database executor is required")
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := database.ValidateWorkerDatabasePosture(checkCtx, pool, production); err != nil {
+		return fmt.Errorf("verify worker database posture: %w", err)
+	}
+	return nil
 }
 
 func shutdownWorkerTelemetry(runtime *observability.Runtime, timeoutSeconds int) {
@@ -524,6 +555,16 @@ func bridgeEvents(ctx context.Context, events <-chan service.Event, outbox event
 				log.Error().Err(err).Str("event_type", event.Type).Msg("could not encode domain event")
 				continue
 			}
+			if event.ID != "" {
+				// Scheduler events use a deterministic UUID derived from the
+				// entity, source deadline and threshold. Preserve it through the
+				// transactional outbox so repeated polling is idempotent.
+				envelope.ID = event.ID
+				envelope.CorrelationID = event.ID
+				if !event.Timestamp.IsZero() {
+					envelope.CreatedAt = event.Timestamp.UTC()
+				}
+			}
 			envelope.CausationID = event.EntityID
 			envelope.Metadata = map[string]string{"entity_type": event.EntityType, "entity_id": event.EntityID}
 			if err := envelope.Validate(); err != nil {
@@ -531,6 +572,14 @@ func bridgeEvents(ctx context.Context, events <-chan service.Event, outbox event
 				continue
 			}
 			if err := outbox.Enqueue(ctx, executor, queueName, envelope); err != nil {
+				if event.ID != "" && errors.Is(err, queuepkg.ErrOutboxConflict) {
+					// The first event snapshot for a deterministic occurrence wins.
+					// Later edits to display/owner metadata must not restart the
+					// bridge or resend the same deadline threshold every poll.
+					log.Warn().Str("event_type", event.Type).Str("event_id", event.ID).
+						Msg("scheduled occurrence already queued; later snapshot suppressed")
+					continue
+				}
 				return err
 			}
 		}

@@ -16,12 +16,20 @@ describe('direct frontend response security headers', () => {
     expect(headers.get('x-frame-options')).toBe('DENY');
   });
 
-  it.each(['/vendor-portal', '/board-portal'])(
-    'prevents caching, indexing, and referrer leakage on %s',
+  it.each([
+    '/vendor-portal',
+    '/board-portal',
+    '/accept-invitation',
+    '/reset-password',
+    '/verify-email',
+  ])(
+    'prevents caching, indexing, and one-time credential referrer leakage on %s',
     async (source) => {
       const rules = await nextConfig.headers!();
-      const portal = rules.find((rule) => rule.source === source)?.headers ?? [];
-      const headers = new Map(portal.map(({ key, value }) => [key.toLowerCase(), value]));
+      const sensitiveRoute = rules.find((rule) => rule.source === source)?.headers ?? [];
+      const headers = new Map(
+        sensitiveRoute.map(({ key, value }) => [key.toLowerCase(), value]),
+      );
 
       expect(headers.get('cache-control')).toBe('no-store');
       expect(headers.get('referrer-policy')).toBe('no-referrer');

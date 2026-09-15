@@ -156,7 +156,11 @@ func TestAPIKeyAuthEnforcesRateLimit(t *testing.T) {
 }
 
 func TestRequireAPIKeyPermission(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decision, ok := GetAuthorizationDecision(r.Context())
+		if !ok || !decision.Allowed || decision.ReasonCode != "api_key_scope_granted" {
+			t.Errorf("authorization decision = %#v, present = %v", decision, ok)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 

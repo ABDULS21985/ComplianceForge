@@ -1,8 +1,8 @@
-import type { ApiError } from '@/lib/api';
 import type {
   EntitlementSnapshot,
   FeatureFlagEvaluation,
 } from '@/types/feature-flag';
+import type { ApiError } from '@/lib/api';
 
 export const FEATURE_FLAG_ROUTES = {
   capabilities: '/settings/capabilities',

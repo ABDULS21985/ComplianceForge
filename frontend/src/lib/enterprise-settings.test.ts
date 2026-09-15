@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-
 import {
   describeChannelConfiguration,
   hasSettingsPermission,
@@ -7,8 +6,8 @@ import {
   notificationPollInterval,
   parseJSONObject,
 } from '@/lib/enterprise-settings';
-import type { User } from '@/types';
 import type { NotificationChannel } from '@/types/enterprise-settings';
+import type { User } from '@/types';
 
 const ADMIN: User = {
   id: 'user-1',

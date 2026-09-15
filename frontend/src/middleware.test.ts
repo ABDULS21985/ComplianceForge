@@ -1,13 +1,12 @@
-import { NextRequest } from 'next/server';
-import { afterEach, describe, expect, it } from 'vitest';
-
-import { proxy } from '@/proxy';
 import {
   ACCESS_TOKEN_COOKIE,
   DEVELOPMENT_ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
 } from '@/lib/auth-constants';
+import { afterEach, describe, expect, it } from 'vitest';
 import { AUTH_REDIRECT_QUERY_PARAM, ROUTES } from '@/lib/routes';
+import { NextRequest } from 'next/server';
+import { proxy } from '@/proxy';
 
 const originalAppEnvironment = process.env.APP_ENV;
 
@@ -28,6 +27,19 @@ describe('authentication proxy routing', () => {
       expect(response.headers.get('location')).toBeNull();
     },
   );
+
+  it.each([
+    ROUTES.auth.acceptInvitation,
+    ROUTES.auth.resetPassword,
+    ROUTES.auth.verifyEmail,
+  ])('allows unauthenticated one-time identity workflows at %s', (route) => {
+    const response = proxy(
+      new NextRequest(`https://app.example.test${route}?token=one-time-credential`),
+    );
+
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(response.headers.get('location')).toBeNull();
+  });
 
   it('redirects protected routes and preserves their query string', () => {
     const response = proxy(

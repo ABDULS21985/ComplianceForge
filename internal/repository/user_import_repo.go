@@ -147,6 +147,9 @@ func (r *userAdministrationRepo) ApplyImport(ctx context.Context, organizationID
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if err := lockDirectoryImportUsers(ctx, tx, organizationID, rows); err != nil {
+			return err
+		}
 		preview, err := previewDirectoryImport(ctx, tx, organizationID, rows, contentHash)
 		if err != nil {
 			return err
@@ -222,6 +225,9 @@ func (r *userAdministrationRepo) ApplyImport(ctx context.Context, organizationID
 					}
 					managerID = manager.ID
 				}
+				if err := ensureDirectoryManagerAssignment(ctx, tx, organizationID, userID, managerID); err != nil {
+					return err
+				}
 				if _, err := tx.Exec(ctx, `UPDATE users SET manager_user_id=$3::uuid
 					WHERE organization_id=$1::uuid AND id=$2::uuid`, organizationID, userID, managerID); err != nil {
 					return classifyDirectoryWrite(err)
@@ -259,6 +265,32 @@ func (r *userAdministrationRepo) ApplyImport(ctx context.Context, organizationID
 				"created_count": result.CreatedCount, "updated_count": result.UpdatedCount})
 	})
 	return result, err
+}
+
+func lockDirectoryImportUsers(ctx context.Context, q database.Querier, organizationID string, input []models.DirectoryImportRow) error {
+	emails := make([]string, 0, len(input)*2)
+	for _, row := range input {
+		emails = append(emails, row.Email)
+		if row.ManagerEmail != "" {
+			emails = append(emails, row.ManagerEmail)
+		}
+	}
+	rows, err := q.Query(ctx, `SELECT id FROM users WHERE organization_id=$1::uuid
+		AND lower(email)=ANY($2::text[]) ORDER BY id FOR UPDATE`, organizationID, emails)
+	if err != nil {
+		return fmt.Errorf("lock directory import users: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("scan locked directory import user: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate locked directory import users: %w", err)
+	}
+	return nil
 }
 
 func getDirectoryImportByKey(ctx context.Context, q database.Querier, organizationID, key string) (*models.DirectoryImportResult, error) {

@@ -19,7 +19,6 @@ import (
 
 	"github.com/complianceforge/platform/internal/database"
 	"github.com/complianceforge/platform/internal/middleware"
-	"github.com/complianceforge/platform/internal/models"
 	"github.com/complianceforge/platform/internal/pkg/safehttp"
 	"github.com/complianceforge/platform/internal/pkg/secretbox"
 	"github.com/complianceforge/platform/internal/service"
@@ -219,21 +218,8 @@ func (h *NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.R
 		log.Error().Err(err).Msg("failed to count unread notifications")
 	}
 
-	w.Header().Set("X-Unread-Count", strconv.Itoa(unreadCount))
-
-	totalPages := 0
-	if pagination.PageSize > 0 {
-		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data": notifications,
-		"pagination": models.PaginationResponse{
-			Page:       pagination.Page,
-			PageSize:   pagination.PageSize,
-			TotalItems: total,
-			TotalPages: totalPages,
-		},
+	writeClassifiedPaginatedWithHeaders(w, r, "users", notifications, total, pagination, map[string]string{
+		"X-Unread-Count": strconv.Itoa(unreadCount),
 	})
 }
 
@@ -268,7 +254,7 @@ func (h *NotificationHandler) MarkAsRead(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Notification marked as read"})
+	writeClassifiedJSON(w, r, http.StatusOK, "users", map[string]string{"message": "Notification marked as read"})
 }
 
 // Acknowledge handles PUT /notifications/{id}/acknowledge. Only the delivered
@@ -295,7 +281,7 @@ func (h *NotificationHandler) Acknowledge(w http.ResponseWriter, r *http.Request
 		writeNotificationInternalError(w, r, "acknowledge notification", "Failed to acknowledge notification", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "users", map[string]interface{}{
 		"id":              notificationID,
 		"acknowledged_at": acknowledgedAt,
 		"message":         "Notification acknowledged",
@@ -322,7 +308,7 @@ func (h *NotificationHandler) MarkAllAsRead(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "users", map[string]interface{}{
 		"message": "All notifications marked as read",
 		"count":   result.RowsAffected(),
 	})
@@ -350,7 +336,7 @@ func (h *NotificationHandler) GetUnreadCount(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]int{"count": count})
+	writeClassifiedJSON(w, r, http.StatusOK, "users", map[string]int{"count": count})
 }
 
 // GetPreferences handles GET /notifications/preferences.
@@ -376,7 +362,7 @@ func (h *NotificationHandler) GetPreferences(w http.ResponseWriter, r *http.Requ
 		&p.DigestFrequency, &p.QuietHoursStart, &p.QuietHoursEnd, &p.QuietHoursTimezone,
 		&p.CreatedAt, &p.UpdatedAt)
 	if err == pgx.ErrNoRows {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"data": map[string]interface{}{
+		writeClassifiedJSON(w, r, http.StatusOK, "users", map[string]interface{}{"data": map[string]interface{}{
 			"user_id": userID, "organization_id": orgID, "event_type": "*",
 			"email_enabled": true, "in_app_enabled": true, "slack_enabled": false,
 			"digest_frequency": "immediate",
@@ -388,7 +374,7 @@ func (h *NotificationHandler) GetPreferences(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": p})
+	writeClassifiedJSON(w, r, http.StatusOK, "users", map[string]interface{}{"data": p})
 }
 
 // UpdatePreferences handles PUT /notifications/preferences.
@@ -468,7 +454,7 @@ func (h *NotificationHandler) UpdatePreferences(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": updated})
+	writeClassifiedJSON(w, r, http.StatusOK, "users", map[string]interface{}{"data": updated})
 }
 
 // --------------------------------------------------------------------------
@@ -536,20 +522,7 @@ func (h *NotificationHandler) ListRules(w http.ResponseWriter, r *http.Request) 
 		rules = append(rules, rule)
 	}
 
-	totalPages := 0
-	if pagination.PageSize > 0 {
-		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data": rules,
-		"pagination": models.PaginationResponse{
-			Page:       pagination.Page,
-			PageSize:   pagination.PageSize,
-			TotalItems: total,
-			TotalPages: totalPages,
-		},
-	})
+	writeClassifiedPaginated(w, r, "settings", rules, total, pagination)
 }
 
 // CreateRule handles POST /settings/notification-rules.
@@ -598,7 +571,7 @@ func (h *NotificationHandler) CreateRule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", map[string]string{
 		"id":      ruleID,
 		"message": "Notification rule created",
 	})
@@ -656,7 +629,7 @@ func (h *NotificationHandler) UpdateRule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Notification rule updated"})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]string{"message": "Notification rule updated"})
 }
 
 // DeleteRule handles DELETE /settings/notification-rules/{id}.
@@ -742,17 +715,7 @@ func (h *NotificationHandler) ListTemplates(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	totalPages := 0
-	if pagination.PageSize > 0 {
-		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data": templates,
-		"pagination": models.PaginationResponse{
-			Page: pagination.Page, PageSize: pagination.PageSize,
-			TotalItems: total, TotalPages: totalPages,
-		},
-	})
+	writeClassifiedPaginated(w, r, "settings", templates, total, pagination)
 }
 
 // CreateTemplate handles POST /settings/notification-templates.
@@ -789,7 +752,7 @@ func (h *NotificationHandler) CreateTemplate(w http.ResponseWriter, r *http.Requ
 		writeNotificationInternalError(w, r, "create notification template", "Failed to create template", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", map[string]string{
 		"id": templateID, "message": "Notification template created",
 	})
 }
@@ -844,7 +807,7 @@ func (h *NotificationHandler) UpdateTemplate(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "Template not found", "")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]string{
 		"id": templateID, "message": "Notification template updated",
 	})
 }
@@ -939,7 +902,7 @@ func (h *NotificationHandler) ListChannels(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": channels})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]interface{}{"data": channels})
 }
 
 // CreateChannel handles POST /settings/notification-channels.
@@ -989,7 +952,7 @@ func (h *NotificationHandler) CreateChannel(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", map[string]string{
 		"id":      channelID,
 		"message": "Notification channel created",
 	})
@@ -1050,7 +1013,7 @@ func (h *NotificationHandler) UpdateChannel(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]string{
 		"id":      channelID,
 		"message": "Notification channel updated",
 	})
@@ -1166,7 +1129,7 @@ func (h *NotificationHandler) TestChannel(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]string{
 		"message":      "Test notification sent successfully",
 		"channel_type": channelType,
 	})

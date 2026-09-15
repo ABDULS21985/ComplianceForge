@@ -32,9 +32,14 @@ export type NavigationIconName =
   | 'Inbox'
   | 'Bell'
   | 'PlugZap'
+  | 'ArchiveRestore'
+  | 'Stethoscope'
+  | 'Fingerprint'
+  | 'BadgeCheck'
   | 'Settings';
 
 export interface NavigationContext {
+  enabledCapabilities?: readonly string[];
   isSuperAdmin?: boolean;
   permissions?: PermissionMap;
   roleSlugs: readonly string[];
@@ -50,7 +55,12 @@ export interface NavigationItem {
     resource: string;
     action?: string;
   };
+  permissionAnyOf?: readonly {
+    resource: string;
+    action?: string;
+  }[];
   fallbackRoles?: readonly string[];
+  requiredCapability?: string;
 }
 
 export interface NavigationGroup {
@@ -71,6 +81,7 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
       { id: 'calendar', label: 'Compliance Calendar', href: '/calendar', icon: 'CalendarDays', keywords: ['deadlines', 'schedule'], permission: { resource: 'audits' } },
       { id: 'activity', label: 'Activity', href: '/activity', icon: 'History', keywords: ['audit trail', 'recent'], permission: { resource: 'reports' } },
       { id: 'notification-center', label: 'Notifications', href: '/notifications', icon: 'Inbox', keywords: ['alerts', 'inbox', 'unread'], permission: { resource: 'users', action: 'read' } },
+      { id: 'account-security', label: 'Account Security', href: '/settings/security', icon: 'Fingerprint', keywords: ['sessions', 'devices', 'mfa', 'passkeys', 'recovery'], permission: { resource: 'users', action: 'read' } },
     ],
   },
   {
@@ -126,6 +137,9 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
     items: [
       { id: 'notifications', label: 'Notification Administration', href: '/settings/notifications', icon: 'Bell', keywords: ['alerts', 'rules', 'channels', 'templates'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
       { id: 'integrations', label: 'Integration Hub', href: '/settings/integrations', icon: 'PlugZap', keywords: ['connectors', 'sso', 'api keys'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
+      { id: 'data-lifecycle', label: 'Data Lifecycle Governance', href: '/settings/data-governance', icon: 'ArchiveRestore', keywords: ['retention', 'residency', 'disposition', 'legal holds'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'], requiredCapability: 'data_lifecycle' },
+      { id: 'diagnostics', label: 'Administrator Diagnostics', href: '/settings/diagnostics', icon: 'Stethoscope', keywords: ['health', 'dependencies', 'queue', 'migrations', 'configuration'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
+      { id: 'identity-administration', label: 'Identity Administration', href: '/settings/identity', icon: 'BadgeCheck', keywords: ['authentication policy', 'invitations', 'mfa reset', 'identity history'], permissionAnyOf: [{ resource: 'settings', action: 'read' }, { resource: 'users', action: 'create' }, { resource: 'users', action: 'update' }], fallbackRoles: ['org_admin'] },
       { id: 'settings', label: 'Organization Settings', href: '/settings', icon: 'Settings', keywords: ['users', 'roles', 'configuration'], permission: { resource: 'settings', action: 'read' }, fallbackRoles: ['org_admin'] },
     ],
   },
@@ -138,7 +152,21 @@ export function canViewNavigationItem(
   item: NavigationItem,
   context: NavigationContext
 ): boolean {
+  if (item.requiredCapability && !context.enabledCapabilities?.includes(item.requiredCapability)) {
+    return false;
+  }
   if (context.isSuperAdmin) return true;
+
+  if (item.permissionAnyOf && context.permissions !== undefined) {
+    const permissions = context.permissions;
+    const permitted = item.permissionAnyOf.some(({ action = 'read', resource }) =>
+      permissions[resource]?.includes(action),
+    );
+    if (permitted) return true;
+    if (!item.fallbackRoles || item.permissionAnyOf.some(({ resource }) => resource in permissions)) {
+      return false;
+    }
+  }
 
   if (item.permission && context.permissions !== undefined) {
     const actions = context.permissions[item.permission.resource];

@@ -54,7 +54,7 @@ func (h *VendorHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeVendorError(w, r, err, "Failed to create vendor")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "vendors", item)
 }
 
 func (h *VendorHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +63,7 @@ func (h *VendorHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writeVendorError(w, r, err, "Failed to get vendor")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", item)
 }
 
 func (h *VendorHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +77,7 @@ func (h *VendorHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeVendorError(w, r, err, "Failed to update vendor")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", item)
 }
 
 func (h *VendorHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +113,7 @@ func (h *VendorHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeVendorError(w, r, err, "Failed to list vendors")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(filter.PaginationRequest))
+	writeClassifiedPaginated(w, r, "vendors", items, total, normalizedHandlerPagination(filter.PaginationRequest))
 }
 
 func (h *VendorHandler) Statistics(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +122,7 @@ func (h *VendorHandler) Statistics(w http.ResponseWriter, r *http.Request) {
 		writeVendorError(w, r, err, "Failed to calculate vendor statistics")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", item)
 }
 
 func (h *VendorHandler) Transition(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +136,7 @@ func (h *VendorHandler) Transition(w http.ResponseWriter, r *http.Request) {
 		writeVendorError(w, r, err, "Failed to change vendor lifecycle")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", item)
 }
 
 func (h *VendorHandler) RecordAssessment(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +150,7 @@ func (h *VendorHandler) RecordAssessment(w http.ResponseWriter, r *http.Request)
 		writeVendorError(w, r, err, "Failed to record vendor assessment")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", item)
 }
 
 func (h *VendorHandler) ListDueForAssessment(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +164,7 @@ func (h *VendorHandler) ListDueForAssessment(w http.ResponseWriter, r *http.Requ
 		writeVendorError(w, r, err, "Failed to list due vendor assessments")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]any{"data": items})
 }
 
 func (h *VendorHandler) ListDueContracts(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +178,7 @@ func (h *VendorHandler) ListDueContracts(w http.ResponseWriter, r *http.Request)
 		writeVendorError(w, r, err, "Failed to list due vendor contracts")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]any{"data": items})
 }
 
 func (h *VendorHandler) ListExpiringCertifications(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +192,7 @@ func (h *VendorHandler) ListExpiringCertifications(w http.ResponseWriter, r *htt
 		writeVendorError(w, r, err, "Failed to list expiring vendor certifications")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]any{"data": items})
 }
 
 func (h *VendorHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +202,7 @@ func (h *VendorHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		writeVendorError(w, r, err, "Failed to list vendor history")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(pagination))
+	writeClassifiedPaginated(w, r, "vendors", items, total, normalizedHandlerPagination(pagination))
 }
 
 func (h *VendorHandler) ListContacts(w http.ResponseWriter, r *http.Request) {
@@ -235,7 +235,7 @@ func (h *VendorHandler) writeRelated(w http.ResponseWriter, r *http.Request, kin
 	default:
 		data = item.SubProcessors
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": data, "vendor_version": item.Version})
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]any{"data": data, "vendor_version": item.Version})
 }
 
 func (h *VendorHandler) SaveContact(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +296,7 @@ func (h *VendorHandler) deleteRelated(w http.ResponseWriter, r *http.Request, re
 		writeVendorError(w, r, err, "Failed to remove vendor related record")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"vendor": vendor})
+	writeClassifiedJSON(w, r, http.StatusOK, "vendors", map[string]any{"vendor": vendor})
 }
 func decodeVendorInput(w http.ResponseWriter, r *http.Request, target any) bool {
 	if err := decodeAuditJSON(w, r, target); err != nil {
@@ -314,7 +314,7 @@ func writeVendorRelatedResult(w http.ResponseWriter, r *http.Request, item, vend
 	if created {
 		status = http.StatusCreated
 	}
-	writeJSON(w, status, map[string]any{"data": item, "vendor": vendor})
+	writeClassifiedJSON(w, r, status, "vendors", map[string]any{"data": item, "vendor": vendor})
 }
 
 func vendorOrgID(r *http.Request) string  { return middleware.GetOrgIDFromContext(r.Context()) }

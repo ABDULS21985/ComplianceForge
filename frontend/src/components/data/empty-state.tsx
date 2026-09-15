@@ -1,10 +1,10 @@
-import React from 'react';
 import { Inbox, type LucideIcon } from 'lucide-react';
-
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import React from 'react';
 
 interface EmptyStateProps {
+  action?: React.ReactNode;
   icon?: LucideIcon;
   title: string;
   description?: string;
@@ -14,6 +14,7 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({
+  action,
   icon: Icon = Inbox,
   title,
   description,
@@ -23,13 +24,15 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <div
+      aria-live="polite"
       className={cn(
         'flex flex-col items-center justify-center py-12 text-center',
         className
       )}
+      role="status"
     >
       <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-        <Icon className="h-8 w-8 text-muted-foreground" />
+        <Icon aria-hidden="true" className="h-8 w-8 text-muted-foreground" />
       </div>
       <h3 className="mt-4 text-lg font-semibold">{title}</h3>
       {description && (
@@ -42,6 +45,7 @@ export function EmptyState({
           {actionLabel}
         </Button>
       )}
+      {action && <div className="mt-6">{action}</div>}
     </div>
   );
 }

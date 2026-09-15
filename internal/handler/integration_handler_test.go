@@ -1,9 +1,60 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/complianceforge/platform/internal/middleware"
+	"github.com/complianceforge/platform/internal/models"
+	"github.com/complianceforge/platform/internal/service"
 )
+
+type integrationSyncServiceStub struct {
+	IntegrationSvc
+	result *service.SyncLog
+}
+
+func (stub integrationSyncServiceStub) TriggerSync(context.Context, string, string, string) (*service.SyncLog, error) {
+	return stub.result, nil
+}
+
+func TestTriggerSyncUsesStandardAsyncJobEnvelope(t *testing.T) {
+	createdAt := time.Date(2026, time.September, 14, 12, 0, 0, 0, time.UTC)
+	syncID := "10000000-0000-0000-0000-000000000010"
+	integrationID := "10000000-0000-0000-0000-000000000020"
+	handler := NewIntegrationHandler(integrationSyncServiceStub{result: &service.SyncLog{
+		ID: syncID, IntegrationID: integrationID, SyncType: "full", Status: "started", CreatedAt: createdAt,
+	}})
+	router := chi.NewRouter()
+	router.Post("/integrations/{id}/sync", handler.TriggerSync)
+
+	request := httptest.NewRequest(http.MethodPost, "/integrations/"+integrationID+"/sync", nil)
+	ctx := context.WithValue(request.Context(), middleware.ContextKeyOrgID, "10000000-0000-0000-0000-000000000001")
+	request = request.WithContext(handlerAllowedContext(ctx))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data service.SyncLog `json:"data"`
+		Job  models.AsyncJob `json:"job"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Data.ID != syncID || payload.Job.ID != syncID || payload.Job.Type != "integration_sync" ||
+		payload.Job.Status != "started" || !payload.Job.SubmittedAt.Equal(createdAt) {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
 
 func TestNormalizeIntegrationPayloadSupportsCanonicalAndLegacyShape(t *testing.T) {
 	tests := []struct {

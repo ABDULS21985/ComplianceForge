@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,13 +22,7 @@ func PlanLimits(pool *pgxpool.Pool, resource string) func(http.Handler) http.Han
 				log.Warn().
 					Str("path", r.URL.Path).
 					Msg("plan limits check: missing organization context")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				if err := json.NewEncoder(w).Encode(map[string]interface{}{
-					"error": "missing organization context",
-				}); err != nil {
-					log.Error().Err(err).Msg("write missing organization response")
-				}
+				writeMiddlewareError(w, r, http.StatusUnauthorized, "tenant_context_required", "Tenant context is required", "Authenticate before checking subscription limits.")
 				return
 			}
 
@@ -81,17 +75,8 @@ func PlanLimits(pool *pgxpool.Pool, resource string) func(http.Handler) http.Han
 					Int("max", maxAllowed).
 					Msg("plan limit exceeded")
 
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusPaymentRequired)
-				if err := json.NewEncoder(w).Encode(map[string]interface{}{
-					"error":       "plan_limit_exceeded",
-					"resource":    resource,
-					"current":     currentCount,
-					"max":         maxAllowed,
-					"upgrade_url": "/subscription/plans",
-				}); err != nil {
-					log.Error().Err(err).Str("resource", resource).Msg("write plan limit response")
-				}
+				details := fmt.Sprintf("The %s limit is %d and current usage is %d. Reduce usage or review subscription plans.", resource, maxAllowed, currentCount)
+				writeMiddlewareError(w, r, http.StatusPaymentRequired, "plan_limit_exceeded", "Subscription plan limit exceeded", details)
 				return
 			}
 

@@ -1,7 +1,5 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
   ArrowLeft,
   BookOpen,
@@ -13,25 +11,25 @@ import {
   Shield,
   Upload,
 } from 'lucide-react';
-
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-import {
-  usePolicy,
-  usePublishPolicy,
-  useAttestPolicy,
-  useUpdatePolicy,
-} from '@/lib/api-hooks';
 import {
   cn,
   formatDate,
   formatDateTime,
   getStatusColor,
 } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  useAttestPolicy,
+  usePolicy,
+  usePublishPolicy,
+  useUpdatePolicy,
+} from '@/lib/api-hooks';
+import { useParams, useRouter } from 'next/navigation';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
+import { Skeleton } from '@/components/ui/skeleton';
 
 // ---------------------------------------------------------------------------
 // Types

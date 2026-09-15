@@ -1,17 +1,9 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Download, Eye, EyeOff, KeyRound, Loader2, Plus, ShieldAlert, Trash2, X } from 'lucide-react';
-import { toast } from 'sonner';
-
-import api from '@/lib/api';
 import { API_KEY_ACTIONS, API_KEY_RESOURCES, formatApiError } from '@/lib/enterprise-settings';
 import type { APIKeyRecord, CreateAPIKeyInput } from '@/types/enterprise-settings';
-import { ConfirmAction } from '@/components/settings/confirm-action';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Copy, Download, Eye, EyeOff, KeyRound, Loader2, Plus, ShieldAlert, Trash2, X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -20,10 +12,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { type FormEvent, useState } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ConfirmAction } from '@/components/settings/confirm-action';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
 
 function formatDate(value: string | null): string {
   if (!value) return 'Never';

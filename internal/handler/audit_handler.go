@@ -50,7 +50,7 @@ func (h *AuditHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to create audit")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "audits", item)
 }
 
 func (h *AuditHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +59,7 @@ func (h *AuditHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to get audit")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", item)
 }
 
 func (h *AuditHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +73,7 @@ func (h *AuditHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to update audit")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", item)
 }
 
 func (h *AuditHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +96,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to list audits")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(filter.PaginationRequest))
+	writeClassifiedPaginated(w, r, "audits", items, total, normalizedHandlerPagination(filter.PaginationRequest))
 }
 
 func (h *AuditHandler) Start(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +124,7 @@ func (h *AuditHandler) writeLifecycleResult(w http.ResponseWriter, r *http.Reque
 		writeAuditError(w, r, err, "Failed to change audit lifecycle")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", item)
 }
 
 func (h *AuditHandler) CreateFinding(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +138,7 @@ func (h *AuditHandler) CreateFinding(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to create audit finding")
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeClassifiedJSON(w, r, http.StatusCreated, "audits", item)
 }
 
 func (h *AuditHandler) ListFindings(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +148,7 @@ func (h *AuditHandler) ListFindings(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to list audit findings")
 		return
 	}
-	writePaginated(w, items, total, pagination)
+	writeClassifiedPaginated(w, r, "audits", items, total, pagination)
 }
 
 func (h *AuditHandler) GetFinding(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func (h *AuditHandler) GetFinding(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to get audit finding")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", item)
 }
 
 func (h *AuditHandler) UpdateFinding(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +171,7 @@ func (h *AuditHandler) UpdateFinding(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to update audit finding")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", item)
 }
 
 func (h *AuditHandler) DeleteFinding(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +189,7 @@ func (h *AuditHandler) FindingStats(w http.ResponseWriter, r *http.Request) {
 		writeAuditError(w, r, err, "Failed to calculate finding statistics")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeClassifiedJSON(w, r, http.StatusOK, "audits", item)
 }
 
 func auditOrgID(r *http.Request) string  { return middleware.GetOrgIDFromContext(r.Context()) }

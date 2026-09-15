@@ -48,6 +48,7 @@ func policyHandlerRequest(method, path, body string) *http.Request {
 	ctx := context.WithValue(request.Context(), middleware.ContextKeyOrgID, policyTestHandlerOrgID)
 	ctx = context.WithValue(ctx, middleware.ContextKeyUserID, policyTestHandlerUserID)
 	ctx = context.WithValue(ctx, middleware.ContextKeyRole, "compliance_manager")
+	ctx = handlerAllowedContext(ctx)
 	return request.WithContext(ctx)
 }
 

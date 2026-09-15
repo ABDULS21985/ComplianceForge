@@ -43,46 +43,46 @@ type ExceptionFilters struct {
 
 // Exception represents a compliance exception.
 type Exception struct {
-	ID               string   `json:"id"`
-	OrganizationID   string   `json:"organization_id"`
-	Title            string   `json:"title" validate:"required"`
-	Description      string   `json:"description"`
-	Type             string   `json:"type"`      // policy, control, regulatory
-	Status           string   `json:"status"`    // draft, pending_approval, approved, rejected, expired, revoked
-	RiskLevel        string   `json:"risk_level"` // critical, high, medium, low
-	Justification    string   `json:"justification"`
-	CompensatingControls string `json:"compensating_controls,omitempty"`
-	AffectedControlIDs []string `json:"affected_control_ids,omitempty"`
-	AffectedPolicyIDs  []string `json:"affected_policy_ids,omitempty"`
-	RequestedBy      string   `json:"requested_by"`
-	ApprovedBy       string   `json:"approved_by,omitempty"`
-	ApprovedAt       string   `json:"approved_at,omitempty"`
-	ExpiresAt        string   `json:"expires_at,omitempty"`
-	RenewedAt        string   `json:"renewed_at,omitempty"`
-	RevokedAt        string   `json:"revoked_at,omitempty"`
-	LastReviewedAt   string   `json:"last_reviewed_at,omitempty"`
-	NextReviewDate   string   `json:"next_review_date,omitempty"`
-	CreatedBy        string   `json:"created_by"`
-	CreatedAt        string   `json:"created_at"`
-	UpdatedAt        string   `json:"updated_at"`
+	ID                   string   `json:"id"`
+	OrganizationID       string   `json:"organization_id"`
+	Title                string   `json:"title" validate:"required"`
+	Description          string   `json:"description"`
+	Type                 string   `json:"type"`       // policy, control, regulatory
+	Status               string   `json:"status"`     // draft, pending_approval, approved, rejected, expired, revoked
+	RiskLevel            string   `json:"risk_level"` // critical, high, medium, low
+	Justification        string   `json:"justification"`
+	CompensatingControls string   `json:"compensating_controls,omitempty"`
+	AffectedControlIDs   []string `json:"affected_control_ids,omitempty"`
+	AffectedPolicyIDs    []string `json:"affected_policy_ids,omitempty"`
+	RequestedBy          string   `json:"requested_by"`
+	ApprovedBy           string   `json:"approved_by,omitempty"`
+	ApprovedAt           string   `json:"approved_at,omitempty"`
+	ExpiresAt            string   `json:"expires_at,omitempty"`
+	RenewedAt            string   `json:"renewed_at,omitempty"`
+	RevokedAt            string   `json:"revoked_at,omitempty"`
+	LastReviewedAt       string   `json:"last_reviewed_at,omitempty"`
+	NextReviewDate       string   `json:"next_review_date,omitempty"`
+	CreatedBy            string   `json:"created_by"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
 }
 
 // ExceptionDetail extends Exception with related data.
 type ExceptionDetail struct {
 	Exception
-	Reviews     []ExceptionReview `json:"reviews,omitempty"`
-	AuditTrail  []ExceptionAudit  `json:"audit_trail,omitempty"`
+	Reviews    []ExceptionReview `json:"reviews,omitempty"`
+	AuditTrail []ExceptionAudit  `json:"audit_trail,omitempty"`
 }
 
 // ExceptionReview represents a periodic review of an exception.
 type ExceptionReview struct {
-	ID           string `json:"id"`
-	ExceptionID  string `json:"exception_id"`
-	ReviewedBy   string `json:"reviewed_by"`
-	Status       string `json:"status"` // continued, escalated, revoked
-	Comments     string `json:"comments,omitempty"`
+	ID               string `json:"id"`
+	ExceptionID      string `json:"exception_id"`
+	ReviewedBy       string `json:"reviewed_by"`
+	Status           string `json:"status"` // continued, escalated, revoked
+	Comments         string `json:"comments,omitempty"`
 	RiskReassessment string `json:"risk_reassessment,omitempty"`
-	ReviewedAt   string `json:"reviewed_at"`
+	ReviewedAt       string `json:"reviewed_at"`
 }
 
 // ExceptionAudit represents an audit trail entry for an exception.
@@ -126,27 +126,27 @@ type ExceptionReviewRequest struct {
 
 // ExceptionDashboard provides exception metrics for an organization.
 type ExceptionDashboard struct {
-	TotalExceptions    int            `json:"total_exceptions"`
-	ActiveExceptions   int            `json:"active_exceptions"`
-	PendingApproval    int            `json:"pending_approval"`
-	ExpiringIn30Days   int            `json:"expiring_in_30_days"`
-	ByStatus           map[string]int `json:"by_status"`
-	ByRiskLevel        map[string]int `json:"by_risk_level"`
-	ByType             map[string]int `json:"by_type"`
-	OverdueReviews     int            `json:"overdue_reviews"`
-	AverageApprovalDays float64       `json:"average_approval_days"`
+	TotalExceptions     int            `json:"total_exceptions"`
+	ActiveExceptions    int            `json:"active_exceptions"`
+	PendingApproval     int            `json:"pending_approval"`
+	ExpiringIn30Days    int            `json:"expiring_in_30_days"`
+	ByStatus            map[string]int `json:"by_status"`
+	ByRiskLevel         map[string]int `json:"by_risk_level"`
+	ByType              map[string]int `json:"by_type"`
+	OverdueReviews      int            `json:"overdue_reviews"`
+	AverageApprovalDays float64        `json:"average_approval_days"`
 }
 
 // ExceptionImpactAnalysis provides impact analysis for an exception.
 type ExceptionImpactAnalysis struct {
-	ExceptionID         string           `json:"exception_id"`
-	AffectedControls    []AffectedItem   `json:"affected_controls"`
-	AffectedPolicies    []AffectedItem   `json:"affected_policies"`
-	RiskImpact          string           `json:"risk_impact"`
-	ComplianceGaps      []string         `json:"compliance_gaps,omitempty"`
-	FrameworksImpacted  []string         `json:"frameworks_impacted,omitempty"`
-	OverallRiskIncrease string           `json:"overall_risk_increase"`
-	Recommendations     []string         `json:"recommendations,omitempty"`
+	ExceptionID         string         `json:"exception_id"`
+	AffectedControls    []AffectedItem `json:"affected_controls"`
+	AffectedPolicies    []AffectedItem `json:"affected_policies"`
+	RiskImpact          string         `json:"risk_impact"`
+	ComplianceGaps      []string       `json:"compliance_gaps,omitempty"`
+	FrameworksImpacted  []string       `json:"frameworks_impacted,omitempty"`
+	OverallRiskIncrease string         `json:"overall_risk_increase"`
+	Recommendations     []string       `json:"recommendations,omitempty"`
 }
 
 // AffectedItem represents an item affected by an exception.
@@ -193,7 +193,7 @@ func (h *ExceptionHandler) List(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]interface{}{
 		"data": exceptions,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -225,7 +225,7 @@ func (h *ExceptionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, exception)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", exception)
 }
 
 // GetByID handles GET /exceptions/{id}.
@@ -243,7 +243,7 @@ func (h *ExceptionHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", detail)
 }
 
 // Update handles PUT /exceptions/{id}.
@@ -268,7 +268,7 @@ func (h *ExceptionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, exception)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", exception)
 }
 
 // Submit handles POST /exceptions/{id}/submit.
@@ -286,7 +286,7 @@ func (h *ExceptionHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Exception submitted for approval"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Exception submitted for approval"})
 }
 
 // Approve handles POST /exceptions/{id}/approve.
@@ -310,7 +310,7 @@ func (h *ExceptionHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Exception approved"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Exception approved"})
 }
 
 // Reject handles POST /exceptions/{id}/reject.
@@ -339,7 +339,7 @@ func (h *ExceptionHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Exception rejected"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Exception rejected"})
 }
 
 // Revoke handles POST /exceptions/{id}/revoke.
@@ -368,7 +368,7 @@ func (h *ExceptionHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Exception revoked"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Exception revoked"})
 }
 
 // Renew handles POST /exceptions/{id}/renew.
@@ -397,7 +397,7 @@ func (h *ExceptionHandler) Renew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Exception renewed"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Exception renewed"})
 }
 
 // Review handles POST /exceptions/{id}/review.
@@ -426,7 +426,7 @@ func (h *ExceptionHandler) Review(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Exception reviewed"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Exception reviewed"})
 }
 
 // GetDashboard handles GET /exceptions/dashboard.
@@ -439,7 +439,7 @@ func (h *ExceptionHandler) GetDashboard(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, dashboard)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", dashboard)
 }
 
 // GetExpiring handles GET /exceptions/expiring.
@@ -463,7 +463,7 @@ func (h *ExceptionHandler) GetExpiring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]interface{}{
 		"data":       exceptions,
 		"days_ahead": daysAhead,
 	})
@@ -484,7 +484,7 @@ func (h *ExceptionHandler) GetImpactAnalysis(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, analysis)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", analysis)
 }
 
 // mustParseInt parses a string to int64; returns 0 on failure.

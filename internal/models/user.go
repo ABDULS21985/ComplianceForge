@@ -57,12 +57,17 @@ func (u *User) IsActive() bool {
 // UserSession is the persisted, revocable relationship between an access and
 // refresh token pair. Only SHA-256 token hashes are stored.
 type UserSession struct {
-	ID               string
-	UserID           string
-	OrganizationID   string
-	TokenHash        string
-	RefreshTokenHash string
-	ExpiresAt        time.Time
-	RevokedAt        *time.Time
-	CreatedAt        time.Time
+	ID                   string
+	UserID               string
+	OrganizationID       string
+	TokenHash            string
+	RefreshTokenHash     string
+	IPAddress            string
+	UserAgent            string
+	DeviceName           string
+	AuthenticationMethod IdentityMethod
+	MFAVerifiedAt        *time.Time
+	ExpiresAt            time.Time
+	RevokedAt            *time.Time
+	CreatedAt            time.Time
 }

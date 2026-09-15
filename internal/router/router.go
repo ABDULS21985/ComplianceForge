@@ -14,6 +14,7 @@ import (
 
 	"github.com/complianceforge/platform/internal/config"
 	"github.com/complianceforge/platform/internal/middleware"
+	"github.com/complianceforge/platform/internal/models"
 )
 
 // NewRouter creates the Chi router with all middleware, route groups, and handler
@@ -53,7 +54,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 	}
-	r.Get("/health", live)
+	r.With(middleware.DeprecatedRoute("/health/live")).Get("/health", live)
 	r.Get("/health/live", live)
 	r.Get("/health/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -72,6 +73,8 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	// Required handlers are validated above. Remaining domain modules are
 	// explicitly optional in this vertical slice.
 	authHandler := dependencies.Auth
+	identityHandler := dependencies.Identity
+	scimHandler := dependencies.SCIM
 	organizationHandler := dependencies.Organizations
 	frameworkHandler := dependencies.Frameworks
 	controlHandler := dependencies.Controls
@@ -83,7 +86,14 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 	assetHandler := dependencies.Assets
 	vendorHandler := dependencies.Vendors
 	accessAdministrationHandler := dependencies.AccessAdministration
+	accessGovernanceHandler := dependencies.AccessGovernance
+	userAdministrationHandler := dependencies.UserAdministration
 	featureFlagHandler := dependencies.FeatureFlags
+	dataGovernanceHandler := dependencies.DataGovernance
+	dataQualityHandler := dependencies.DataQuality
+	organizationProfileHandler := dependencies.OrganizationProfile
+	calendarReadHandler := dependencies.CalendarRead
+	diagnosticsHandler := dependencies.Diagnostics
 	dashboardHandler := dependencies.Domains.Dashboard
 	reportHandler := dependencies.Domains.Report
 	notificationHandler := dependencies.Notifications
@@ -117,6 +127,14 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 		r.Post("/login", authHandler.Login)
 		r.Post("/register", authHandler.Register)
 		r.Post("/refresh", authHandler.Refresh)
+		r.Post("/invitations/accept", identityHandler.AcceptInvitation)
+		r.Post("/email-verification/request", identityHandler.RequestEmailVerification)
+		r.Post("/email-verification/confirm", identityHandler.VerifyEmail)
+		r.Post("/password/forgot", identityHandler.RequestPasswordReset)
+		r.Post("/password/reset", identityHandler.ResetPassword)
+		r.Post("/mfa/verify", authHandler.CompleteMFA)
+		r.Post("/passkeys/authentication/options", identityHandler.BeginPasskeyAuthentication)
+		r.Post("/passkeys/authentication/verify", authHandler.CompletePasskeyAuthentication)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.AuthMiddleware(dependencies.AccessTokenValidator))
 			r.Use(dependencies.TenantMiddleware)
@@ -126,6 +144,36 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			// principals whose role assignment has been revoked.
 			r.With(middleware.RequireAuthorization(dependencies.Authorizer, "users", "read", nil)).Post("/logout", authHandler.Logout)
 		})
+	})
+
+	// SCIM has an isolated credential namespace and RFC 7644 response surface.
+	// The bearer token establishes the tenant before the same request-scoped
+	// RLS middleware used by the browser API is entered. No tenant header or JWT
+	// identity is accepted by these routes.
+	r.Route("/api/scim/v2", func(r chi.Router) {
+		r.Use(middleware.SCIMAuth(dependencies.SCIMAuthenticator, dependencies.APIKeyRateLimiter))
+		r.Use(dependencies.TenantMiddleware)
+		r.Use(middleware.RequireSCIMFeature(dependencies.FeatureEvaluator, "api_access"))
+
+		r.Get("/ServiceProviderConfig", scimHandler.ServiceProviderConfig)
+		r.Get("/Schemas", scimHandler.ListSchemas)
+		r.Get("/Schemas/{schema}", scimHandler.GetSchema)
+		r.Get("/ResourceTypes", scimHandler.ListResourceTypes)
+		r.Get("/ResourceTypes/{resourceType}", scimHandler.GetResourceType)
+
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeUsersRead)).Get("/Users", scimHandler.ListUsers)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeUsersWrite)).Post("/Users", scimHandler.CreateUser)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeUsersRead)).Get("/Users/{id}", scimHandler.GetUser)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeUsersWrite)).Put("/Users/{id}", scimHandler.ReplaceUser)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeUsersWrite)).Patch("/Users/{id}", scimHandler.PatchUser)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeUsersWrite)).Delete("/Users/{id}", scimHandler.DeleteUser)
+
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeGroupsRead)).Get("/Groups", scimHandler.ListGroups)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeGroupsWrite)).Post("/Groups", scimHandler.CreateGroup)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeGroupsRead)).Get("/Groups/{id}", scimHandler.GetGroup)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeGroupsWrite)).Put("/Groups/{id}", scimHandler.ReplaceGroup)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeGroupsWrite)).Patch("/Groups/{id}", scimHandler.PatchGroup)
+		r.With(middleware.RequireSCIMScope(models.SCIMTokenScopeGroupsWrite)).Delete("/Groups/{id}", scimHandler.DeleteGroup)
 	})
 
 	// --- Public portal routes (token-authenticated, no JWT) ---
@@ -249,6 +297,28 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 		r.Use(dependencies.TenantMiddleware)
 		r.Use(authorizeProtectedRoute(dependencies.Authorizer))
 
+		// Identity security. Self-service mutations remain tenant/user scoped in
+		// the handler and service; policy and history use administrator RBAC.
+		r.Route("/identity", func(r chi.Router) {
+			r.Get("/policy", identityHandler.GetPolicy)
+			r.Put("/policy", identityHandler.UpdatePolicy)
+			r.Get("/sessions", identityHandler.ListSessions)
+			r.Delete("/sessions/{sessionID}", identityHandler.RevokeSession)
+			r.Post("/sessions/sign-out", identityHandler.GlobalSignOut)
+			r.Get("/mfa/factors", identityHandler.ListMFAFactors)
+			r.Post("/mfa/totp/enrollment", identityHandler.BeginTOTPEnrollment)
+			r.Post("/mfa/totp/verification", identityHandler.VerifyTOTPEnrollment)
+			r.Delete("/mfa/factors/{factorID}", identityHandler.DisableMFAFactor)
+			r.Post("/mfa/factors/{factorID}/recovery-codes", identityHandler.RegenerateRecoveryCodes)
+			r.Post("/step-up/challenges", identityHandler.BeginStepUp)
+			r.Post("/step-up/verify", identityHandler.VerifyStepUp)
+			r.Get("/passkeys", identityHandler.ListPasskeys)
+			r.Post("/passkeys/registration/options", identityHandler.BeginPasskeyRegistration)
+			r.Post("/passkeys/registration/verify", identityHandler.FinishPasskeyRegistration)
+			r.Delete("/passkeys/{passkeyID}", identityHandler.RemovePasskey)
+			r.Get("/history", identityHandler.ListEvents)
+		})
+
 		// Organizations
 		r.Route("/organizations", func(r chi.Router) {
 			r.Post("/", organizationHandler.Create)
@@ -275,6 +345,11 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Patch("/{id}/implementation", controlHandler.UpdateImplementation)
 			r.Post("/{id}/evidence", controlHandler.AttachEvidence)
 			r.Get("/{id}/evidence", controlHandler.ListEvidence)
+			r.Get("/{id}/evidence/{evidenceID}/download", controlHandler.DownloadEvidence)
+			r.Post("/{id}/evidence/{evidenceID}/review", controlHandler.ReviewEvidence)
+			r.Get("/{id}/evidence/{evidenceID}/history", controlHandler.EvidenceHistory)
+			r.Post("/{id}/evidence/{evidenceID}/verify-integrity", controlHandler.VerifyEvidenceIntegrity)
+			r.Post("/{id}/evidence/{evidenceID}/supersede", controlHandler.SupersedeEvidence)
 		})
 
 		// Risks
@@ -335,8 +410,8 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Get("/{id}/exceptions/{exceptionID}", policyHandler.GetException)
 			r.Post("/{id}/exceptions/{exceptionID}/decision", policyHandler.DecideException)
 			// Backward-compatible aliases use the same workflow-backed behavior.
-			r.Put("/{id}/submit-review", policyHandler.SubmitForReview)
-			r.Put("/{id}/approve", policyHandler.Approve)
+			r.With(middleware.DeprecatedRoute("/api/v1/policies/{id}/submit")).Put("/{id}/submit-review", policyHandler.SubmitForReview)
+			r.With(middleware.DeprecatedRoute("/api/v1/policies/{id}/approval/decision")).Put("/{id}/approve", policyHandler.Approve)
 		})
 
 		// Audits
@@ -369,7 +444,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Get("/statistics", incidentHandler.Statistics)
 			r.Get("/breaches/upcoming", incidentHandler.GetBreachNotifiable)
 			// Backward-compatible deadline alias.
-			r.Get("/breach-notifiable", incidentHandler.GetBreachNotifiable)
+			r.With(middleware.DeprecatedRoute("/api/v1/incidents/breaches/upcoming")).Get("/breach-notifiable", incidentHandler.GetBreachNotifiable)
 			r.Get("/{id}", incidentHandler.GetByID)
 			r.Put("/{id}", incidentHandler.Update)
 			r.Patch("/{id}", incidentHandler.Update)
@@ -408,7 +483,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Get("/", vendorHandler.List)
 			r.Get("/statistics", vendorHandler.Statistics)
 			// Backward-compatible route for the existing dashboard client.
-			r.Get("/stats", vendorHandler.Statistics)
+			r.With(middleware.DeprecatedRoute("/api/v1/vendors/statistics")).Get("/stats", vendorHandler.Statistics)
 			r.Get("/due-for-assessment", vendorHandler.ListDueForAssessment)
 			r.Get("/contracts/upcoming", vendorHandler.ListDueContracts)
 			r.Get("/certifications/expiring", vendorHandler.ListExpiringCertifications)
@@ -419,7 +494,7 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Post("/{id}/transitions", vendorHandler.Transition)
 			r.Post("/{id}/assessments", vendorHandler.RecordAssessment)
 			// Compatibility alias for the former assessment stub.
-			r.Post("/{id}/assess", vendorHandler.RecordAssessment)
+			r.With(middleware.DeprecatedRoute("/api/v1/vendors/{id}/assessments")).Post("/{id}/assess", vendorHandler.RecordAssessment)
 			r.Get("/{id}/timeline", vendorHandler.ListEvents)
 			r.Get("/{id}/contacts", vendorHandler.ListContacts)
 			r.Post("/{id}/contacts", vendorHandler.SaveContact)
@@ -437,6 +512,38 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Post("/{id}/subprocessors", vendorHandler.SaveSubprocessor)
 			r.Put("/{id}/subprocessors/{subprocessorID}", vendorHandler.SaveSubprocessor)
 			r.Delete("/{id}/subprocessors/{subprocessorID}", vendorHandler.DeleteSubprocessor)
+		})
+
+		// Enterprise user and group directory
+		r.Route("/directory", func(r chi.Router) {
+			r.Route("/users", func(r chi.Router) {
+				r.Post("/", userAdministrationHandler.CreateUser)
+				r.Get("/", userAdministrationHandler.ListUsers)
+				r.Post("/import/preview", userAdministrationHandler.PreviewImport)
+				r.Post("/import", userAdministrationHandler.ApplyImport)
+				r.Get("/{id}", userAdministrationHandler.GetUser)
+				r.Patch("/{id}", userAdministrationHandler.UpdateUser)
+				r.Post("/{id}/suspend", userAdministrationHandler.SuspendUser)
+				r.Post("/{id}/reactivate", userAdministrationHandler.ReactivateUser)
+				r.Get("/{id}/ownership-impact", userAdministrationHandler.PreviewOwnership)
+				r.Post("/{id}/transfer-ownership", userAdministrationHandler.TransferOwnership)
+				r.Post("/{id}/deprovision", userAdministrationHandler.DeprovisionUser)
+				r.Get("/{id}/history", userAdministrationHandler.ListUserEvents)
+				r.Post("/{id}/invitation", identityHandler.IssueInvitation)
+				r.Post("/{id}/mfa/reset", identityHandler.AdminResetMFA)
+			})
+			r.Route("/groups", func(r chi.Router) {
+				r.Post("/", userAdministrationHandler.CreateGroup)
+				r.Get("/", userAdministrationHandler.ListGroups)
+				r.Get("/{groupID}", userAdministrationHandler.GetGroup)
+				r.Patch("/{groupID}", userAdministrationHandler.UpdateGroup)
+				r.Delete("/{groupID}", userAdministrationHandler.DeleteGroup)
+				r.Get("/{groupID}/members", userAdministrationHandler.ListGroupMembers)
+				r.Post("/{groupID}/members", userAdministrationHandler.AddGroupMember)
+				r.Delete("/{groupID}/members/{userID}", userAdministrationHandler.RemoveGroupMember)
+				r.Post("/{groupID}/members/bulk", userAdministrationHandler.ChangeGroupMembers)
+				r.Get("/{groupID}/history", userAdministrationHandler.ListGroupEvents)
+			})
 		})
 
 		// Dashboard
@@ -605,9 +712,18 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Get("/settings/api-keys", integrationHandler.ListAPIKeys)
 		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Post("/settings/api-keys", integrationHandler.CreateAPIKey)
 		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Delete("/settings/api-keys/{id}", integrationHandler.RevokeAPIKey)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Get("/settings/scim/tokens", scimHandler.ListTokens)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Post("/settings/scim/tokens", scimHandler.CreateToken)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Post("/settings/scim/tokens/{id}/rotate", scimHandler.RotateToken)
+		r.With(middleware.RequireFeature(dependencies.FeatureEvaluator, "api_access")).Delete("/settings/scim/tokens/{id}", scimHandler.RevokeToken)
 
 		// Product capability catalogue, entitlements, and tenant feature flags.
 		r.Route("/settings", func(r chi.Router) {
+			r.Get("/organization", organizationProfileHandler.GetProfile)
+			r.Put("/organization", organizationProfileHandler.UpdateProfile)
+			r.Get("/data-quality", dataQualityHandler.GetSnapshot)
+			r.Get("/diagnostics", diagnosticsHandler.GetSnapshot)
+			r.Post("/diagnostics/support-bundle", diagnosticsHandler.GenerateSupportBundle)
 			r.Get("/capabilities", featureFlagHandler.ListCapabilities)
 			r.Get("/capabilities/{key}/evaluation", featureFlagHandler.Evaluate)
 			r.Get("/entitlements", featureFlagHandler.GetEntitlements)
@@ -616,6 +732,35 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Put("/feature-flags/{key}", featureFlagHandler.UpsertOverride)
 			r.Post("/feature-flags/{key}/reset", featureFlagHandler.ResetOverride)
 			r.Get("/feature-flags/{key}/history", featureFlagHandler.ListEvents)
+
+			// Tenant data residency, retention, disposition, and legal holds.
+			r.Route("/data-governance", func(r chi.Router) {
+				r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "data_lifecycle"))
+				r.Get("/policy", dataGovernanceHandler.GetPolicy)
+				r.Put("/policy", dataGovernanceHandler.UpsertPolicy)
+				r.Get("/retention-schedules", dataGovernanceHandler.ListSchedules)
+				r.Post("/retention-schedules", dataGovernanceHandler.CreateSchedule)
+				r.Get("/retention-schedules/{scheduleID}", dataGovernanceHandler.GetSchedule)
+				r.Patch("/retention-schedules/{scheduleID}", dataGovernanceHandler.UpdateSchedule)
+				r.Delete("/retention-schedules/{scheduleID}", dataGovernanceHandler.RetireSchedule)
+				r.Post("/retention-assignments", dataGovernanceHandler.CreateAssignment)
+				r.Get("/retention-assignments/{assignmentID}", dataGovernanceHandler.GetAssignment)
+				r.Post("/retention-assignments/{assignmentID}/review", dataGovernanceHandler.ReviewDisposition)
+				r.Get("/retention-assignments/{assignmentID}/exceptions", dataGovernanceHandler.ListExceptions)
+				r.Post("/retention-assignments/{assignmentID}/exceptions", dataGovernanceHandler.RequestException)
+				r.Post("/retention-exceptions/{exceptionID}/decision", dataGovernanceHandler.DecideException)
+				r.Get("/records/{recordType}/{recordID}/disposition", dataGovernanceHandler.GetRecordDisposition)
+				r.Get("/legal-holds", dataGovernanceHandler.ListLegalHolds)
+				r.Post("/legal-holds", dataGovernanceHandler.CreateLegalHold)
+				r.Get("/legal-holds/{holdID}", dataGovernanceHandler.GetLegalHold)
+				r.Patch("/legal-holds/{holdID}", dataGovernanceHandler.UpdateLegalHold)
+				r.Post("/legal-holds/{holdID}/release", dataGovernanceHandler.ReleaseLegalHold)
+				r.Get("/legal-holds/{holdID}/records", dataGovernanceHandler.ListLegalHoldRecords)
+				r.Post("/legal-holds/{holdID}/records", dataGovernanceHandler.AddLegalHoldRecord)
+				r.Post("/legal-holds/{holdID}/records/{holdRecordID}/release", dataGovernanceHandler.ReleaseLegalHoldRecord)
+				r.Get("/events", dataGovernanceHandler.ListEvents)
+				r.Get("/events/verify", dataGovernanceHandler.VerifyEventChain)
+			})
 		})
 
 		// Access Policies (ABAC)
@@ -634,16 +779,48 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 			r.Post("/roles/{id}/assignments", accessAdministrationHandler.AssignRole)
 			r.Delete("/roles/{id}/assignments/{userID}", accessAdministrationHandler.UnassignRole)
 			r.Get("/roles/{id}/events", accessAdministrationHandler.ListEvents)
+			r.Put("/roles/{id}/assignments/{userID}/window", accessGovernanceHandler.SetAssignmentWindow)
+			r.Route("/governance", func(r chi.Router) {
+				r.Get("/campaigns", accessGovernanceHandler.ListCampaigns)
+				r.Post("/campaigns", accessGovernanceHandler.CreateCampaign)
+				r.Get("/campaigns/{id}", accessGovernanceHandler.GetCampaign)
+				r.Get("/campaigns/{id}/items", accessGovernanceHandler.ListItems)
+				r.Post("/campaigns/{id}/items/{itemID}/decision", accessGovernanceHandler.DecideItem)
+				r.Post("/campaigns/{id}/complete", accessGovernanceHandler.CompleteCampaign)
+				r.Post("/campaigns/{id}/cancel", accessGovernanceHandler.CancelCampaign)
+				r.Get("/sod-rules", accessGovernanceHandler.ListSoDRules)
+				r.Post("/sod-rules", accessGovernanceHandler.CreateSoDRule)
+				r.Post("/sod-rules/{id}/disable", accessGovernanceHandler.DisableSoDRule)
+				r.Post("/sod-rules/{id}/exceptions", accessGovernanceHandler.RequestException)
+				r.Get("/sod-exceptions", accessGovernanceHandler.ListExceptions)
+				r.Post("/sod-exceptions/{id}/approve", accessGovernanceHandler.ApproveException)
+				r.Post("/sod-exceptions/{id}/reject", accessGovernanceHandler.RejectException)
+				r.Post("/sod-exceptions/{id}/revoke", accessGovernanceHandler.RevokeException)
+				r.Get("/sod-violations", accessGovernanceHandler.ListViolations)
+				r.Get("/events", accessGovernanceHandler.ListEvents)
+			})
 			if accessHandler != nil {
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireFeature(dependencies.FeatureEvaluator, "abac"))
 					r.Get("/policies", accessHandler.ListPolicies)
 					r.Post("/policies", accessHandler.CreatePolicy)
+					r.Get("/policies/{id}", accessHandler.GetPolicy)
 					r.Put("/policies/{id}", accessHandler.UpdatePolicy)
 					r.Delete("/policies/{id}", accessHandler.DeletePolicy)
+					r.Get("/policies/{id}/assignments", accessHandler.ListAssignments)
 					r.Post("/policies/{id}/assignments", accessHandler.AssignPolicy)
 					r.Delete("/policies/{id}/assignments/{assignmentId}", accessHandler.RemoveAssignment)
+					r.Get("/policies/{id}/field-permissions", accessHandler.ListPolicyFieldPermissions)
+					r.Put("/policies/{id}/field-permissions", accessHandler.UpsertFieldPermission)
+					r.Delete("/policies/{id}/field-permissions/{fieldPermissionId}", accessHandler.DeleteFieldPermission)
+					r.Get("/policies/{id}/certifications", accessHandler.ListPolicyCertifications)
+					r.Post("/policies/{id}/certifications", accessHandler.CertifyPolicy)
+					r.Get("/object-grants", accessHandler.ListObjectGrants)
+					r.Post("/object-grants", accessHandler.CreateObjectGrant)
+					r.Post("/object-grants/{grantId}/decision", accessHandler.DecideObjectGrant)
+					r.Post("/object-grants/{grantId}/revoke", accessHandler.RevokeObjectGrant)
 					r.Post("/evaluate", accessHandler.TestEvaluate)
+					r.Get("/decision-evidence", accessHandler.ListDecisionEvidence)
 					r.Get("/audit-log", accessHandler.GetAuditLog)
 					r.Get("/field-permissions", accessHandler.GetFieldPermissions)
 				})
@@ -951,9 +1128,14 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 
 		// Calendar & Scheduling
 		r.Route("/calendar", func(r chi.Router) {
+			// These four reads have schema-aligned, required composition and
+			// source-object policy enforcement before aggregation/pagination.
+			r.Get("/events", calendarReadHandler.ListEvents)
+			r.Get("/upcoming", calendarReadHandler.Upcoming)
+			r.Get("/overdue", calendarReadHandler.Overdue)
+			r.Get("/summary", calendarReadHandler.Summary)
 			if calendarHandler != nil {
 				r.Route("/events", func(r chi.Router) {
-					r.Get("/", calendarHandler.ListEvents)
 					r.Post("/", calendarHandler.CreateEvent)
 					r.Get("/{id}", calendarHandler.GetEvent)
 					r.Put("/{id}/complete", calendarHandler.CompleteEvent)
@@ -961,8 +1143,6 @@ func NewRouterWithDependencies(cfg *config.Config, dependencies RouterDependenci
 					r.Put("/{id}/assign", calendarHandler.AssignEvent)
 				})
 				r.Get("/deadlines", calendarHandler.GetDeadlines)
-				r.Get("/overdue", calendarHandler.GetOverdue)
-				r.Get("/summary", calendarHandler.GetSummary)
 				r.Get("/subscriptions", calendarHandler.GetSubscriptions)
 				r.Put("/subscriptions", calendarHandler.UpdateSubscriptions)
 				r.Route("/sync", func(r chi.Router) {

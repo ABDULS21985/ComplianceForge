@@ -1,8 +1,56 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"testing"
 )
+
+func TestAutomatedEvidenceProofMetadataBindsRunAndResults(t *testing.T) {
+	collected := []byte(`{"enabled":true,"count":7}`)
+	validation := []byte(`[{"criteria_index":0,"passed":true}]`)
+	encoded, err := automatedEvidenceProofMetadata("run-123", collected, validation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]map[string]string
+	if err := json.Unmarshal(encoded, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	proof := metadata["automated_proof"]
+	want := map[string]string{
+		"proof_schema":              "automated-evidence/v1",
+		"collection_run_id":         "run-123",
+		"collected_data_sha256":     fmt.Sprintf("%x", sha256.Sum256(collected)),
+		"validation_results_sha256": fmt.Sprintf("%x", sha256.Sum256(validation)),
+	}
+	if !reflect.DeepEqual(proof, want) {
+		t.Fatalf("proof=%v want=%v", proof, want)
+	}
+
+	changed, err := automatedEvidenceProofMetadata("run-123", []byte(`{"enabled":false,"count":7}`), validation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(changed) == string(encoded) {
+		t.Fatal("changed collected proof produced the same metadata")
+	}
+	for _, test := range []struct {
+		runID      string
+		collected  []byte
+		validation []byte
+	}{
+		{runID: "", collected: collected, validation: validation},
+		{runID: "run-123", collected: []byte(`{`), validation: validation},
+		{runID: "run-123", collected: collected, validation: []byte(`not-json`)},
+	} {
+		if _, err := automatedEvidenceProofMetadata(test.runID, test.collected, test.validation); err == nil {
+			t.Fatalf("invalid proof inputs accepted: %+v", test)
+		}
+	}
+}
 
 func TestValidateEvidence(t *testing.T) {
 	collector := &EvidenceCollector{}

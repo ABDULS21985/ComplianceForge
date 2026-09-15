@@ -1,6 +1,9 @@
+import type { ControlEvidence as ExactControlEvidence } from './control-evidence';
+
 export * from './access';
 export * from './audit';
 export * from './asset';
+export * from './control-evidence';
 export * from './incident';
 
 // === API Response Wrappers ===
@@ -132,19 +135,8 @@ export interface ControlImplementation {
   last_test_result?: string; effectiveness_score?: number;
   risk_if_not_implemented?: string; automation_level?: string;
   tags: string[]; created_at: string; updated_at: string;
-  control?: FrameworkControl; evidence?: ControlEvidence[];
+  control?: FrameworkControl; evidence?: ExactControlEvidence[];
   test_results?: ControlTestResult[];
-}
-
-export interface ControlEvidence {
-  id: string; organization_id: string; control_implementation_id: string;
-  title: string; description?: string; evidence_type: string;
-  file_path?: string; file_name?: string; file_size_bytes?: number;
-  mime_type?: string; file_hash?: string; collection_method: string;
-  collected_at: string; collected_by?: string; valid_from?: string;
-  valid_until?: string; is_current: boolean; review_status: string;
-  reviewed_by?: string; reviewed_at?: string; review_notes?: string;
-  created_at: string;
 }
 
 export interface ControlTestResult {

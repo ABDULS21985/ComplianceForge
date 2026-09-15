@@ -1,14 +1,5 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, ShieldCheck } from 'lucide-react';
-import { toast } from 'sonner';
-
-import api from '@/lib/api';
-import { formatApiError, parseCommaList, parseJSONObject, type IntegrationCatalogEntry } from '@/lib/enterprise-settings';
-import type { Integration, IntegrationInput } from '@/types/enterprise-settings';
-import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -17,9 +8,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { formatApiError, type IntegrationCatalogEntry, parseCommaList, parseJSONObject } from '@/lib/enterprise-settings';
+import { type FormEvent, useState } from 'react';
+import type { Integration, IntegrationInput } from '@/types/enterprise-settings';
+import { Loader2, ShieldCheck } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '@/lib/api';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
 
 interface IntegrationEditorDialogProps {
   catalogEntry?: IntegrationCatalogEntry;

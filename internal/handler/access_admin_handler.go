@@ -44,7 +44,7 @@ func (h *AccessAdministrationHandler) ListPermissions(w http.ResponseWriter, r *
 		writeAccessAdministrationError(w, r, err, "Failed to list permissions")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]any{"data": items})
 }
 
 func (h *AccessAdministrationHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +58,7 @@ func (h *AccessAdministrationHandler) CreateRole(w http.ResponseWriter, r *http.
 		writeAccessAdministrationError(w, r, err, "Failed to create role")
 		return
 	}
-	writeJSON(w, http.StatusCreated, role)
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", role)
 }
 
 func (h *AccessAdministrationHandler) GetRole(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +67,7 @@ func (h *AccessAdministrationHandler) GetRole(w http.ResponseWriter, r *http.Req
 		writeAccessAdministrationError(w, r, err, "Failed to get role")
 		return
 	}
-	writeJSON(w, http.StatusOK, role)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", role)
 }
 
 func (h *AccessAdministrationHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +89,7 @@ func (h *AccessAdministrationHandler) ListRoles(w http.ResponseWriter, r *http.R
 		writeAccessAdministrationError(w, r, err, "Failed to list roles")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(filter.PaginationRequest))
+	writeClassifiedPaginated(w, r, "settings", items, total, normalizedHandlerPagination(filter.PaginationRequest))
 }
 
 func (h *AccessAdministrationHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +103,7 @@ func (h *AccessAdministrationHandler) UpdateRole(w http.ResponseWriter, r *http.
 		writeAccessAdministrationError(w, r, err, "Failed to update role")
 		return
 	}
-	writeJSON(w, http.StatusOK, role)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", role)
 }
 
 func (h *AccessAdministrationHandler) DeleteRole(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +130,7 @@ func (h *AccessAdministrationHandler) CloneRole(w http.ResponseWriter, r *http.R
 		writeAccessAdministrationError(w, r, err, "Failed to clone role")
 		return
 	}
-	writeJSON(w, http.StatusCreated, role)
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", role)
 }
 
 func (h *AccessAdministrationHandler) PreviewImpact(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +146,7 @@ func (h *AccessAdministrationHandler) PreviewImpact(w http.ResponseWriter, r *ht
 		writeAccessAdministrationError(w, r, err, "Failed to preview role impact")
 		return
 	}
-	writeJSON(w, http.StatusOK, impact)
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", impact)
 }
 
 func (h *AccessAdministrationHandler) ListAssignments(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +155,7 @@ func (h *AccessAdministrationHandler) ListAssignments(w http.ResponseWriter, r *
 		writeAccessAdministrationError(w, r, err, "Failed to list role assignments")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeClassifiedJSON(w, r, http.StatusOK, "settings", map[string]any{"data": items})
 }
 
 func (h *AccessAdministrationHandler) AssignRole(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +168,7 @@ func (h *AccessAdministrationHandler) AssignRole(w http.ResponseWriter, r *http.
 		writeAccessAdministrationError(w, r, err, "Failed to assign role")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"message": "Role assigned"})
+	writeClassifiedJSON(w, r, http.StatusCreated, "settings", map[string]string{"message": "Role assigned"})
 }
 
 func (h *AccessAdministrationHandler) UnassignRole(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +191,7 @@ func (h *AccessAdministrationHandler) ListEvents(w http.ResponseWriter, r *http.
 		writeAccessAdministrationError(w, r, err, "Failed to list role history")
 		return
 	}
-	writePaginated(w, items, total, normalizedHandlerPagination(pagination))
+	writeClassifiedPaginated(w, r, "settings", items, total, normalizedHandlerPagination(pagination))
 }
 
 func accessAdminOrgID(r *http.Request) string   { return middleware.GetOrgIDFromContext(r.Context()) }

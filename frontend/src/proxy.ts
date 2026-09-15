@@ -1,12 +1,11 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-
+import { AUTH_REDIRECT_QUERY_PARAM, isPublicRoute, ROUTES } from '@/lib/routes';
 import {
   LEGACY_ACCESS_TOKEN_KEY,
   LEGACY_REFRESH_TOKEN_KEY,
 } from '@/lib/auth-constants';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { sessionCookiePolicy } from '@/lib/request-security';
-import { AUTH_REDIRECT_QUERY_PARAM, isPublicRoute, ROUTES } from '@/lib/routes';
 
 function clearLegacyCookie(request: NextRequest, response: NextResponse): NextResponse {
   for (const name of [LEGACY_ACCESS_TOKEN_KEY, LEGACY_REFRESH_TOKEN_KEY]) {

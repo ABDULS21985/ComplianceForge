@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/complianceforge/platform/internal/observability"
 	"github.com/complianceforge/platform/internal/pkg/ratelimit"
 	"github.com/complianceforge/platform/internal/router"
+	"github.com/complianceforge/platform/internal/service"
 )
 
 func main() {
@@ -54,6 +56,14 @@ func run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("create database pool: %w", err)
 	}
 	defer pool.Close()
+	if err := enforceProductionAPIDatabasePosture(ctx, cfg.App.Env, func(checkCtx context.Context) error {
+		if err := database.ValidateRuntimeDatabaseLoginIdentity(checkCtx, pool, pool.Config().ConnConfig.User); err != nil {
+			return err
+		}
+		return database.ValidateAPIDatabasePosture(checkCtx, pool)
+	}); err != nil {
+		return err
+	}
 
 	// Shared Redis is required for API-key quotas and participates in readiness.
 	redisClient, err := database.NewRedisClient(ctx, cfg.Redis)
@@ -96,6 +106,15 @@ func run(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("compose API dependencies: %w", err)
 	}
+	diagnosticsHandler, err := router.BuildDiagnosticsHandler(pool, cfg,
+		service.DependencyProbe{Key: "postgres", Name: "PostgreSQL", Critical: true, Check: postgresHealth},
+		service.DependencyProbe{Key: "redis", Name: "Redis", Critical: true, Check: redisHealth},
+		service.DependencyProbe{Key: "evidence_scanner", Name: "Evidence malware scanner", Critical: false, Check: dependencies.EvidenceScannerCheck},
+	)
+	if err != nil {
+		return fmt.Errorf("compose administrator diagnostics: %w", err)
+	}
+	dependencies.Diagnostics = diagnosticsHandler
 	dependencies.HealthCheck = readiness
 	r, err := router.NewRouterWithDependencies(cfg, dependencies)
 	if err != nil {
@@ -104,15 +123,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 
 	// Create HTTP server.
 	addr := fmt.Sprintf(":%d", cfg.App.Port)
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           telemetry.Metrics().HTTPMiddleware(r),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
-	}
+	srv := newPublicHTTPServer(addr, telemetry.Metrics().HTTPMiddleware(r), cfg.HTTP)
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -136,13 +147,44 @@ func run(ctx context.Context, cfg *config.Config) error {
 	}
 	telemetry.SetDraining()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.HTTP.ShutdownTimeoutSeconds)*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		runErr = errors.Join(runErr, fmt.Errorf("shutdown public API: %w", err))
 	}
 	log.Info().Msg("server stopped gracefully")
 	return runErr
+}
+
+func enforceProductionAPIDatabasePosture(
+	ctx context.Context,
+	environment string,
+	check func(context.Context) error,
+) error {
+	if strings.ToLower(strings.TrimSpace(environment)) != "production" {
+		return nil
+	}
+	if check == nil {
+		return fmt.Errorf("validate production API database identity: posture check is not configured")
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := check(checkCtx); err != nil {
+		return fmt.Errorf("validate production API database identity: %w", err)
+	}
+	return nil
+}
+
+func newPublicHTTPServer(addr string, next http.Handler, configured config.HTTPConfig) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           next,
+		ReadHeaderTimeout: time.Duration(configured.ReadHeaderTimeoutSeconds) * time.Second,
+		ReadTimeout:       time.Duration(configured.ReadTimeoutSeconds) * time.Second,
+		WriteTimeout:      time.Duration(configured.WriteTimeoutSeconds) * time.Second,
+		IdleTimeout:       time.Duration(configured.IdleTimeoutSeconds) * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 }
 
 func shutdownTelemetry(runtime *observability.Runtime, timeoutSeconds int) {

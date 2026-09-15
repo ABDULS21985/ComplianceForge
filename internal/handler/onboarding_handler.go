@@ -51,7 +51,7 @@ func (h *OnboardingHandler) GetProgress(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": progress})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"data": progress})
 }
 
 // SaveStep handles PUT /onboard/step/{n}.
@@ -80,7 +80,7 @@ func (h *OnboardingHandler) SaveStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Step data saved"})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"message": "Step data saved"})
 }
 
 // SkipStep handles POST /onboard/step/{n}/skip.
@@ -103,7 +103,7 @@ func (h *OnboardingHandler) SkipStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Step skipped"})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"message": "Step skipped"})
 }
 
 // Complete handles POST /onboard/complete.
@@ -120,7 +120,7 @@ func (h *OnboardingHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Onboarding completed"})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"message": "Onboarding completed"})
 }
 
 // GetRecommendations handles GET /onboard/recommendations.
@@ -147,7 +147,7 @@ func (h *OnboardingHandler) GetRecommendations(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": recommendations})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"data": recommendations})
 }
 
 // GetSubscription handles GET /subscription.
@@ -164,7 +164,7 @@ func (h *OnboardingHandler) GetSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": subscription})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"data": subscription})
 }
 
 // ChangePlan handles PUT /subscription/plan.
@@ -198,7 +198,7 @@ func (h *OnboardingHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Plan changed successfully"})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"message": "Plan changed successfully"})
 }
 
 // Cancel handles POST /subscription/cancel.
@@ -223,7 +223,7 @@ func (h *OnboardingHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Subscription cancelled"})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"message": "Subscription cancelled"})
 }
 
 // ListPlans handles GET /subscription/plans.
@@ -234,7 +234,7 @@ func (h *OnboardingHandler) ListPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": plans})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"data": plans})
 }
 
 // GetUsage handles GET /subscription/usage.
@@ -251,5 +251,5 @@ func (h *OnboardingHandler) GetUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": usage})
+	writeClassifiedJSON(w, r, http.StatusOK, "organizations", map[string]interface{}{"data": usage})
 }

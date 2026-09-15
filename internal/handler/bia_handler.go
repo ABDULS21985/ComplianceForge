@@ -55,23 +55,23 @@ type BIAProcessFilters struct {
 
 // BIAProcess represents a business process for impact analysis.
 type BIAProcess struct {
-	ID             string  `json:"id"`
-	OrganizationID string  `json:"organization_id"`
-	Name           string  `json:"name" validate:"required"`
-	Description    string  `json:"description"`
-	Department     string  `json:"department"`
-	Owner          string  `json:"owner,omitempty"`
-	Criticality    string  `json:"criticality"` // critical, high, medium, low
-	RTO            int     `json:"rto"`          // recovery time objective in hours
-	RPO            int     `json:"rpo"`          // recovery point objective in hours
-	MTPD           int     `json:"mtpd"`         // max tolerable period of disruption in hours
-	RevenueImpact  float64 `json:"revenue_impact,omitempty"`
-	OperationalImpact string `json:"operational_impact,omitempty"`
-	ReputationalImpact string `json:"reputational_impact,omitempty"`
-	RegulatoryImpact  string `json:"regulatory_impact,omitempty"`
-	CreatedBy      string  `json:"created_by"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	ID                 string  `json:"id"`
+	OrganizationID     string  `json:"organization_id"`
+	Name               string  `json:"name" validate:"required"`
+	Description        string  `json:"description"`
+	Department         string  `json:"department"`
+	Owner              string  `json:"owner,omitempty"`
+	Criticality        string  `json:"criticality"` // critical, high, medium, low
+	RTO                int     `json:"rto"`         // recovery time objective in hours
+	RPO                int     `json:"rpo"`         // recovery point objective in hours
+	MTPD               int     `json:"mtpd"`        // max tolerable period of disruption in hours
+	RevenueImpact      float64 `json:"revenue_impact,omitempty"`
+	OperationalImpact  string  `json:"operational_impact,omitempty"`
+	ReputationalImpact string  `json:"reputational_impact,omitempty"`
+	RegulatoryImpact   string  `json:"regulatory_impact,omitempty"`
+	CreatedBy          string  `json:"created_by"`
+	CreatedAt          string  `json:"created_at"`
+	UpdatedAt          string  `json:"updated_at"`
 }
 
 // BIAProcessDetail extends BIAProcess with dependencies.
@@ -127,68 +127,68 @@ type GraphEdge struct {
 
 // SinglePointOfFailure identifies a process that is a single point of failure.
 type SinglePointOfFailure struct {
-	ProcessID       string   `json:"process_id"`
-	ProcessName     string   `json:"process_name"`
-	Criticality     string   `json:"criticality"`
-	DependentCount  int      `json:"dependent_count"`
-	DependentNames  []string `json:"dependent_names"`
-	RiskLevel       string   `json:"risk_level"`
-	Recommendation  string   `json:"recommendation"`
+	ProcessID      string   `json:"process_id"`
+	ProcessName    string   `json:"process_name"`
+	Criticality    string   `json:"criticality"`
+	DependentCount int      `json:"dependent_count"`
+	DependentNames []string `json:"dependent_names"`
+	RiskLevel      string   `json:"risk_level"`
+	Recommendation string   `json:"recommendation"`
 }
 
 // BIAReport is the full BIA report data.
 type BIAReport struct {
-	OrganizationID     string                `json:"organization_id"`
-	TotalProcesses     int                   `json:"total_processes"`
-	CriticalProcesses  int                   `json:"critical_processes"`
-	AverageRTO         float64               `json:"average_rto_hours"`
-	AverageRPO         float64               `json:"average_rpo_hours"`
-	ByCriticality      map[string]int        `json:"by_criticality"`
-	ByDepartment       map[string]int        `json:"by_department"`
+	OrganizationID        string                 `json:"organization_id"`
+	TotalProcesses        int                    `json:"total_processes"`
+	CriticalProcesses     int                    `json:"critical_processes"`
+	AverageRTO            float64                `json:"average_rto_hours"`
+	AverageRPO            float64                `json:"average_rpo_hours"`
+	ByCriticality         map[string]int         `json:"by_criticality"`
+	ByDepartment          map[string]int         `json:"by_department"`
 	SinglePointsOfFailure []SinglePointOfFailure `json:"single_points_of_failure"`
-	GeneratedAt        string                `json:"generated_at"`
+	GeneratedAt           string                 `json:"generated_at"`
 }
 
 // BCScenario represents a business continuity scenario.
 type BCScenario struct {
-	ID             string   `json:"id"`
-	OrganizationID string   `json:"organization_id"`
-	Name           string   `json:"name" validate:"required"`
-	Description    string   `json:"description"`
-	Type           string   `json:"type"` // natural_disaster, cyber_attack, pandemic, infrastructure_failure, supply_chain
-	Likelihood     string   `json:"likelihood"` // very_high, high, medium, low, very_low
-	Impact         string   `json:"impact"`     // catastrophic, major, moderate, minor, insignificant
+	ID                string   `json:"id"`
+	OrganizationID    string   `json:"organization_id"`
+	Name              string   `json:"name" validate:"required"`
+	Description       string   `json:"description"`
+	Type              string   `json:"type"`       // natural_disaster, cyber_attack, pandemic, infrastructure_failure, supply_chain
+	Likelihood        string   `json:"likelihood"` // very_high, high, medium, low, very_low
+	Impact            string   `json:"impact"`     // catastrophic, major, moderate, minor, insignificant
 	AffectedProcesses []string `json:"affected_processes,omitempty"`
-	CreatedBy      string   `json:"created_by"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
+	CreatedBy         string   `json:"created_by"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
 }
 
 // BCPlan represents a business continuity plan.
 type BCPlan struct {
-	ID             string       `json:"id"`
-	OrganizationID string       `json:"organization_id"`
-	Name           string       `json:"name" validate:"required"`
-	Description    string       `json:"description"`
-	ScenarioID     string       `json:"scenario_id,omitempty"`
-	Status         string       `json:"status"` // draft, pending_approval, approved, active, archived
-	Version        int          `json:"version"`
+	ID             string        `json:"id"`
+	OrganizationID string        `json:"organization_id"`
+	Name           string        `json:"name" validate:"required"`
+	Description    string        `json:"description"`
+	ScenarioID     string        `json:"scenario_id,omitempty"`
+	Status         string        `json:"status"` // draft, pending_approval, approved, active, archived
+	Version        int           `json:"version"`
 	Procedures     []BCProcedure `json:"procedures,omitempty"`
-	ApprovedBy     string       `json:"approved_by,omitempty"`
-	ApprovedAt     string       `json:"approved_at,omitempty"`
-	LastTestedAt   string       `json:"last_tested_at,omitempty"`
-	CreatedBy      string       `json:"created_by"`
-	CreatedAt      string       `json:"created_at"`
-	UpdatedAt      string       `json:"updated_at"`
+	ApprovedBy     string        `json:"approved_by,omitempty"`
+	ApprovedAt     string        `json:"approved_at,omitempty"`
+	LastTestedAt   string        `json:"last_tested_at,omitempty"`
+	CreatedBy      string        `json:"created_by"`
+	CreatedAt      string        `json:"created_at"`
+	UpdatedAt      string        `json:"updated_at"`
 }
 
 // BCProcedure is a step in a BC plan.
 type BCProcedure struct {
-	Order       int    `json:"order"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Order           int    `json:"order"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
 	ResponsibleRole string `json:"responsible_role,omitempty"`
-	TimeframeHours int    `json:"timeframe_hours,omitempty"`
+	TimeframeHours  int    `json:"timeframe_hours,omitempty"`
 }
 
 // ApproveBCPlanRequest is the payload for POST /bc/plans/{id}/approve.
@@ -198,19 +198,19 @@ type ApproveBCPlanRequest struct {
 
 // BCExercise represents a business continuity exercise/drill.
 type BCExercise struct {
-	ID             string `json:"id"`
-	OrganizationID string `json:"organization_id"`
-	Name           string `json:"name" validate:"required"`
-	Type           string `json:"type"` // tabletop, walkthrough, simulation, full_scale
-	PlanID         string `json:"plan_id,omitempty"`
-	ScenarioID     string `json:"scenario_id,omitempty"`
-	Status         string `json:"status"` // scheduled, in_progress, completed, cancelled
-	ScheduledDate  string `json:"scheduled_date"`
-	CompletedDate  string `json:"completed_date,omitempty"`
+	ID             string   `json:"id"`
+	OrganizationID string   `json:"organization_id"`
+	Name           string   `json:"name" validate:"required"`
+	Type           string   `json:"type"` // tabletop, walkthrough, simulation, full_scale
+	PlanID         string   `json:"plan_id,omitempty"`
+	ScenarioID     string   `json:"scenario_id,omitempty"`
+	Status         string   `json:"status"` // scheduled, in_progress, completed, cancelled
+	ScheduledDate  string   `json:"scheduled_date"`
+	CompletedDate  string   `json:"completed_date,omitempty"`
 	Participants   []string `json:"participants,omitempty"`
-	CreatedBy      string `json:"created_by"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	CreatedBy      string   `json:"created_by"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
 }
 
 // ExerciseResults is the payload for PUT /bc/exercises/{id}/complete.
@@ -226,16 +226,16 @@ type ExerciseResults struct {
 
 // BCDashboard provides business continuity metrics.
 type BCDashboard struct {
-	TotalScenarios      int            `json:"total_scenarios"`
-	TotalPlans          int            `json:"total_plans"`
-	ApprovedPlans       int            `json:"approved_plans"`
-	TotalExercises      int            `json:"total_exercises"`
-	ExercisesThisYear   int            `json:"exercises_this_year"`
-	LastExerciseDate    string         `json:"last_exercise_date,omitempty"`
-	PlansByStatus       map[string]int `json:"plans_by_status"`
-	CriticalProcesses   int            `json:"critical_processes"`
-	SinglePointsOfFailure int          `json:"single_points_of_failure"`
-	AverageRTO          float64        `json:"average_rto_hours"`
+	TotalScenarios        int            `json:"total_scenarios"`
+	TotalPlans            int            `json:"total_plans"`
+	ApprovedPlans         int            `json:"approved_plans"`
+	TotalExercises        int            `json:"total_exercises"`
+	ExercisesThisYear     int            `json:"exercises_this_year"`
+	LastExerciseDate      string         `json:"last_exercise_date,omitempty"`
+	PlansByStatus         map[string]int `json:"plans_by_status"`
+	CriticalProcesses     int            `json:"critical_processes"`
+	SinglePointsOfFailure int            `json:"single_points_of_failure"`
+	AverageRTO            float64        `json:"average_rto_hours"`
 }
 
 // ---------- handler ----------
@@ -272,7 +272,7 @@ func (h *BIAHandler) ListProcesses(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]interface{}{
 		"data": processes,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -304,7 +304,7 @@ func (h *BIAHandler) CreateProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, process)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", process)
 }
 
 // GetProcess handles GET /bia/processes/{id}.
@@ -322,7 +322,7 @@ func (h *BIAHandler) GetProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", detail)
 }
 
 // UpdateProcess handles PUT /bia/processes/{id}.
@@ -347,7 +347,7 @@ func (h *BIAHandler) UpdateProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, process)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", process)
 }
 
 // MapDependencies handles POST /bia/processes/{id}/dependencies.
@@ -375,7 +375,7 @@ func (h *BIAHandler) MapDependencies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Dependencies mapped"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Dependencies mapped"})
 }
 
 // GetDependencyGraph handles GET /bia/processes/{id}/dependency-graph.
@@ -393,7 +393,7 @@ func (h *BIAHandler) GetDependencyGraph(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, graph)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", graph)
 }
 
 // GetSinglePointsOfFailure handles GET /bia/single-points-of-failure.
@@ -406,7 +406,7 @@ func (h *BIAHandler) GetSinglePointsOfFailure(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": spofs})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]interface{}{"data": spofs})
 }
 
 // GetBIAReport handles GET /bia/report.
@@ -419,7 +419,7 @@ func (h *BIAHandler) GetBIAReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, report)
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", report)
 }
 
 // ListScenarios handles GET /bc/scenarios.
@@ -438,7 +438,7 @@ func (h *BIAHandler) ListScenarios(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]interface{}{
 		"data": scenarios,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -470,7 +470,7 @@ func (h *BIAHandler) CreateScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, scenario)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", scenario)
 }
 
 // ListBCPlans handles GET /bc/plans.
@@ -489,7 +489,7 @@ func (h *BIAHandler) ListBCPlans(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]interface{}{
 		"data": plans,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -521,7 +521,7 @@ func (h *BIAHandler) CreateBCPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, plan)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", plan)
 }
 
 // ApproveBCPlan handles POST /bc/plans/{id}/approve.
@@ -545,7 +545,7 @@ func (h *BIAHandler) ApproveBCPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Plan approved"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Plan approved"})
 }
 
 // ListExercises handles GET /bc/exercises.
@@ -564,7 +564,7 @@ func (h *BIAHandler) ListExercises(w http.ResponseWriter, r *http.Request) {
 		totalPages = (total + pagination.PageSize - 1) / pagination.PageSize
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]interface{}{
 		"data": exercises,
 		"pagination": models.PaginationResponse{
 			Page:       pagination.Page,
@@ -596,7 +596,7 @@ func (h *BIAHandler) CreateExercise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, exercise)
+	writeClassifiedJSON(w, r, http.StatusCreated, "risks", exercise)
 }
 
 // CompleteExercise handles PUT /bc/exercises/{id}/complete.
@@ -625,7 +625,7 @@ func (h *BIAHandler) CompleteExercise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Exercise completed"})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]string{"message": "Exercise completed"})
 }
 
 // GetBCDashboard handles GET /bc/dashboard.
@@ -638,5 +638,5 @@ func (h *BIAHandler) GetBCDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"data": dashboard})
+	writeClassifiedJSON(w, r, http.StatusOK, "risks", map[string]interface{}{"data": dashboard})
 }
